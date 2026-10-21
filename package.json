@@ -1,0 +1,23 @@
+{
+  "name": "rugged-box",
+  "version": "1.0.0",
+  "description": "Generador param\u00e9trico de cajas Rugged Box imprimibles en 3D (FDM)",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build && node scripts/rename-dist.mjs",
+    "preview": "vite preview",
+    "test": "node tests/geometry.test.mjs && node tests/bedfit.test.mjs"
+  },
+  "author": "Parra0713",
+  "license": "MIT",
+  "dependencies": {
+    "manifold-3d": "^3.5.4",
+    "three": "^0.186.1"
+  },
+  "devDependencies": {
+    "vite": "^8.3.4",
+    "vite-plugin-singlefile": "^2.3.4"
+  },
+  "type": "module",
+  "private": true
+}
