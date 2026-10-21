@@ -117,6 +117,31 @@ deslizador nunca se acumulan cálculos atrasados.
   combinación de menor impacto entre recortar esquinas (gratis si el
   contenido lo permite), banda más fina o pared con una línea menos (nunca
   < 4 líneas ni < 1.6 mm), y la aplica con un clic.
+* **Soportes de voladizos detectados capa a capa:** al inclinar, el programa
+  corta la pieza cada 0.6 mm y marca lo que sobresale más de 50° respecto a la
+  capa anterior (contando con lo que ya sostienen las aletas). Solo ahí genera
+  columnas en rejilla de 2 líneas con interfaz maciza de 2 capas, pie de 2
+  capas y separación de 1 capa con la pieza. Bisagras y cierres intactos son
+  autoportantes a 45°; lo que sí necesita soporte (p. ej. la cara inferior de
+  la banda en el extremo alto) queda cubierto.
+* **Apilable (rediseñado):** la tapa lleva un marco perimetral y nervios rectos
+  a la misma altura (impresa boca abajo todo apoya en la cama y la piel solo
+  puentea ≤ 30 mm); la base lleva un pie más estrecho con ranuras finas
+  (puentes de ~2 mm) donde encajan los nervios. La caja de arriba asienta
+  sobre la piel de la tapa y queda bloqueada en X e Y.
+* **Insertos interiores:** siguen la forma exacta del interior (también el
+  octógono y el chaflán del suelo) con holgura ajustable. Solo paredes de
+  2 líneas, cubierta y nervios cada ~40 mm: huecos por debajo (~10 % del
+  material de un bloque macizo). Con el calco SVG del contenido se generan
+  **alojamientos pasantes** (el objeto apoya en el fondo de la caja, sin gastar
+  material en fondos) con pared propia, chaflán de entrada y **huecos para los
+  dedos** colocados automáticamente en los bordes del eje menor del objeto
+  (diámetro y posición ajustables). Inserto en blanco opcional para la tapa.
+  Se imprimen con la cubierta sobre la cama.
+* **Registro y pruebas:** tarjeta "Registro" en la interfaz (descargable en
+  JSON) y barrido de regresión de 20 a 380 mm (`npm run test:sweep`) que
+  comprueba integridad de piezas, colisiones, mecánica tras el bisel,
+  voladizos, apilado e insertos.
 * **Robustez en cajas pequeñas:** la mecánica tiene longitudes mínimas
   (nudillo ≥ 4 mm, cierre ≥ 6 mm); los nervios de esquina ceden longitud o
   se omiten antes que recortar bisagras y cierres.
@@ -169,6 +194,7 @@ Requiere Node.js ≥ 20 (en Windows: `winget install OpenJS.NodeJS.LTS`).
 npm install
 npm run dev      # servidor local con recarga en caliente → http://localhost:5173
 npm test         # pruebas geométricas (interferencias, apertura, junta, cama)
+npm run test:sweep   # barrido de 20 a 380 mm con registro en logs/
 npm run build    # regenera dist/rugged-box.html
 ```
 
@@ -227,3 +253,6 @@ Licencia MIT.
 * [Forget Trees, Add Fins To Your 3D Prints Instead — Hackaday](https://hackaday.com/2026/09/23/forget-trees-add-fins-to-your-3d-prints-instead/)
 * [support-fins (M. Trahan) — GitHub](https://github.com/gittrahan/support-fins/wiki)
 * [Stop Using Standard Supports — KNIN Custom (YouTube)](https://www.youtube.com/watch?v=TADeDyIBoBU)
+* [Tooltrace — cómo funciona (holguras 0/1.5/3/4.5 mm, huecos de dedo Ø20 mm)](https://www.tooltrace.ai/how-to)
+* [Free AI tool auto-generates Gridfinity bins — CNC Kitchen](https://cnckitchen.com/blog/this-free-ai-tool-auto-generates-gridfinity-bins)
+* [Gridfinity Cutout Generator (muescas y chaflán de entrada)](https://www.gridfinitylayouttool.com/gridfinity-cutout-generator)
