@@ -61,8 +61,12 @@ export function placeSVG(raw, P) {
     const u = (x - cx) * k, v = (y - cy) * k;
     return [c * u - s * v + P.svgOffsetX, s * u + c * v + P.svgOffsetY];
   };
+  // El motor modela con el lado largo en X: si el usuario pidió un ancho
+  // mayor que el largo, el logo pasa al marco interno girado −90°.
+  const rot = P.innerW > P.innerL;
+  const tfi = rot ? (q) => { const [x, y] = tf(q); return [y, -x]; } : tf;
   return {
-    fills: raw.fills.map((f) => ({ outer: f.outer.map(tf), holes: f.holes.map((hh) => hh.map(tf)) })),
-    strokes: raw.strokes.map((st) => ({ points: st.points.map(tf), width: st.width * k })),
+    fills: raw.fills.map((f) => ({ outer: f.outer.map(tfi), holes: f.holes.map((hh) => hh.map(tfi)) })),
+    strokes: raw.strokes.map((st) => ({ points: st.points.map(tfi), width: st.width * k })),
   };
 }

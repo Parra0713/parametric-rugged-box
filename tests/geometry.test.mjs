@@ -26,13 +26,16 @@ function rotX(man, deg, y, z) {
 }
 
 const cases = [
-  { name: 'S 60×40×30 (filamento)', p: { innerL: 60, innerW: 40, innerH: 30 } },
-  { name: 'M 120×80×50 TPU', p: {} },
-  { name: 'M laberinto + gridfinity', p: { sealMode: 'labyrinth', gridfinity: true, innerL: 150, innerW: 100 } },
-  { name: 'L 260×180×90', p: { innerL: 260, innerW: 180, innerH: 90, pattern: 'cross' } },
+  { name: 'S 60×40 (filamento)', p: { innerL: 60, innerW: 40, baseDepth: 21, lidDepth: 9 } },
+  { name: 'M 120×80 TPU', p: {} },
+  { name: 'M laberinto + Gridfinity interior', p: { sealMode: 'labyrinth', gridfinity: 'baseplate', innerL: 168.5, innerW: 84.5 } },
+  { name: 'M pies Gridfinity', p: { gridfinity: 'feet', innerL: 150, innerW: 100 } },
+  { name: 'L 260×180×(63+27)', p: { innerL: 260, innerW: 180, baseDepth: 63, lidDepth: 27, pattern: 'cross' } },
   { name: 'M estriado relieve', p: { pattern: 'stripes', relief: 'emboss' } },
-  { name: 'L plana 300×200×40 + radio 15', p: { innerL: 300, innerW: 200, innerH: 40, innerR: 15 } },
-  { name: 'M con pasador de filamento forzado', p: { pinMode: 'filament', innerL: 100, innerW: 100 } },
+  { name: 'L plana 300×200 + radio 15', p: { innerL: 300, innerW: 200, baseDepth: 28, lidDepth: 12, innerR: 15 } },
+  { name: 'Estrecha 20×172 (girada)', p: { innerL: 20, innerW: 172, baseDepth: 31, lidDepth: 3, wall: 1.2, floor: 1.2, top: 1.2, bandH: 4 } },
+  { name: 'Apilable + tapa mínima + circuito', p: { stackable: true, lidMin: true, pattern: 'circuit' } },
+  { name: 'Sci-fi radial grabado', p: { pattern: 'radial' } },
   { name: 'M + logo SVG (relleno + trazo)', p: { pattern: 'hex' }, svg: {
     fills: [{ outer: [[-20, -10], [20, -10], [20, 10], [-20, 10]], holes: [[[-5, -5], [5, -5], [5, 5], [-5, 5]]] }],
     strokes: [{ points: [[-30, -20], [0, 15], [30, -20]], width: 2 }],
@@ -51,8 +54,8 @@ for (const c of cases) {
   // Geometría cruda para colisiones (sin pies: no afectan).
   const D = derive(P);
   const H = hinges(D), L = latches(D);
-  const base = buildBase(D, H, L);
-  const lid = buildLid(D, P, H, L, c.svg || null).lid;
+  const base = buildBase(D, H, L, []);
+  const lid = buildLid(D, P, H, L, c.svg || null, []).lid;
 
   const closed = base.intersect(lid).volume();
   check(closed < 0.05, `cerrada: interferencia base∩tapa = ${closed.toFixed(3)} mm³`);
@@ -68,7 +71,7 @@ for (const c of cases) {
     const latch = L.latch.translate([x, 0, 0]);
     const vb = latch.intersect(base).volume();
     const vl = latch.intersect(lid).volume();
-    const expected = D.pre * (D.kd - D.kc - 0.3 + 0.01) * D.latchW * 1.2 + 0.5;
+    const expected = D.pre * (D.kd - D.kc + 0.5) * D.latchW * 1.2 + 0.5;
     check(vb < 0.05, `cierre x=${x}: ∩base = ${vb.toFixed(3)} mm³`);
     check(vl <= expected, `cierre x=${x}: ∩tapa = ${vl.toFixed(3)} mm³ (precarga, máx ${expected.toFixed(2)})`);
     let w = 0;

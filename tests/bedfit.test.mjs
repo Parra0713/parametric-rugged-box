@@ -33,10 +33,21 @@ const e = rotatedExtent(f.hull, f.fit.angle);
 check(e.w <= bed.x && e.h <= bed.y, `huella girada ${e.w.toFixed(1)} × ${e.h.toFixed(1)} mm`);
 
 console.log('▶ Tapa de caja 250×170 (no cabe plana)');
-f = fitOf({ innerL: 250, innerW: 170, innerH: 40 }, 'lid');
+f = fitOf({ innerL: 250, innerW: 170, baseDepth: 30, lidDepth: 10, printAids: 'off' }, 'lid');
 check(!f.fit.ok, 'detecta que no cabe plana');
 const t = tiltSolve(f.xyz, bed);
 check(t.ok, `sugerencia: ${t.ok ? `inclinar ${t.alpha}° sobre ${t.axis} y girar ${t.angle}° en Z (con soportes)` : 'ninguna'}`);
+
+console.log('▶ Misma tapa con ayudas automáticas (cuna)');
+{
+  const r = build({ ...DEFAULTS, innerL: 250, innerW: 170, baseDepth: 30, lidDepth: 10 }, null, { normals: false });
+  const lid = r.parts.find((q) => q.id === 'lid');
+  check(!!lid.tilt && lid.aids.some((a) => a.name.startsWith('Cuna')), `tapa inclinada ${lid.tilt?.alpha}° con ${lid.aids.map((a) => a.name).join(' + ')}`);
+  const xyz = transformVerts(lid.mesh.vert, lid.mesh.numProp, lid.print);
+  let zmin = Infinity; for (let i = 2; i < xyz.length; i += 3) zmin = Math.min(zmin, xyz[i]);
+  const ff = fitAngle(hull2D(xyz), bed.x - 4, bed.y - 4);
+  check(ff.ok && Math.abs(zmin) < 0.01, `cabe tras inclinar (${ff.mode}), apoyada en z=0`);
+}
 
 console.log(fails ? `\n✘ ${fails} fallos` : '\n✔ Optimizador de cama correcto');
 process.exit(fails ? 1 : 0);

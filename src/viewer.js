@@ -102,6 +102,11 @@ export class Viewer {
     return this.materials[id];
   }
 
+  aidMaterial() {
+    if (!this._aid) this._aid = new THREE.MeshStandardMaterial({ color: 0x4da3ff, transparent: true, opacity: 0.55, roughness: 0.8, side: THREE.DoubleSide });
+    return this._aid;
+  }
+
   /** Convierte la malla del motor (posición + normal intercaladas) en geometría. */
   geometry(mesh) {
     const g = new THREE.BufferGeometry();
@@ -118,7 +123,7 @@ export class Viewer {
   setData(res, layout, bed) {
     for (const g of Object.values(this.geoms)) g.dispose();
     this.geoms = {};
-    for (const p of res.parts) this.geoms[p.id] = this.geometry(p.mesh);
+    for (const p of res.parts) this.geoms[p.key] = this.geometry(p.mesh);
     const first = !this.data;
     this.data = res;
     this.layout = layout;
@@ -141,12 +146,12 @@ export class Viewer {
   clearRoot() {
     while (this.root.children.length) {
       const c = this.root.children.pop();
-      if (c.userData.own) { c.geometry?.dispose(); c.material?.dispose?.(); }
+      if (c.userData.own) { c.geometry?.dispose(); if (c.material !== this._aid) c.material?.dispose?.(); }
     }
   }
 
-  addMesh(id, m4) {
-    const mesh = new THREE.Mesh(this.geoms[id], this.material(id));
+  addMesh(p, m4) {
+    const mesh = new THREE.Mesh(this.geoms[p.key], this.material(p.id));
     mesh.matrixAutoUpdate = false;
     mesh.matrix.copy(m4);
     this.root.add(mesh);
@@ -157,8 +162,12 @@ export class Viewer {
     if (!this.data) return;
     this.clearRoot();
     const { parts, assembly, D } = this.data;
-    const byId = Object.fromEntries(parts.map((p) => [p.id, p]));
+    const byId = Object.fromEntries(parts.map((p) => [p.key, p]));
 
+    // El motor modela con el lado largo en X; si el usuario lo pidió al revés
+    // se gira el conjunto 90° solo para mostrarlo (la impresión no cambia).
+    this.root.rotation.z = this.mode !== 'print' && assembly.rot90 ? Math.PI / 2 : 0;
+    this.root.updateMatrixWorld(true);
     if (this.mode === 'print') { this.buildPrint(byId); this.requestRender(); return; }
 
     const ex = this.mode === 'exploded';
@@ -188,7 +197,7 @@ export class Viewer {
         } else if (p.id === 'latchPin' || p.id === 'cap') {
           m = exOff(-D.Lband * 0.5 - 30, -40, 0).multiply(m);
         }
-        this.addMesh(p.id, m);
+        this.addMesh(p, m);
       }
     }
 
@@ -197,7 +206,7 @@ export class Viewer {
       const I = D.inner;
       const r = I.inner_corner_radius;
       const s = new THREE.Shape();
-      const L = I.L / 2, W = I.W / 2;
+      const L = D.Li / 2, W = D.Wi / 2;
       s.moveTo(-L + r, -W); s.lineTo(L - r, -W); s.absarc(L - r, -W + r, r, -Math.PI / 2, 0);
       s.lineTo(L, W - r); s.absarc(L - r, W - r, r, 0, Math.PI / 2);
       s.lineTo(-L + r, W); s.absarc(-L + r, W - r, r, Math.PI / 2, Math.PI);
@@ -206,7 +215,7 @@ export class Viewer {
       const mesh = new THREE.Mesh(g, new THREE.MeshBasicMaterial({
         color: 0x3ddc84, transparent: true, opacity: 0.22, depthWrite: false,
       }));
-      mesh.position.z = assembly.z0 + D.floor;
+      mesh.position.z = assembly.z0 + D.floorTop;
       mesh.userData.own = true;
       this.root.add(mesh);
       const edges = new THREE.LineSegments(new THREE.EdgesGeometry(g, 30),
@@ -238,10 +247,18 @@ export class Viewer {
       for (const it of plate.items) {
         const p = byId[it.partId];
         if (!p) continue;
-        const m = new THREE.Matrix4().makeTranslation(ox + it.tx, it.ty, 0)
-          .multiply(new THREE.Matrix4().makeRotationZ(it.angle * Math.PI / 180))
-          .multiply(fromCols(p.print));
-        this.addMesh(p.id, m);
+        const place = new THREE.Matrix4().makeTranslation(ox + it.tx, it.ty, 0)
+          .multiply(new THREE.Matrix4().makeRotationZ(it.angle * Math.PI / 180));
+        this.addMesh(p, place.clone().multiply(fromCols(p.print)));
+        // Ayudas de impresión (ya en coordenadas de impresión de la pieza).
+        for (const ad of p.aids || []) {
+          const g = this.geometry(ad.mesh);
+          const am = new THREE.Mesh(g, this.aidMaterial());
+          am.matrixAutoUpdate = false;
+          am.matrix.copy(place);
+          am.userData.own = true;
+          this.root.add(am);
+        }
       }
     });
     this.grid.visible = false;

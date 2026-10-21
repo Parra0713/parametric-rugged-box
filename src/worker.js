@@ -15,7 +15,10 @@ self.onmessage = async (e) => {
     await ready;
     const r = build(P, svg, { normals });
     const transfer = [];
-    for (const p of r.parts) transfer.push(p.mesh.vert.buffer, p.mesh.tri.buffer);
+    for (const p of r.parts) {
+      transfer.push(p.mesh.vert.buffer, p.mesh.tri.buffer);
+      for (const a of p.aids || []) transfer.push(a.mesh.vert.buffer, a.mesh.tri.buffer);
+    }
     self.postMessage({ id, ok: true, r }, transfer);
   } catch (err) {
     self.postMessage({ id, ok: false, error: String(err?.stack || err) });

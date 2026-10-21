@@ -2,7 +2,7 @@
  * main.js — Interfaz: parámetros, comunicación con el motor, panel de medidas
  * y exportación.
  */
-import { DEFAULTS, SCHEMA, BED_PRESETS } from './engine/params.js';
+import { DEFAULTS, SCHEMA, BED_PRESETS, migrate } from './engine/params.js';
 import { EngineClient } from './engineClient.js';
 import { Viewer } from './viewer.js';
 import { parseSVG, placeSVG } from './svg.js';
@@ -21,6 +21,7 @@ function loadParams() {
     if (location.hash.length > 1) saved = JSON.parse(decodeURIComponent(location.hash.slice(1)));
     else saved = JSON.parse(localStorage.getItem(STORE) || '{}');
   } catch { saved = {}; }
+  saved = migrate(saved);
   const P = { ...DEFAULTS };
   for (const k of Object.keys(DEFAULTS)) if (k in saved) P[k] = saved[k];
   return P;
@@ -68,6 +69,7 @@ function buildParams() {
   SCHEMA.forEach((g, gi) => {
     const body = el('div', { class: 'group-body' });
     if (g.svg) body.append(svgControl());
+    if (g.gridfinity) body.append(gridfinitySnap());
     for (const it of g.items) body.append(control(it));
     root.append(el('details', { class: 'group', ...(gi < 2 || g.svg ? { open: '' } : {}) },
       el('summary', {}, g.group), body));
@@ -102,6 +104,22 @@ function control(it) {
   cb.addEventListener('change', () => setParam(it.k, cb.checked));
   controls[it.k] = { set: (x) => { cb.checked = !!x; } };
   return el('label', { class: 'field tog' }, el('span', { class: 'lbl' }, it.label), cb);
+}
+
+/** Botón: ajusta el interior a un número entero de celdas Gridfinity (+0.5 mm). */
+function gridfinitySnap() {
+  const b = el('button', { class: 'sm' }, 'Ajustar interior a celdas Gridfinity');
+  b.addEventListener('click', () => {
+    for (const k of ['innerL', 'innerW']) {
+      const n = Math.max(1, Math.round((state.P[k] - 0.5) / 42));
+      state.P[k] = n * 42 + 0.5;
+      controls[k]?.set(state.P[k]);
+    }
+    setParam('gridfinity', state.P.gridfinity === 'off' ? 'baseplate' : state.P.gridfinity);
+    controls.gridfinity?.set(state.P.gridfinity);
+  });
+  return el('div', {}, b, el('div', { class: 'small', style: 'margin-top:4px' },
+    'Placa interior: los bins estándar encajan dentro. Pies: la caja se asienta sobre una placa.'));
 }
 
 function svgControl() {
@@ -222,10 +240,11 @@ function computeLayout(res) {
     // Margen de 2 mm por lado respecto al borde de la cama.
     const fit = fitAngle(hull, B.x - 2 * EDGE, B.y - 2 * EDGE);
     const tilt = fit.ok ? null : tiltSolve(xyz, B);
-    fits[p.id] = { ...fit, tilt, tooTall: zMax > B.z, height: zMax };
+    fits[p.key] = { ...fit, tilt, tooTall: zMax > B.z, height: zMax };
     for (let k = 0; k < p.instances.length; k++) {
-      items.push({ partId: p.id, angle: fit.angle, fit, label: p.name });
+      items.push({ partId: p.key, angle: fit.angle, fit, label: p.name });
     }
+    fits[p.key].aids = (p.aids || []).map((a) => a.name);
   }
   const plates = packPlates(items, { x: B.x - 2 * EDGE, y: B.y - 2 * EDGE }).map((pl) => ({
     items: pl.items.map((it) => ({
@@ -264,26 +283,37 @@ function renderInfo() {
       ['Largo × ancho', `${I.L} × ${I.W} mm`, true],
       ['inner_corner_radius', mm(I.inner_corner_radius), true],
       ['Profundidad base', mm(I.baseDepth)],
-      ['Profundidad tapa', mm(I.lidDepth)],
+      ['Profundidad tapa', mm(I.lidDepth) + (state.P.lidMin ? ' (mín.)' : '')],
       ['Alto total cerrada', mm(I.closedHeight), true],
-      ['Chaflán suelo/pared', mm(I.floorChamfer)],
+      ['Chaflán suelo / techo', `${I.floorChamfer} / ${I.lidChamfer} mm`],
+      ...(I.gridfinity ? [['Gridfinity', `${I.gridfinity.nx}×${I.gridfinity.ny} celdas · bins hasta ${I.gridfinity.units}U`, true]] : []),
     ]),
     el('p', { class: 'small' }, `Inserto: L ≤ ${I.L - 0.4} mm, W ≤ ${I.W - 0.4} mm (0.2 mm de holgura por lado), radio ≥ ${I.inner_corner_radius} mm y chaflán inferior ≥ ${I.floorChamfer} mm.`)));
 
   info.append(el('section', { class: 'card' }, el('h3', {}, 'Exterior'),
     kv([['Envolvente', `${D.outerL} × ${D.outerW} × ${D.outerH} mm`], ['Pared / banda', `${D.t} / ${D.bo} mm`]])));
 
-  const pin = D.pinMode === 'filament'
-    ? `Filamento 1.75 mm: ${D.filament.hingeQty}× ${D.filament.hinge} mm + ${D.filament.latchQty}× ${D.filament.latch} mm`
-    : `Impreso Ø${D.pinD} mm (snap, acostado)`;
+  const fl = D.filament || {};
+  const pin = [
+    fl.hinge ? `Bisagra: filamento 1.75, ${fl.hingeQty}× ${fl.hinge} mm` : `Bisagra: pasador impreso Ø${D.pinD} (acostado)`,
+    fl.latch ? `cierres: filamento 1.75, ${fl.latchQty}× ${fl.latch} mm` : '',
+  ].filter(Boolean).join(' · ');
   info.append(el('section', { class: 'card' }, el('h3', {}, 'Mecánica adaptativa'),
     kv([
       ['Clase', D.cls === 'S' ? 'S — pequeña' : D.cls === 'M' ? 'M — mediana' : 'L — grande'],
       ['Bisagras', `${D.hinge.n} × ${D.hinge.nk} nudillos (${D.hinge.len} mm)`],
-      ['Cierres', `${D.latch.n} de gancho autobloqueante`],
-      ['Taladro', `Ø${D.holeD} mm teardrop`],
+      ['Cierres', `${D.latch.n} empotrados, ${D.latchW} mm`],
+      ['Pasador cierre', D.latchPinMode === 'filament' ? 'filamento 1.75' : `impreso Ø${D.latchPinD}`],
+      ['Taladro bisagra', `Ø${D.holeD} mm teardrop`],
     ]),
-    el('p', { class: 'small' }, pin)));
+    el('p', { class: 'small' }, pin + (D.rot90 ? ' · Mecánica girada al lado largo.' : ''))));
+
+  // Línea de contracción: alturas críticas detectadas y cómo se atacan.
+  const hl = D.hullLine || [];
+  info.append(el('section', { class: 'card' }, el('h3', {}, 'Línea de contracción'),
+    hl.length ? kv(hl.map((h) => [`${h.part} z=${h.z} mm`, `−${h.drop}% · ${h.masked}`, h.masked !== 'no'])) : el('p', { class: 'small' }, 'Sin transiciones bruscas detectadas.'),
+    el('p', { class: 'small' }, (D.snapped.length ? 'Ajustado a la impresora: ' + D.snapped.join(', ') + '. ' : '') +
+      'z en orientación de impresión. Además: chaflán interior 45°, paredes de líneas enteras y ajustes de slicer en LEEME.txt.')));
 
   const seal = D.sealMode === 'tpu'
     ? [['Ranura', `${D.gw} × ${D.gd} mm`], ['Junta TPU', `${D.gkw} × ${D.gkh} mm`],
@@ -295,11 +325,13 @@ function renderInfo() {
 
   const B = bed();
   const fitRows = parts.map((p) => {
-    const f = state.layout.fits[p.id];
+    const f = state.layout.fits[p.key];
     let txt = f.ok ? (f.mode === 'diagonal' ? `diagonal ${f.angle}°` : f.mode) : 'no cabe plana';
+    if (p.tilt) txt = `inclinada ${p.tilt.alpha}° + cuna`;
     if (!f.ok && f.tilt?.ok) txt = `inclinar ${f.tilt.alpha}° sobre ${f.tilt.axis} + giro ${f.tilt.angle}° (soportes)`;
     if (!f.ok && !f.tilt?.ok) txt = 'no cabe: reduce medidas';
     if (f.tooTall) txt += ' · excede Z';
+    if (f.aids?.length) txt += ' + ' + f.aids.map((a) => a.split(' (')[0].toLowerCase()).join(', ');
     return [p.name, txt, f.mode === 'diagonal'];
   });
   info.append(el('section', { class: 'card' },
@@ -344,9 +376,20 @@ function printMesh(p, angle) {
   }
   const cx = (x0 + x1) / 2, cy = (y0 + y1) / 2;
   for (let i = 0; i < xyz.length; i += 3) { xyz[i] -= cx; xyz[i + 1] -= cy; xyz[i + 2] -= z0; }
-  return { xyz, tri: p.mesh.tri, w: x1 - x0, h: y1 - y0 };
+  // Ayudas (orejas, cuna): misma rotación y desplazamiento que la pieza.
+  const aids = (p.aids || []).map((ad) => {
+    const v = transformVerts(ad.mesh.vert, ad.mesh.numProp, IDENT);
+    for (let i = 0; i < v.length; i += 3) {
+      const x = v[i], y = v[i + 1];
+      v[i] = c * x - s * y - cx; v[i + 1] = s * x + c * y - cy; v[i + 2] -= z0;
+    }
+    return { xyz: v, tri: ad.mesh.tri };
+  });
+  return { xyz, tri: p.mesh.tri, w: x1 - x0, h: y1 - y0, aids };
 }
+const IDENT = [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1];
 
+const fileName = (p) => FILE[p.id] + (p.key !== p.id ? '_' + (Number(p.key.replace(/\D/g, '')) + 1) : '');
 const FILE = { base: 'base', lid: 'tapa', latch: 'cierre', gasket: 'junta_TPU', hingePin: 'pasador_bisagra', latchPin: 'pasador_cierre', cap: 'tapon_pasador' };
 
 async function exportZip() {
@@ -357,22 +400,30 @@ async function exportZip() {
     const layout = computeLayout(r);
     const files = [];
     for (const p of r.parts) {
-      const m = printMesh(p, layout.fits[p.id].angle);
-      files.push({ name: `piezas/${FILE[p.id]}_x${p.instances.length}.stl`, data: stlBinary(m.xyz, m.tri, p.id) });
+      const m = printMesh(p, layout.fits[p.key].angle);
+      files.push({ name: `piezas/${fileName(p)}_x${p.instances.length}.stl`, data: stlBinary(m.xyz, m.tri, p.id) });
+      if (m.aids.length) {
+        const ag = mergeMeshes(m.aids);
+        files.push({ name: `piezas/${fileName(p)}_ayudas.stl`, data: stlBinary(ag.xyz, ag.tri, p.id + ' ayudas') });
+      }
     }
     const B = bed();
-    const byId = Object.fromEntries(r.parts.map((p) => [p.id, p]));
+    const byId = Object.fromEntries(r.parts.map((p) => [p.key, p]));
     layout.plates.forEach((pl, k) => {
-      const meshes = pl.items.map((it) => {
-        const p = byId[it.partId];
-        const xyz = transformVerts(p.mesh.vert, p.mesh.numProp, p.print);
+      const place = (src, it) => {
         const a = (it.angle * Math.PI) / 180, c = Math.cos(a), s = Math.sin(a);
-        for (let i = 0; i < xyz.length; i += 3) {
-          const x = xyz[i], y = xyz[i + 1];
-          xyz[i] = c * x - s * y + it.tx - B.x / 2;
-          xyz[i + 1] = s * x + c * y + it.ty - B.y / 2;
+        for (let i = 0; i < src.length; i += 3) {
+          const x = src[i], y = src[i + 1];
+          src[i] = c * x - s * y + it.tx - B.x / 2;
+          src[i + 1] = s * x + c * y + it.ty - B.y / 2;
         }
-        return { xyz, tri: p.mesh.tri };
+        return src;
+      };
+      const meshes = pl.items.flatMap((it) => {
+        const p = byId[it.partId];
+        const out = [{ xyz: place(transformVerts(p.mesh.vert, p.mesh.numProp, p.print), it), tri: p.mesh.tri }];
+        for (const ad of p.aids || []) out.push({ xyz: place(transformVerts(ad.mesh.vert, ad.mesh.numProp, IDENT), it), tri: ad.mesh.tri });
+        return out;
       });
       const mg = mergeMeshes(meshes);
       files.push({ name: `placas/placa_${k + 1}.stl`, data: stlBinary(mg.xyz, mg.tri, `placa ${k + 1}`) });
@@ -389,6 +440,12 @@ async function exportZip() {
   }
 }
 
+function orientText(f, p) {
+  if (p.tilt) return `inclinada ${p.tilt.alpha}° sobre ${p.tilt.axis}, con cuna de soporte incluida`;
+  if (!f.ok) return 'NO CABE en la cama';
+  return f.mode + (f.mode === 'diagonal' ? ` ${f.angle}°` : '') + (f.aids?.length ? ' + ' + f.aids.join(', ') : '');
+}
+
 function readme(r, layout) {
   const D = r.D;
   const lines = [
@@ -397,10 +454,14 @@ function readme(r, layout) {
     `Interior: ${D.inner.L} × ${D.inner.W} mm, alto cerrado ${D.inner.closedHeight} mm, inner_corner_radius ${D.inner.inner_corner_radius} mm`,
     `Exterior: ${D.outerL} × ${D.outerW} × ${D.outerH} mm`, '',
     'PIEZAS (ya orientadas para imprimir, sin soportes):',
-    ...r.parts.map((p) => `  - ${p.name} × ${p.instances.length}  [${p.material}]  → orientación: ${layout.fits[p.id].ok ? layout.fits[p.id].mode + (layout.fits[p.id].mode === 'diagonal' ? ' ' + layout.fits[p.id].angle + '°' : '') : 'NO CABE'}`),
+    ...r.parts.map((p) => `  - ${p.name} × ${p.instances.length}  [${p.material}]  → ${orientText(layout.fits[p.key], p)}`),
     '',
     'AJUSTES RECOMENDADOS:',
-    '  - Base/tapa: 0.2 mm de capa, 4–6 perímetros, 15–25 % de relleno gyroid.',
+    `  - Base/tapa: capa ${D.lh} mm, ancho de pared ${D.lw} mm (la pared mide ${D.t} mm = ${Math.round(D.t / D.lw)} líneas exactas), relleno gyroid 15–25 %.`,
+    '  - Línea de contracción (además del diseño): perímetro exterior primero (outer/inner),',
+    '    flujo de relleno sólido 95 %, tiempo mínimo de capa 6–8 s, ventilador constante,',
+    '    "asegurar grosor de pared vertical" activado y sin "solo una pared en superficies superiores".',
+    '  - Las ayudas (*_ayudas.stl: orejas de 2 capas / cuna con interfaz de 1 capa) se retiran con un cúter.',
     '  - Cierres: imprimir acostados (como vienen), 100 % de perímetros o 5+ paredes, PETG preferible (más elástico).',
     '  - Pasadores: acostados sobre la cara plana, 100 % de relleno.',
     '  - Junta: TPU 95A, 0.2 mm, velocidad baja, 100 % de relleno.',
@@ -410,9 +471,11 @@ function readme(r, layout) {
     '  2. Alinea los nudillos de la tapa entre los de la base e inserta el pasador por el lado de la cabeza hasta que los dientes salten.',
     '  3. Coloca cada cierre entre sus orejetas e inserta su pasador.',
   ];
-  if (D.pinMode === 'filament') {
-    lines.push(`  * Pasadores de filamento 1.75 mm: corta ${D.filament.hingeQty}× ${D.filament.hinge} mm (bisagra) y ${D.filament.latchQty}× ${D.filament.latch} mm (cierres); fíjalos con los tapones a presión.`);
-  }
+  const fl = D.filament || {};
+  if (fl.hinge) lines.push(`  * Bisagra: corta ${fl.hingeQty}× ${fl.hinge} mm de filamento 1.75 mm y fíjalos con los tapones a presión.`);
+  if (fl.latch) lines.push(`  * Cierres: corta ${fl.latchQty}× ${fl.latch} mm de filamento 1.75 mm y fíjalos con los tapones a presión.`);
+  if (D.stack) lines.push('  * Apilable: la base de una caja encaja en el marco de la tapa de otra.');
+  if (D.gfPlate) lines.push(`  * Gridfinity: ${D.inner.gridfinity.nx}×${D.inner.gridfinity.ny} celdas, bins de hasta ${D.inner.gridfinity.units}U.`);
   if (D.warn.length) lines.push('', 'AVISOS:', ...D.warn.map((w) => '  ! ' + w));
   return lines.join('\r\n');
 }
@@ -431,8 +494,8 @@ async function exportSingles() {
       dlg.append(el('div', { style: 'display:flex;justify-content:space-between;gap:16px;align-items:center;margin:6px 0' },
         el('span', {}, `${p.name} × ${p.instances.length}`),
         el('button', { class: 'sm', onclick: () => {
-          const m = printMesh(p, layout.fits[p.id].angle);
-          download(stlBinary(m.xyz, m.tri, p.id), `${FILE[p.id]}.stl`, 'model/stl');
+          const m = printMesh(p, layout.fits[p.key].angle);
+          download(stlBinary(m.xyz, m.tri, p.id), `${fileName(p)}.stl`, 'model/stl');
         } }, 'STL')));
     }
     dlg.append(el('div', { style: 'text-align:right;margin-top:10px' }, el('button', { class: 'ghost sm', onclick: () => dlg.close() }, 'Cerrar')));
