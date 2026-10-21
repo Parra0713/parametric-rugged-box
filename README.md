@@ -138,6 +138,19 @@ deslizador nunca se acumulan cálculos atrasados.
   dedos** colocados automáticamente en los bordes del eje menor del objeto
   (diámetro y posición ajustables). Inserto en blanco opcional para la tapa.
   Se imprimen con la cubierta sobre la cama.
+* **Varios objetos con acomodo automático:** añade todos los calcos que
+  quieras (con cantidad). Se acomodan solos para la caja más pequeña:
+  giros de 90/180/270° (encaje cabeza con cola), colocación por gravedad,
+  pared mínima entre huecos configurable (rigidez) y huecos para dedos que se
+  comparten entre objetos vecinos. Entre disposiciones de área parecida
+  prefiere la que deja la caja **plana en la cama**. La caja se ajusta al
+  acomodo o, en modo manual, el acomodo se hace dentro de tus medidas.
+* **Insertos con la misma lógica de cama** que la caja: diagonal + orejas, o
+  inclinados con bisel simétrico, aletas y soportes de voladizos.
+* **Interfaz por pasos:** pestañas Caja → Contenido → Tapa → Mecánica →
+  Impresión, ayudas de una línea y **modo experto** para los ajustes finos.
+  El panel derecho empieza por un resumen (cabe plana/diagonal/inclinada,
+  placas, material, avisos) y deja el detalle en secciones plegables.
 * **Registro y pruebas:** tarjeta "Registro" en la interfaz (descargable en
   JSON) y barrido de regresión de 20 a 380 mm (`npm run test:sweep`) que
   comprueba integridad de piezas, colisiones, mecánica tras el bisel,

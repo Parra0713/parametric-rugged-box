@@ -23,6 +23,7 @@ import { init, build, _internal } from '../src/engine/engine.js';
 import { DEFAULTS, derive } from '../src/engine/params.js';
 import { M, CS } from '../src/engine/geo.js';
 import { overhangRegions } from '../src/engine/tilt.js';
+import { pack } from '../src/packer.js';
 
 await init(Module);
 const { hinges, latches, buildBase, buildLid } = _internal;
@@ -60,9 +61,19 @@ SIZES.forEach(([L, W, bd, ld], i) => {
   const [vn, vf] = VARIANTS[i % VARIANTS.length];
   cases.push({ name: `${L}×${W} ${vn}`, p: { ...base, ...vf(L, W) } });
 });
+// Varios objetos acomodados automáticamente (como en la interfaz).
+{
+  const wr = (L, hw) => { const p = []; for (let i = 0; i <= 16; i++) { const a = Math.PI / 2 + (i / 16) * Math.PI; p.push([hw * 1.6 * Math.cos(a), hw * 1.6 * Math.sin(a)]); } p.push([L - 12, -hw * 0.55], [L, -hw * 0.9], [L, hw * 0.9], [L - 12, hw * 0.55]); return p; };
+  const objs = [{ polys: [wr(140, 9)], qty: 2 }, { polys: [wr(90, 7)], qty: 1 }, { polys: [ellipse(60, 60)], qty: 1 }];
+  const opt = { spacing: 3, pocketTol: 0.6, fingerCount: 'auto', fingerD: 20, fingerPos: 0, rotate: true };
+  const k = pack(objs, opt);
+  const m = 0.3 + 0.9 + 0.8 + 1;
+  cases.push({ name: 'varios objetos acomodados', p: { innerL: Math.ceil(k.w + 2 * m), innerW: Math.ceil(k.h + 2 * m), baseDepth: 30, lidDepth: 10,
+    insertMode: 'pockets', contentObjects: k.placed.map((q) => ({ polys: q.polys, notches: q.notches })) } });
+}
 // Casos girados (ancho > largo) y del barrido rápido.
 cases.push({ name: '25×120 girada', p: { innerL: 25, innerW: 120, baseDepth: 20, lidDepth: 5 } });
-if (args.quick) cases = cases.filter((c) => /^(20×20|60×40|120×80|250×170|380×260) estándar|apilable|alojamiento/.test(c.name)).slice(0, 7);
+if (args.quick) cases = cases.filter((c) => /^(20×20|60×40|120×80|250×170|380×260) estándar|apilable|alojamiento|varios/.test(c.name)).slice(0, 8);
 if (args.filter) cases = cases.filter((c) => c.name.includes(args.filter));
 if (args.chunk) {
   const [k, n] = String(args.chunk).split('/').map(Number);
@@ -143,8 +154,9 @@ for (const c of cases) {
     const m = toMan(pt.mesh);
     const v = m.intersect(id === 'insert' ? base : lid).volume();
     check(v < 0.05, `${pt.name}: encaja sin interferencia (${v.toFixed(3)} mm³)`);
-    if (id === 'insert' && P.contentPolys) {
-      const obj = M().union(P.contentPolys.map((p) => CS().ofPolygons([p], 'EvenOdd').extrude(D.Db - 1).translate([0, 0, D.floorTop + 0.5])));
+    const cps = P.contentObjects ? P.contentObjects.flatMap((o) => o.polys) : P.contentPolys;
+    if (id === 'insert' && cps) {
+      const obj = M().union(cps.map((p) => CS().ofPolygons([p], 'EvenOdd').extrude(D.Db - 1).translate([0, 0, D.floorTop + 0.5])));
       const vo = m.intersect(obj).volume();
       check(vo < 0.05, `${pt.name}: el contenido cabe en su alojamiento (${vo.toFixed(3)} mm³)`);
     }

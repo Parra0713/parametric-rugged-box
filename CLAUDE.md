@@ -33,7 +33,8 @@ registro interno del motor) y `logs/sweep-latest.json` (resumen). **Ejecuta
 | `src/engine/tilt.js` | Impresión inclinada: bisel de contacto, aletas, detector de voladizos y soportes. |
 | `src/engine/engine.js` | Orquestador `build(P, svg, opt)`; ayudas de impresión (`addAids`); registro `D.log`. |
 | `src/bedfit.js`, `src/optimizer.js` | Cama: rotación/diagonal/inclinación; optimizador "imprimir plana". |
-| `src/content.js` | SVG calcado del contenido (unidades reales, rectángulo mínimo, recorte máx.). |
+| `src/content.js` | SVG calcado del contenido (unidades reales, recorte máx. de esquina). |
+| `src/packer.js` | Acomodo automático de varios objetos (gravedad sobre rejilla de 1 mm, giros 90/180/270°, huecos para dedos compartibles, prefiere cajas que quepan planas). Pura JS. |
 | `src/main.js`, `viewer.js`, `worker.js` | UI, vista three.js (render bajo demanda), hilo de geometría. |
 
 ## Convenciones y trampas conocidas
@@ -54,8 +55,14 @@ registro interno del motor) y `logs/sweep-latest.json` (resumen). **Ejecuta
   (`snapW`, `snapH`).
 - `baseCache` reutiliza la base: añade a `LID_ONLY` cualquier parámetro nuevo
   que NO afecte a la base (si afecta, no lo añadas).
-- `P.contentPolys` viaja dentro de `P` hacia el worker (polígonos en el marco
-  interno).
+- El contenido viaja dentro de `P` hacia el worker: `P.contentObjects =
+  [{ polys, notches }]` (acomodado por `packer.js`, marco interno). El motor
+  no acomoda: solo recorta huecos y huecos para dedos donde le dicen.
+  `P.contentPolys` (un objeto) se mantiene por compatibilidad y pruebas.
+- La UI se genera de `SCHEMA` (pestaña `tab`, `adv` = solo modo experto,
+  `hint` = ayuda de una línea). No añadas controles a mano en `main.js`.
+- Las ayudas de impresión (`addAids`) se aplican a base, tapa e insertos; el
+  parámetro `G` describe el contorno y si hay mecánica que proteger.
 - Memoria WASM: todo objeto creado se libera en `cleanup()` al final de
   `build`; no guardes `Manifold`/`CrossSection` entre llamadas.
 - Evita importaciones circulares (p. ej. `pattern.js` ↔ `engine.js`): las
