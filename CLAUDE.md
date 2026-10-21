@@ -10,7 +10,7 @@ español**. Unidades: milímetros y grados.
 npm run dev          # servidor Vite con recarga (http://localhost:5173)
 npm run build        # dist/rugged-box.html: UN archivo autocontenido (doble clic)
 npm test             # geometría + cama + montaje real (~2 min)
-npm run test:assembly   # pasadores/tapones montables, puentes ≤ 10 mm, apilado (~40 s)
+npm run test:assembly   # mecánica completa, pasadores montables, puentes ≤ 10 mm, apilado (~45 s)
 npm run test:quick   # barrido rápido de tamaños (7 casos, ~15 s)
 npm run test:sweep   # barrido completo de 20 a 380 mm (~25 casos, ~30 s–2 min)
 node tests/sweep.test.mjs --chunk=1/3   # trocear en máquinas lentas
@@ -73,6 +73,14 @@ registro interno del motor) y `logs/sweep-latest.json` (resumen). **Ejecuta
 - **Sin soportes**: toda pieza plana debe quedar con puentes ≤ `D.maxBridge`
   (10 mm, límite de Orca/Bambu). La tapa se imprime boca abajo: cualquier
   cavidad de su cara superior es un techo → `limitBridges` en pattern.js.
+- **Mecánica completa**: cualquier recorte global de la base o la tapa
+  (pie de apilado, biseles, envolventes) puede comerse bisagras y cierres SIN
+  provocar colisiones, así que las pruebas de choque no lo ven. `mechChecks`
+  exige que todo lo que la mecánica tiene por fuera de la banda esté entero.
+  El apilado ya no recorta la base por fuera: la pared baja recta.
+- Clases de tamaño en `MECH` (params.js): XS < 50 mm, S < 90, M < 200, L.
+  Las cotas de la mecánica que dependen de la clase (`rkWall`, `rlWall`, `tl`,
+  `hGap`, `hh`, `bandHlMin`, `kd0`) se leen con `Mx.x ?? valor de S/M/L`.
 - **Montaje real**: un pasador/tapón no solo debe no solaparse; tiene que
   poder llegar a su sitio. Ver `tests/lib/assembly.mjs` (`pinChecks`). La
   cabeza del pasador impreso va en `headSide` (params.js); con `side > 0` la
@@ -85,11 +93,13 @@ registro interno del motor) y `logs/sweep-latest.json` (resumen). **Ejecuta
 1. Piezas con malla válida y un solo sólido (la junta dividida admite 2 tiras).
 2. Caja cerrada sin interferencias; apertura 0–180° y cierres 0–80° sin choques.
 3. Inclinada: mecánica intacta y sin voladizos > 50° sin soporte.
-4. Apilable: asienta sin interferencia y bloquea ±0.6 mm en X e Y.
+4. Apilable: asienta sin interferencia y bloquea ±0.6 mm en X e Y, también
+   con bases poco profundas.
 5. Insertos: sin interferencia con la caja ni con el contenido.
 6. Pasadores y tapones: no se solapan con la caja, la tapa abre sin tocarlos,
    tienen camino de montaje libre y el filamento entra recto.
 7. Piezas planas: ningún puente/voladizo más ancho que `maxBridge`.
+8. Mecánica completa en base y tapa (`mechChecks`).
 
 ## Flujo con el PC del usuario
 

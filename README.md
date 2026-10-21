@@ -124,12 +124,23 @@ deslizador nunca se acumulan cálculos atrasados.
   capas y separación de 1 capa con la pieza. Bisagras y cierres intactos son
   autoportantes a 45°; lo que sí necesita soporte (p. ej. la cara inferior de
   la banda en el extremo alto) queda cubierto.
-* **Apilable sin soportes (v6.1):** la tapa lleva un marco perimetral y
-  nervios paralelos al lado largo a la misma altura, con paso ≤ 0.8 × el
-  puente máximo (impresa boca abajo, marco y nervios apoyan en la cama y la
-  piel puentea ≤ 8 mm, por debajo de los 10 mm a partir de los que Orca/Bambu
-  ponen soporte). La base lleva un pie más estrecho con ranuras de 0.5 mm de
-  holgura por lado donde entran los nervios. El marco bloquea en X e Y.
+* **Apilable (v6.2):** la base de arriba conserva la pared RECTA hasta la
+  cama, así que bisagras y cierres quedan intactos (antes el pie de apilado se
+  estrechaba con un cono de 45° que se comía hasta el 90 % de la mecánica en
+  bases poco profundas). Por debajo lleva un faldón con cara interior a 45° y
+  un canal oculto (techo = puente de 1.9 mm) donde entra el marco de la tapa
+  de abajo, y un pie con ranuras para sus nervios. La tapa tiene un bisel de
+  45° en el borde que sube hasta el marco: asiento cónico que centra y bloquea
+  en X e Y. Nervios paralelos al lado largo con paso ≤ 0.8 × el puente máximo
+  (la piel puentea ≤ 8 mm, por debajo de los 10 mm a partir de los que
+  Orca/Bambu ponen soporte).
+* **Clase XS (ultrapequeña, < 50 mm exteriores):** mecánica a escala sin
+  bajar de los mínimos de impresión: nudillo con 1.6 mm de pared alrededor
+  del agujero (3.5 líneas), orejeta 1.3 mm, placa de cierre 1.6 mm, cierre de
+  7 mm, banda de 1.8 mm, lengüeta de 1.8 mm. En una caja de 20×20: cierre un
+  25 % más corto (12.6 mm frente a 16.8), 3 mm menos de fondo exterior y la
+  base y la tapa mínimas ~1 mm más bajas que con la clase S. Se elige sola o
+  en Mecánica → Robustez.
 * **Sin soportes en todas las piezas planas:** un limitador de puentes
   añade nervios finos a cualquier celda del patrón de la tapa (grabado o
   relieve) más ancha que el puente máximo (ajustable, 10 mm por defecto).
@@ -180,16 +191,16 @@ deslizador nunca se acumulan cálculos atrasados.
   tapa (o **tapa mínima** para objetos a ras del borde); el panel muestra el `inner_corner_radius`,
   profundidades exactas y holguras recomendadas para insertos (botón *Copiar
   JSON*, y `interior.json` dentro del ZIP).
-* Bisagras y cierres adaptativos (clase S/M/L automática o forzada).
+* Bisagras y cierres adaptativos (clase XS/S/M/L automática o forzada).
 * Junta TPU / laberinto / lengüeta simple.
 * Tapa: liso, hexagonal, estriado, reforzado cruzado, **sci‑fi circuito**
   (semilla editable) y **sci‑fi radial** + **SVG propio**, en grabado o
   relieve.
 * **Gridfinity:** placa base interior (los bins van dentro; botón para ajustar
   el interior a celdas enteras) o pies bajo la caja.
-* **Apilable:** la base se estrecha con un escalón a 45° que encaja en un
-  marco sobre la tapa; la cara superior se imprime sobre nervios paralelos
-  (puentes ≤ 8 mm, sin soportes).
+* **Apilable:** faldón y canal bajo la base que encajan en el marco con bisel
+  de 45° de la tapa; la cara superior se imprime sobre nervios paralelos
+  (puentes ≤ 8 mm, sin soportes) y la mecánica no se toca.
 * Nervios de esquina y banda fina proporcionada.
 * **Optimizador de cama:** recta → 90° → **ángulo diagonal mínimo** → si no
   cabe plana, inclinación mínima sugerida (con soportes). Empaqueta todas las
@@ -218,7 +229,7 @@ Requiere Node.js ≥ 20 (en Windows: `winget install OpenJS.NodeJS.LTS`).
 npm install
 npm run dev      # servidor local con recarga en caliente → http://localhost:5173
 npm test         # pruebas geométricas, cama y montaje real
-npm run test:assembly  # pasadores/tapones montables + puentes ≤ 10 mm + apilado
+npm run test:assembly  # mecánica completa, pasadores montables, puentes ≤ 10 mm, apilado
 npm run test:sweep   # barrido de 20 a 380 mm con registro en logs/
 npm run build    # regenera dist/rugged-box.html
 ```
