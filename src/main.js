@@ -1,29 +1,37 @@
 /**
- * main.js — Interfaz: parámetros, comunicación con el motor, panel de medidas
- * y exportación.
+ * main.js — Interfaz: pestañas de parámetros, contenido a medida (varios
+ * objetos con acomodo automático), comunicación con el motor, panel de
+ * resultados y exportación.
  */
-import { DEFAULTS, SCHEMA, BED_PRESETS, migrate } from './engine/params.js';
+import { DEFAULTS, SCHEMA, TABS, BED_PRESETS, migrate } from './engine/params.js';
 import { EngineClient } from './engineClient.js';
 import { Viewer } from './viewer.js';
 import { parseSVG, placeSVG } from './svg.js';
-import { transformVerts, hull2D, fitAngle, tiltChoose, packPlates } from './bedfit.js';
+import { transformVerts, hull2D, fitAngle, tiltChoose, packPlates, rotatedExtent } from './bedfit.js';
 import { stlBinary, mergeMeshes, zipStore, download } from './export.js';
-import { parseContentSVG, placeContent, minAreaRect, maxCornerCut, contentFits } from './content.js';
-import { optimize } from './optimizer.js';
-import { rotatedExtent } from './bedfit.js';
+import { parseContentSVG, maxCornerCut } from './content.js';
+import { pack } from './packer.js';
+import { optimize, fitsFlat } from './optimizer.js';
+import { derive } from './engine/params.js';
 
 /* ------------------------------------------------------------------ */
 /*  Estado                                                            */
 /* ------------------------------------------------------------------ */
 const STORE = 'ruggedbox.params.v1';
 const STORE_SVG = 'ruggedbox.svg.v1';
-const STORE_OBJ = 'ruggedbox.content.v1';
+const STORE_OBJ = 'ruggedbox.content.v1';      // v4: un solo objeto (se migra)
+const STORE_OBJS = 'ruggedbox.objects.v1';     // v6: lista de objetos
+const STORE_UI = 'ruggedbox.ui.v1';
+
+const safeGet = (k) => { try { return localStorage.getItem(k); } catch { return null; } };
+const safeSet = (k, v) => { try { localStorage.setItem(k, v); } catch { /* sin almacenamiento */ } };
+const safeDel = (k) => { try { localStorage.removeItem(k); } catch { /* idem */ } };
 
 function loadParams() {
   let saved = {};
   try {
     if (location.hash.length > 1) saved = JSON.parse(decodeURIComponent(location.hash.slice(1)));
-    else saved = JSON.parse(localStorage.getItem(STORE) || '{}');
+    else saved = JSON.parse(safeGet(STORE) || '{}');
   } catch { saved = {}; }
   saved = migrate(saved);
   const P = { ...DEFAULTS };
@@ -31,23 +39,32 @@ function loadParams() {
   return P;
 }
 
+const ui = (() => { try { return { tab: 'caja', expert: false, open: {}, ...JSON.parse(safeGet(STORE_UI) || '{}') }; } catch { return { tab: 'caja', expert: false, open: {} }; } })();
+const saveUi = () => safeSet(STORE_UI, JSON.stringify(ui));
+
 const state = {
   P: loadParams(),
-  svgRaw: null,
-  svgName: '',
-  svgText: '',
-  result: null,
-  layout: null,
-  lastApplied: 0,
+  svgRaw: null, svgName: '', svgText: '',
+  objects: [],              // [{ name, text, raw, qty }]
+  packed: null,             // resultado del acomodo
+  result: null, layout: null, lastApplied: 0,
 };
+
+// Objetos guardados (y migración del contorno único de la v4).
 try {
-  const s = localStorage.getItem(STORE_OBJ);
-  if (s) { const o = JSON.parse(s); state.objText = o.text; state.objName = o.name; state.objRaw = parseContentSVG(o.text); }
-} catch { /* contorno guardado inválido */ }
+  const list = JSON.parse(safeGet(STORE_OBJS) || 'null');
+  if (Array.isArray(list)) state.objects = list.map((o) => ({ ...o, raw: parseContentSVG(o.text) }));
+  else {
+    const one = JSON.parse(safeGet(STORE_OBJ) || 'null');
+    if (one) state.objects = [{ name: one.name, text: one.text, qty: 1, raw: parseContentSVG(one.text) }];
+  }
+} catch { state.objects = []; }
 try {
-  const s = localStorage.getItem(STORE_SVG);
+  const s = safeGet(STORE_SVG);
   if (s) { const o = JSON.parse(s); state.svgText = o.text; state.svgName = o.name; state.svgRaw = parseSVG(o.text); }
 } catch { /* SVG guardado inválido: se ignora */ }
+
+const saveObjects = () => safeSet(STORE_OBJS, JSON.stringify(state.objects.map(({ name, text, qty }) => ({ name, text, qty }))));
 
 const engine = new EngineClient();
 const viewer = new Viewer(document.getElementById('viewport'));
@@ -56,7 +73,7 @@ viewer.setTheme(mq.matches);
 mq.addEventListener?.('change', (e) => viewer.setTheme(e.matches));
 
 /* ------------------------------------------------------------------ */
-/*  Panel de parámetros (generado desde SCHEMA)                       */
+/*  Utilidades DOM                                                    */
 /* ------------------------------------------------------------------ */
 const $ = (s, r = document) => r.querySelector(s);
 const el = (tag, attrs = {}, ...kids) => {
@@ -64,32 +81,54 @@ const el = (tag, attrs = {}, ...kids) => {
   for (const [k, v] of Object.entries(attrs)) {
     if (k === 'class') e.className = v;
     else if (k.startsWith('on')) e.addEventListener(k.slice(2), v);
-    else if (v !== undefined && v !== null) e.setAttribute(k, v);
+    else if (v !== undefined && v !== null && v !== false) e.setAttribute(k, v);
   }
-  for (const k of kids.flat()) if (k != null) e.append(k.nodeType ? k : document.createTextNode(k));
+  for (const k of kids.flat()) if (k != null && k !== false) e.append(k.nodeType ? k : document.createTextNode(k));
   return e;
 };
 
+/* ------------------------------------------------------------------ */
+/*  Panel de parámetros: pestañas + grupos + modo experto             */
+/* ------------------------------------------------------------------ */
 const controls = {};
+
 function buildParams() {
   const root = $('#params');
   root.innerHTML = '';
-  SCHEMA.forEach((g, gi) => {
+  // Barra de pestañas (flujo de trabajo) + interruptor de modo experto.
+  const bar = el('div', { class: 'tabs', role: 'tablist' }, TABS.map(([id, label, title]) =>
+    el('button', { class: 'tab' + (ui.tab === id ? ' on' : ''), role: 'tab', title, 'aria-selected': String(ui.tab === id),
+      onclick: () => { ui.tab = id; saveUi(); buildParams(); } }, label)));
+  const expert = el('label', { class: 'expert' },
+    el('input', { type: 'checkbox', ...(ui.expert ? { checked: '' } : {}), onchange: (e) => { ui.expert = e.target.checked; saveUi(); buildParams(); } }),
+    'Modo experto');
+  const [, , subtitle] = TABS.find(([id]) => id === ui.tab) || TABS[0];
+  root.append(el('div', { class: 'tabhead' }, bar, el('div', { class: 'tabsub' }, el('span', {}, subtitle), expert)));
+
+  for (const g of SCHEMA.filter((x) => x.tab === ui.tab)) {
     const body = el('div', { class: 'group-body' });
+    if (g.content) body.append(contentControl());
     if (g.svg) body.append(svgControl());
     if (g.gridfinity) body.append(gridfinitySnap());
-    if (g.content) body.append(contentControl());
-    for (const it of g.items) body.append(control(it));
-    root.append(el('details', { class: 'group', ...(gi < 2 || g.svg ? { open: '' } : {}) },
-      el('summary', {}, g.group), body));
-  });
+    const items = g.items.filter((it) => ui.expert || !it.adv);
+    for (const it of items) body.append(control(it));
+    const hidden = g.items.length - items.length;
+    if (hidden) body.append(el('button', { class: 'linkbtn', onclick: () => { ui.expert = true; saveUi(); buildParams(); } },
+      `+ ${hidden} ajuste${hidden > 1 ? 's' : ''} avanzado${hidden > 1 ? 's' : ''}`));
+    const key = g.group;
+    const open = ui.open[key] !== false;
+    const det = el('details', { class: 'group', ...(open ? { open: '' } : {}) }, el('summary', {}, g.group), body);
+    det.addEventListener('toggle', () => { ui.open[key] = det.open; saveUi(); });
+    root.append(det);
+  }
 }
 
 function control(it) {
   const v = state.P[it.k];
+  const hint = it.hint ? el('div', { class: 'hint' }, it.hint) : null;
   if (it.type === 'range') {
-    const range = el('input', { type: 'range', min: it.min, max: it.max, step: it.step, value: v });
-    const num = el('input', { type: 'number', min: it.min, max: it.max, step: it.step, value: v });
+    const range = el('input', { type: 'range', min: it.min, max: it.max, step: it.step, value: v, 'aria-label': it.label });
+    const num = el('input', { type: 'number', min: it.min, max: it.max, step: it.step, value: v, 'aria-label': it.label });
     const sync = (val, src) => {
       const x = Math.min(it.max * 4, Math.max(it.min, Number(val)));
       if (!Number.isFinite(x)) return;
@@ -101,74 +140,137 @@ function control(it) {
     num.addEventListener('change', () => sync(num.value, num));
     controls[it.k] = { set: (x) => { range.value = x; num.value = x; } };
     return el('div', { class: 'field' },
-      el('div', { class: 'lbl' }, el('span', {}, it.label), el('span', {}, it.unit)), range, num);
+      el('div', { class: 'lbl' }, el('span', {}, it.label), el('span', { class: 'unit' }, it.unit)), range, num, hint);
   }
   if (it.type === 'select') {
-    const sel = el('select', {}, it.options.map(([val, txt]) => el('option', { value: val, ...(val === v ? { selected: '' } : {}) }, txt)));
+    const sel = el('select', { 'aria-label': it.label }, it.options.map(([val, txt]) => el('option', { value: val, ...(String(val) === String(v) ? { selected: '' } : {}) }, txt)));
     sel.addEventListener('change', () => setParam(it.k, sel.value));
     controls[it.k] = { set: (x) => { sel.value = x; } };
-    return el('div', { class: 'field sel' }, el('div', { class: 'lbl' }, it.label), sel);
+    return el('div', { class: 'field sel' }, el('div', { class: 'lbl' }, it.label), sel, hint);
   }
   const cb = el('input', { type: 'checkbox', ...(v ? { checked: '' } : {}) });
   cb.addEventListener('change', () => setParam(it.k, cb.checked));
   controls[it.k] = { set: (x) => { cb.checked = !!x; } };
-  return el('label', { class: 'field tog' }, el('span', { class: 'lbl' }, it.label), cb);
+  return el('label', { class: 'field tog' }, el('span', { class: 'lbl' }, it.label), cb, hint);
+}
+
+/* ------------------------------------------------------------------ */
+/*  Contenido: varios objetos (calcos SVG 1:1) con acomodo automático */
+/* ------------------------------------------------------------------ */
+function contentControl() {
+  const file = el('input', { type: 'file', accept: '.svg,image/svg+xml', multiple: '', hidden: '' });
+  const add = el('button', { class: 'sm primary' }, '+ Añadir objetos (SVG)');
+  add.addEventListener('click', () => file.click());
+  file.addEventListener('change', async () => {
+    const errs = [];
+    for (const f of file.files) {
+      try {
+        const text = await f.text();
+        state.objects.push({ name: f.name.replace(/\.svg$/i, ''), text, qty: 1, raw: parseContentSVG(text) });
+      } catch (e) { errs.push(`${f.name}: ${e.message}`); }
+    }
+    file.value = '';
+    if (errs.length) alert('No se pudieron leer:\n' + errs.join('\n'));
+    // Con objetos, lo natural es un inserto con sus huecos.
+    if (state.objects.length && state.P.insertMode === 'off') { state.P.insertMode = 'pockets'; controls.insertMode?.set('pockets'); }
+    saveObjects();
+    buildParams();
+    contentChanged();
+  });
+
+  const list = el('div', { class: 'objlist' });
+  if (!state.objects.length) {
+    list.append(el('div', { class: 'empty' },
+      el('b', {}, 'Sin objetos.'), ' Sube el calco de cada pieza (SVG a escala 1:1 en mm). ',
+      'Se acomodan solos para ocupar el mínimo espacio y el inserto les deja su hueco y huecos para los dedos.'));
+  }
+  state.objects.forEach((o, i) => {
+    const thumb = el('div', { class: 'thumb' }, el('img', { alt: '', src: 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(o.text) }));
+    const qty = el('div', { class: 'qty' },
+      el('span', { class: 'small' }, 'Cantidad'),
+      el('button', { class: 'ghost sm', 'aria-label': 'Menos', onclick: () => { o.qty = Math.max(1, o.qty - 1); saveObjects(); buildParams(); contentChanged(); } }, '−'),
+      el('span', {}, String(o.qty)),
+      el('button', { class: 'ghost sm', 'aria-label': 'Más', onclick: () => { o.qty = Math.min(50, o.qty + 1); saveObjects(); buildParams(); contentChanged(); } }, '+'));
+    const del = el('button', { class: 'ghost sm', title: 'Quitar', 'aria-label': 'Quitar', onclick: () => { state.objects.splice(i, 1); saveObjects(); buildParams(); contentChanged(); } }, '✕');
+    list.append(el('div', { class: 'obj' }, thumb,
+      el('div', { class: 'objinfo' }, el('div', { class: 'name' }, o.name), el('div', { class: 'small' }, `${o.raw.w.toFixed(1)} × ${o.raw.h.toFixed(1)} mm`)),
+      qty, del));
+  });
+  const status = el('div', { class: 'small packinfo', id: 'packInfo' }, packText());
+  const again = state.objects.length ? el('button', { class: 'sm', onclick: () => { contentChanged(true); } }, 'Reorganizar') : null;
+  return el('div', { class: 'svgbox' }, el('div', { class: 'row' }, add, again, file), list, status);
+}
+
+function packText() {
+  const k = state.packed;
+  if (!state.objects.length) return '';
+  if (!k) return 'No caben con estas medidas: aumenta la caja o usa "Ajustarlo al contenido".';
+  const n = k.placed.length;
+  return `${n} pieza${n > 1 ? 's' : ''} acomodada${n > 1 ? 's' : ''} en ${k.w.toFixed(0)} × ${k.h.toFixed(0)} mm (${k.ms} ms).`;
+}
+
+/** Margen entre la huella del contenido y la cara interior de la caja. */
+function contentMargin() {
+  const P = state.P;
+  return (P.insertTol ?? 0.3) + 2 * P.lineWidth + 0.8 + (P.objClearance || 0);
 }
 
 /**
- * Contenido a medida: SVG calcado de la pieza real (en mm). Permite ajustar el
- * interior al contorno y saber cuánto se pueden recortar las esquinas.
+ * Recalcula el acomodo. Con "Ajustarlo al contenido" la caja toma el tamaño
+ * del acomodo (+ márgenes); en manual se acomoda dentro de las medidas dadas.
  */
-function contentControl() {
-  const file = el('input', { type: 'file', accept: '.svg,image/svg+xml', hidden: '' });
-  const info = el('div', { class: 'small' });
-  const pick = el('button', { class: 'sm' }, 'Cargar contorno (SVG)…');
-  const fit = el('button', { class: 'sm' }, 'Ajustar interior al contenido');
-  const clear = el('button', { class: 'ghost sm' }, 'Quitar');
-  const refresh = () => {
-    const r = state.objRaw;
-    fit.hidden = clear.hidden = !r;
-    info.textContent = r
-      ? `${state.objName}: ${r.w.toFixed(1)} × ${r.h.toFixed(1)} mm (${r.note}).`
-      : 'Sube el calco de tu pieza (SVG 1:1 en mm). Se usa para dimensionar el interior y para saber cuánto se pueden recortar las esquinas sin tocarla.';
+let packKey = '';
+function runPack(force) {
+  const P = state.P;
+  if (!state.objects.length) { state.packed = null; packKey = ''; return; }
+  const m = contentMargin();
+  const manual = P.contentFit === 'manual';
+  const L = Math.max(P.innerL, P.innerW), W = Math.min(P.innerL, P.innerW);
+  const opt = {
+    spacing: P.objSpacing, pocketTol: P.pocketTol, fingerCount: P.insertMode === 'pockets' ? P.fingerCount : '0',
+    fingerD: P.fingerD, fingerPos: P.fingerPos, rotate: P.objRotateAllow,
+    ...(manual ? { stripW: L - 2 * m, maxH: W - 2 * m } : {}),
   };
-  pick.addEventListener('click', () => file.click());
-  file.addEventListener('change', async () => {
-    const f = file.files[0];
-    if (!f) return;
-    const text = await f.text();
-    try {
-      state.objRaw = parseContentSVG(text); state.objText = text; state.objName = f.name;
-      try { localStorage.setItem(STORE_OBJ, JSON.stringify({ name: f.name, text })); } catch { /* grande */ }
-      refresh(); fitInterior();
-    } catch (e) { alert('No se pudo leer el contorno: ' + e.message); }
-    file.value = '';
-  });
-  fit.addEventListener('click', fitInterior);
-  clear.addEventListener('click', () => {
-    state.objRaw = null; state.objText = ''; state.objName = '';
-    localStorage.removeItem(STORE_OBJ); refresh(); viewer.setContent(null); renderInfo();
-  });
-  refresh();
-  return el('div', { class: 'svgbox' }, el('div', { class: 'row' }, pick, clear, file), fit, info);
+  // ¿Cabe plana la caja que resultaría de un acomodo w × h? (huella exacta
+  // de la caja con su mecánica; cuesta ~1 ms y se cachea por tamaño).
+  const fitCache = new Map();
+  opt.fitsBed = (w, h) => {
+    const k2 = `${Math.round(w)}x${Math.round(h)}`;
+    if (!fitCache.has(k2)) fitCache.set(k2, fitsFlat(derive({ ...P, innerL: w + 2 * m, innerW: h + 2 * m }), { x: P.bedX, y: P.bedY }).ok);
+    return fitCache.get(k2);
+  };
+  const key = JSON.stringify([state.objects.map((o) => [o.name, o.qty, o.raw.w, o.raw.h]), opt, P.bedX, P.bedY, P.wall, P.cornerCut]);
+  if (!force && key === packKey) return;
+  packKey = key;
+  state.packed = pack(state.objects.map((o) => ({ polys: o.raw.polys, qty: o.qty })), opt);
+  if (state.packed && !manual) {
+    const nl = Math.ceil((state.packed.w + 2 * m) * 2) / 2, nw = Math.ceil((state.packed.h + 2 * m) * 2) / 2;
+    if (nl !== P.innerL || nw !== P.innerW) {
+      P.innerL = nl; P.innerW = nw;
+      controls.innerL?.set(nl); controls.innerW?.set(nw);
+    }
+  }
 }
 
-/** Interior = rectángulo de área mínima del contenido + holgura (lado largo en X). */
-function fitInterior() {
-  const r = state.objRaw;
-  if (!r) return;
-  const m = minAreaRect(r.hull);
-  const c = 2 * state.P.objClearance;
-  state.P.objRotate = Math.round(((m.deg + 540) % 360 - 180) * 10) / 10;
-  state.P.innerL = Math.ceil((m.w + c) * 2) / 2;
-  state.P.innerW = Math.ceil((m.h + c) * 2) / 2;
-  for (const k of ['objRotate', 'innerL', 'innerW']) controls[k]?.set(state.P[k]);
+/** El contenido acomodado en el marco interno del motor (lado largo en X). */
+function contentPayload() {
+  const k = state.packed;
+  if (!k) return { contentObjects: null };
+  const rot = state.P.innerW > state.P.innerL;
+  const f = rot ? ([x, y]) => [y, -x] : (p) => p;
+  return { contentObjects: k.placed.map((q) => ({ polys: q.polys.map((p) => p.map(f)), notches: q.notches.map(f) })) };
+}
+
+function contentChanged(force) {
+  runPack(force);
+  const pi = $('#packInfo');
+  if (pi) pi.textContent = packText();
   setParam('innerL', state.P.innerL);
 }
 
 /** Botón: ajusta el interior a un número entero de celdas Gridfinity (+0.5 mm). */
 function gridfinitySnap() {
-  const b = el('button', { class: 'sm' }, 'Ajustar interior a celdas Gridfinity');
+  const b = el('button', { class: 'sm' }, 'Ajustar el interior a celdas Gridfinity');
   b.addEventListener('click', () => {
     for (const k of ['innerL', 'innerW']) {
       const n = Math.max(1, Math.round((state.P[k] - 0.5) / 42));
@@ -178,24 +280,21 @@ function gridfinitySnap() {
     setParam('gridfinity', state.P.gridfinity === 'off' ? 'baseplate' : state.P.gridfinity);
     controls.gridfinity?.set(state.P.gridfinity);
   });
-  return el('div', {}, b, el('div', { class: 'small', style: 'margin-top:4px' },
-    'Placa interior: los bins estándar encajan dentro. Pies: la caja se asienta sobre una placa.'));
+  return b;
 }
 
 function svgControl() {
   const file = el('input', { type: 'file', accept: '.svg,image/svg+xml', hidden: '' });
   const thumb = el('div', { class: 'thumb' });
-  const name = el('div', { class: 'name' }, state.svgName || 'Ningún archivo');
+  const name = el('div', { class: 'name' }, state.svgName || 'Sin logo');
   const clear = el('button', { class: 'ghost sm' }, 'Quitar');
-  const pick = el('button', { class: 'sm' }, 'Importar SVG…');
+  const pick = el('button', { class: 'sm' }, 'Elegir SVG…');
   const refresh = () => {
-    name.textContent = state.svgName || 'Ningún archivo';
+    name.textContent = state.svgName || 'Sin logo';
     thumb.innerHTML = '';
     if (state.svgText) {
       // Miniatura: se inserta como imagen (sin ejecutar scripts del SVG).
-      const img = el('img', { src: 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(state.svgText), alt: '' });
-      img.style.cssText = 'max-width:100%;max-height:100%';
-      thumb.append(img);
+      thumb.append(el('img', { alt: '', src: 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(state.svgText) }));
     }
     clear.hidden = !state.svgText;
   };
@@ -205,28 +304,26 @@ function svgControl() {
     if (!f) return;
     const text = await f.text();
     try {
-      state.svgRaw = parseSVG(text);
-      state.svgText = text;
-      state.svgName = f.name;
-      try { localStorage.setItem(STORE_SVG, JSON.stringify({ name: f.name, text })); } catch { /* demasiado grande */ }
-      refresh();
-      schedule();
-    } catch (e) {
-      alert('No se pudo leer el SVG: ' + e.message);
-    }
+      state.svgRaw = parseSVG(text); state.svgText = text; state.svgName = f.name;
+      safeSet(STORE_SVG, JSON.stringify({ name: f.name, text }));
+      refresh(); schedule();
+    } catch (e) { alert('No se pudo leer el SVG: ' + e.message); }
     file.value = '';
   });
   clear.addEventListener('click', () => {
     state.svgRaw = null; state.svgText = ''; state.svgName = '';
-    localStorage.removeItem(STORE_SVG);
-    refresh(); schedule();
+    safeDel(STORE_SVG); refresh(); schedule();
   });
   refresh();
   return el('div', { class: 'svgbox' },
-    el('div', { class: 'row' }, thumb, el('div', { style: 'min-width:0;flex:1' }, name)),
-    el('div', { class: 'row' }, pick, clear, file),
-    el('div', { class: 'small' }, 'Se graba o se pone en relieve según el modo de la tapa. Usa formas con relleno; los trazos se convierten con su grosor.'));
+    el('div', { class: 'row' }, thumb, el('div', { style: 'min-width:0;flex:1' }, name), pick, clear, file),
+    el('div', { class: 'small' }, 'Se graba (o en relieve) en la tapa. Usa formas con relleno; los trazos se convierten con su grosor.'));
 }
+
+/* ------------------------------------------------------------------ */
+/*  Parámetros                                                        */
+/* ------------------------------------------------------------------ */
+const PACK_KEYS = new Set(['bedPreset', 'bedX', 'bedY', 'objSpacing', 'pocketTol', 'fingerCount', 'fingerD', 'fingerPos', 'objRotateAllow', 'contentFit', 'insertMode', 'objClearance', 'insertTol']);
 
 function setParam(k, v) {
   state.P[k] = v;
@@ -238,7 +335,12 @@ function setParam(k, v) {
     state.P.bedPreset = 'custom';
     controls.bedPreset?.set('custom');
   }
-  try { localStorage.setItem(STORE, JSON.stringify(state.P)); } catch { /* sin almacenamiento */ }
+  if (PACK_KEYS.has(k) || (state.P.contentFit === 'manual' && (k === 'innerL' || k === 'innerW'))) {
+    runPack();
+    const pi = $('#packInfo');
+    if (pi) pi.textContent = packText();
+  }
+  safeSet(STORE, JSON.stringify(state.P));
   history.replaceState(null, '', '#' + encodeURIComponent(JSON.stringify(diffFromDefaults())));
   schedule();
 }
@@ -262,8 +364,7 @@ async function rebuild() {
   const busy = $('#busy');
   const t = setTimeout(() => { busy.hidden = false; }, 150);
   const svg = placeSVG(state.svgRaw, state.P);
-  const placed = placeContent(state.objRaw, state.P);
-  const msg = await engine.request({ ...state.P, quality: 'preview', contentPolys: placed ? placed.internal : null }, svg, true);
+  const msg = await engine.request({ ...state.P, quality: 'preview', ...contentPayload() }, svg, true);
   clearTimeout(t);
   if (msg.superseded) return;
   busy.hidden = true;
@@ -274,7 +375,7 @@ async function rebuild() {
   state.layout = computeLayout(msg.r);
   viewer.setData(msg.r, state.layout, bed());
   const tris = msg.r.parts.reduce((s, p) => s + p.tris * p.instances.length, 0);
-  setStatus('ok', `${msg.r.ms} ms · ${tris.toLocaleString('es')} triángulos · clase ${msg.r.D.cls}`);
+  setStatus('ok', `${msg.r.ms} ms · ${tris.toLocaleString('es')} triángulos`);
   updateContent();
   renderInfo();
   const sp = $('#sectionPos');
@@ -289,13 +390,15 @@ function applyOption(a) {
   setParam('wall', state.P.wall);
 }
 
-/** Coloca el contenido en el visor y calcula sus límites. */
+/** Contenido en el visor + recorte de esquina máximo + optimizador de cama. */
 function updateContent() {
-  const placed = placeContent(state.objRaw, state.P);
-  state.content = placed;
-  viewer.setContent(placed ? placed.internal : null);
+  const pay = contentPayload().contentObjects;
+  viewer.setContent(pay ? pay.flatMap((q) => q.polys) : null);
   const D = state.result?.D;
-  state.cmax = placed && D ? maxCornerCut(placed.internal, D.Li, D.Wi, state.P.objClearance) : null;
+  const fp = state.packed?.footprint;
+  const rot = state.P.innerW > state.P.innerL;
+  const fpi = fp ? (rot ? fp.map((p) => p.map(([x, y]) => [y, -x])) : fp) : null;
+  state.cmax = fpi && D ? maxCornerCut(fpi, D.Li, D.Wi, contentMargin() - 0.5) : null;
   state.opt = optimize(state.P, state.cmax);
 }
 
@@ -343,7 +446,7 @@ function computeLayout(res) {
 }
 
 /* ------------------------------------------------------------------ */
-/*  Panel de información                                              */
+/*  Panel de resultados                                               */
 /* ------------------------------------------------------------------ */
 const COLORS = { insert: '#7fb3d5', insertLid: '#a9cce3', base: '#343a3f', lid: '#d9601a', latch: '#e8b10c', gasket: '#1fa596', hingePin: '#c8cbce', latchPin: '#c8cbce', cap: '#c8cbce' };
 const mm = (v) => `${Number(v).toFixed(2).replace(/\.?0+$/, '')} mm`;
@@ -352,149 +455,143 @@ function kv(rows) {
   return el('dl', { class: 'kv' }, rows.flatMap(([k, v, hl]) => [el('dt', {}, k), el('dd', { class: hl ? 'hl' : '' }, v)]));
 }
 
+/** Tarjeta plegable con estado recordado. */
+function fold(id, title, ...body) {
+  const open = ui.open['info:' + id] === true;
+  const d = el('details', { class: 'card fold', ...(open ? { open: '' } : {}) }, el('summary', {}, title), ...body);
+  d.addEventListener('toggle', () => { ui.open['info:' + id] = d.open; saveUi(); });
+  return d;
+}
+
+function orientShort(p) {
+  const f = state.layout.fits[p.key];
+  if (p.tilt) return `inclinada ${p.tilt.alpha}°`;
+  if (!f.ok) return 'no cabe';
+  return f.mode === 'diagonal' ? `diagonal ${Math.round(f.angle)}°` : f.mode;
+}
+
 function renderInfo() {
   const { D, parts } = state.result;
   const I = D.inner;
   const info = $('#info');
   info.innerHTML = '';
 
-  const copy = el('button', { class: 'ghost' }, 'Copiar JSON');
-  copy.addEventListener('click', () => {
+  /* --- Resumen --- */
+  const big = parts.filter((p) => ['base', 'lid', 'insert', 'insertLid'].includes(p.id));
+  const tilted = parts.filter((p) => p.tilt);
+  const diag = big.some((p) => !p.tilt && state.layout.fits[p.key]?.mode === 'diagonal');
+  const printChip = tilted.length ? ['warn', 'Impresión inclinada'] : diag ? ['ok', 'Cabe en diagonal'] : ['ok', 'Cabe plana'];
+  const vol = parts.reduce((s, p) => s + p.volume * p.instances.length, 0);
+  info.append(el('section', { class: 'card summary' },
+    el('div', { class: 'chips' },
+      el('span', { class: 'chip ' + printChip[0] }, printChip[1]),
+      el('span', { class: 'chip' }, `${state.layout.plates.length} placa${state.layout.plates.length > 1 ? 's' : ''}`),
+      D.warn.length ? el('span', { class: 'chip warn' }, `${D.warn.length} aviso${D.warn.length > 1 ? 's' : ''}`) : null),
+    kv([
+      ['Interior', `${I.L} × ${I.W} mm`, true],
+      ['Profundidad', `${I.baseDepth} + ${I.lidDepth} mm`],
+      ['Exterior', `${D.outerL} × ${D.outerW} × ${D.outerH} mm`],
+      ['Material (aprox.)', `${(vol / 1000).toFixed(0)} cm³ · ${Math.round(vol / 1000 * 1.24)} g PLA`],
+    ])));
+
+  /* --- Avisos --- */
+  if (D.warn.length) {
+    info.append(el('section', { class: 'card alert' }, el('h3', {}, 'Avisos'),
+      el('ul', { class: 'warn' }, D.warn.map((w) => el('li', {}, w)))));
+  }
+
+  /* --- Acciones sugeridas: imprimir plana --- */
+  const o = state.opt;
+  if (o && o.status === 'option') {
+    const box = el('section', { class: 'card key' }, el('h3', {}, 'Puede imprimirse plana'),
+      el('p', { class: 'small' }, 'Cambios mínimos para que quepa sin inclinar ni soportes:'));
+    o.alts.forEach((a, i) => {
+      const btn = el('button', { class: i ? 'sm' : 'sm primary' }, 'Aplicar');
+      btn.addEventListener('click', () => applyOption(a));
+      box.append(el('div', { class: 'opt' },
+        el('div', { style: 'flex:1' }, a.changes.join(' + '),
+          el('div', { class: 'small' }, `→ ${a.fit.mode === 'diagonal' ? `diagonal ${Math.round(a.fit.angle)}°` : a.fit.mode}`)), btn));
+    });
+    info.append(box);
+  }
+
+  /* --- Contenido --- */
+  if (state.objects.length) {
+    const k = state.packed;
+    const n = state.objects.reduce((s, x) => s + x.qty, 0);
+    info.append(el('section', { class: 'card' + (k ? '' : ' alert') }, el('h3', {}, 'Contenido'),
+      kv([
+        ['Objetos', `${n} (${state.objects.length} tipo${state.objects.length > 1 ? 's' : ''})`],
+        ['Acomodo', k ? `${k.w.toFixed(0)} × ${k.h.toFixed(0)} mm` : 'no caben', !!k],
+        ['Inserto', state.P.insertMode === 'pockets' ? `${D.insert?.pockets ?? 0} huecos · ${D.insert?.notches.length ?? 0} para dedos` : state.P.insertMode === 'blank' ? 'en blanco' : 'sin inserto'],
+        ['Recorte máx. de esquina', state.cmax != null ? `${state.cmax} mm` : '—'],
+      ])));
+  }
+
+  /* --- Detalles plegables --- */
+  const copy = el('button', { class: 'ghost sm' }, 'Copiar JSON');
+  copy.addEventListener('click', (e) => {
+    e.preventDefault();
     navigator.clipboard?.writeText(JSON.stringify(I, null, 2));
     copy.textContent = 'Copiado';
     setTimeout(() => { copy.textContent = 'Copiar JSON'; }, 1200);
   });
-  info.append(el('section', { class: 'card key' },
-    el('h3', {}, 'Interior para insertos', copy),
+  info.append(fold('inner', 'Medidas para diseñar insertos',
     kv([
       ['Largo × ancho', `${I.L} × ${I.W} mm`, true],
-      ['inner_corner_radius', mm(I.inner_corner_radius), true],
-      ['Profundidad base', mm(I.baseDepth)],
-      ['Profundidad tapa', mm(I.lidDepth) + (state.P.lidMin ? ' (mín.)' : '')],
+      ['Radio de esquina', mm(I.inner_corner_radius), true],
+      ['Profundidad base / tapa', `${I.baseDepth} / ${I.lidDepth} mm`],
       ['Alto total cerrada', mm(I.closedHeight), true],
       ['Chaflán suelo / techo', `${I.floorChamfer} / ${I.lidChamfer} mm`],
-      ...(I.gridfinity ? [['Gridfinity', `${I.gridfinity.nx}×${I.gridfinity.ny} celdas · bins hasta ${I.gridfinity.units}U`, true]] : []),
+      ...(I.cornerCut ? [['Esquinas recortadas', mm(I.cornerCut)]] : []),
+      ...(I.gridfinity ? [['Gridfinity', `${I.gridfinity.cells} celdas · bins hasta ${I.gridfinity.units}U`, true]] : []),
     ]),
-    el('p', { class: 'small' }, `Inserto: L ≤ ${I.L - 0.4} mm, W ≤ ${I.W - 0.4} mm (0.2 mm de holgura por lado), radio ≥ ${I.inner_corner_radius} mm y chaflán inferior ≥ ${I.floorChamfer} mm.`)));
-
-  // Contenido a medida.
-  if (state.content) {
-    const pc = state.content;
-    const okIn = contentFits(pc, state.P);
-    const cut = state.P.cornerCut || 0;
-    info.append(el('section', { class: 'card' + (okIn ? '' : ' key') }, el('h3', {}, 'Contenido'),
-      kv([
-        ['Contorno', `${pc.w.toFixed(1)} × ${pc.h.toFixed(1)} mm`],
-        ['Cabe en el interior', okIn ? 'sí' : 'NO: usa "Ajustar interior"', okIn],
-        ['Recorte de esquina máx.', `${state.cmax} mm`],
-        ...(cut > (state.cmax ?? 0) ? [['Aviso', `el recorte (${cut} mm) toca el contenido`]] : []),
-      ])));
-  }
-
-  // Optimizador: ¿se puede imprimir plana?
-  const o = state.opt;
-  if (o && o.status !== 'fits') {
-    const box = el('section', { class: 'card key' }, el('h3', {}, 'Imprimir plana'));
-    if (o.status === 'option') {
-      box.append(el('p', { class: 'small' }, 'La caja no cabe plana tal cual. Cambios mínimos que la hacen caber (sin inclinar, sin soportes):'));
-      o.alts.forEach((a, i) => {
-        const btn = el('button', { class: i ? 'sm' : 'sm primary' }, 'Aplicar');
-        btn.addEventListener('click', () => applyOption(a));
-        box.append(el('div', { style: 'display:flex;gap:8px;align-items:flex-start;margin:6px 0' },
-          el('div', { style: 'flex:1' }, a.changes.join(' + '),
-            el('div', { class: 'small' }, `→ ${a.fit.mode === 'diagonal' ? `diagonal ${a.fit.angle}°` : a.fit.mode}`)), btn));
-      });
-    } else {
-      box.append(el('p', { class: 'small' }, 'No cabe plana ni con los ajustes permitidos: se imprime inclinada con bisel simétrico y aletas.'));
-    }
-    info.append(box);
-  }
-
-  info.append(el('section', { class: 'card' }, el('h3', {}, 'Exterior'),
-    kv([['Envolvente', `${D.outerL} × ${D.outerW} × ${D.outerH} mm`], ['Pared / banda', `${D.t} / ${D.bo} mm`]])));
-
-  const fl = D.filament || {};
-  const pin = [
-    fl.hinge ? `Bisagra: filamento 1.75, ${fl.hingeQty}× ${fl.hinge} mm` : `Bisagra: pasador impreso Ø${D.pinD} (acostado)`,
-    fl.latch ? `cierres: filamento 1.75, ${fl.latchQty}× ${fl.latch} mm` : '',
-  ].filter(Boolean).join(' · ');
-  info.append(el('section', { class: 'card' }, el('h3', {}, 'Mecánica adaptativa'),
-    kv([
-      ['Clase', D.cls === 'S' ? 'S — pequeña' : D.cls === 'M' ? 'M — mediana' : 'L — grande'],
-      ['Bisagras', `${D.hinge.n} × ${D.hinge.nk} nudillos (${D.hinge.len} mm)`],
-      ['Cierres', `${D.latch.n} empotrados, ${D.latchW} mm`],
-      ['Pasador cierre', D.latchPinMode === 'filament' ? 'filamento 1.75' : `impreso Ø${D.latchPinD}`],
-      ['Taladro bisagra', `Ø${D.holeD} mm teardrop`],
-    ]),
-    el('p', { class: 'small' }, pin + (D.rot90 ? ' · Mecánica girada al lado largo.' : ''))));
-
-  // Línea de contracción: alturas críticas detectadas y cómo se atacan.
-  const hl = D.hullLine || [];
-  info.append(el('section', { class: 'card' }, el('h3', {}, 'Línea de contracción'),
-    hl.length ? kv(hl.map((h) => [`${h.part} z=${h.z} mm`, `−${h.drop}% · ${h.masked}`, h.masked !== 'no'])) : el('p', { class: 'small' }, 'Sin transiciones bruscas detectadas.'),
-    el('p', { class: 'small' }, (D.snapped.length ? 'Ajustado a la impresora: ' + D.snapped.join(', ') + '. ' : '') +
-      'z en orientación de impresión. Además: chaflán interior 45°, paredes de líneas enteras y ajustes de slicer en LEEME.txt.')));
-
-  const seal = D.sealMode === 'tpu'
-    ? [['Ranura', `${D.gw} × ${D.gd} mm`], ['Junta TPU', `${D.gkw} × ${D.gkh} mm`],
-      ['Compresión', `${Math.round(D.c * 100)} %`, true], ['Llenado', `${Math.round(D.fill * 100)} % (≤ 85 %)`]]
-    : D.sealMode === 'labyrinth'
-      ? [['Ranuras', `2 × ${D.gw} × ${D.gd} mm`], ['Lengüetas', `${D.tl} mm, holgura ${D.clr} mm`]]
-      : [['Ranura', `${D.gw} × ${D.gd} mm`], ['Lengüeta', `${D.tl} mm`]];
-  info.append(el('section', { class: 'card' }, el('h3', {}, 'Sellado'), kv(seal)));
+    el('p', { class: 'small' }, `Inserto propio: L ≤ ${I.L - 0.4}, W ≤ ${I.W - 0.4} mm, radio ≥ ${I.inner_corner_radius} mm y chaflán inferior ≥ ${I.floorChamfer} mm.`),
+    el('div', { style: 'text-align:right' }, copy)));
 
   const B = bed();
-  const fitRows = parts.map((p) => {
-    const f = state.layout.fits[p.key];
-    let txt = f.ok ? (f.mode === 'diagonal' ? `diagonal ${f.angle}°` : f.mode) : 'no cabe plana';
-    if (p.tilt) txt = `inclinada ${p.tilt.alpha}° · bisel ${p.tilt.cut} mm · ${p.tilt.finCount} aletas`;
-    if (!f.ok && f.tilt?.ok) txt = `inclinar ${f.tilt.alpha}° sobre ${f.tilt.axis} + giro ${f.tilt.angle}° (soportes)`;
-    if (!f.ok && !f.tilt?.ok) txt = 'no cabe: reduce medidas';
-    if (f.tooTall) txt += ' · excede Z';
-    if (f.aids?.length) txt += ' + ' + f.aids.map((a) => a.split(' (')[0].toLowerCase()).join(', ');
-    return [p.name, txt, f.mode === 'diagonal'];
-  });
-  const tilted = parts.filter((p) => p.tilt);
-  if (tilted.length) {
-    info.append(el('section', { class: 'card key' }, el('h3', {}, 'Impresión inclinada'),
-      kv(tilted.flatMap((p) => [
-        [`${p.name}: ángulo`, `${p.tilt.alpha}° sobre ${p.tilt.axis}`, p.tilt.alpha === 45],
-        ['Bisel de contacto', `${p.tilt.cut} mm → franja ${p.tilt.contact} mm${p.tilt.symmetric ? ' · simétrico (4 aristas)' : ''}`],
-        ['Aletas', `${p.tilt.finCount} · ${(p.tilt.finVol / 1000).toFixed(1)} cm³ (${Math.round(100 * p.tilt.finVol / Math.max(1, p.tilt.wedgeVol))} % de una cuña)`],
-      ])),
-      el('p', { class: 'small' }, 'A 45° fondo y paredes no necesitan soporte; las aletas solo estabilizan hasta el centro de masa y tocan la pieza con dientes de 1 línea.')));
-  }
-  info.append(el('section', { class: 'card' },
-    el('h3', {}, `Cama ${B.x}×${B.y}×${B.z}`), kv(fitRows),
-    el('p', { class: 'small' }, `${state.layout.plates.length} placa(s). Ver en modo “Placas”.`)));
+  info.append(fold('bed', `Impresión · cama ${B.x}×${B.y}`,
+    kv(parts.map((p) => [`${p.name}${p.instances.length > 1 ? ' ×' + p.instances.length : ''}`, orientShort(p) +
+      ((state.layout.fits[p.key].aids || []).length ? ' + ayudas' : '')])),
+    ...tilted.map((p) => el('p', { class: 'small' },
+      `${p.name}: ${p.tilt.alpha}° sobre ${p.tilt.axis}, bisel ${p.tilt.cut} mm (franja ${p.tilt.contact} mm), ${p.tilt.finCount} aletas ` +
+      `(${Math.round(100 * p.tilt.finVol / Math.max(1, p.tilt.wedgeVol))} % de una cuña)` + (p.tilt.ovCount ? `, soportes en ${p.tilt.ovCount} voladizos` : '') + '.')),
+    el('p', { class: 'small' }, `${state.layout.plates.length} placa(s): míralas en la vista "Placas".`)));
 
-  info.append(el('section', { class: 'card' }, el('h3', {}, 'Piezas'),
+  const fl = D.filament || {};
+  info.append(fold('mech', 'Mecánica y sellado',
+    kv([
+      ['Robustez', D.cls === 'S' ? 'S — pequeña' : D.cls === 'M' ? 'M — mediana' : 'L — grande'],
+      ['Bisagras', `${D.hinge.n} × ${D.hinge.nk} nudillos (${D.hinge.len} mm)`],
+      ['Cierres', `${D.latch.n} empotrados, ${D.latchW} mm`],
+      ['Pasador bisagra', fl.hinge ? `filamento 1.75 · ${fl.hingeQty}× ${fl.hinge} mm` : `impreso Ø${D.pinD}`],
+      ['Pasador cierre', fl.latch ? `filamento 1.75 · ${fl.latchQty}× ${fl.latch} mm` : `impreso Ø${D.latchPinD}`],
+      ...(D.sealMode === 'tpu'
+        ? [['Junta TPU', `${D.gkw} × ${D.gkh} mm · ${Math.round(D.c * 100)} % compresión`]]
+        : [['Sellado', D.sealMode === 'labyrinth' ? 'laberinto doble' : 'lengüeta simple']]),
+    ])));
+
+  const hl = D.hullLine || [];
+  info.append(fold('hull', 'Acabado (línea de contracción)',
+    hl.length ? kv(hl.map((h) => [`${h.part} z=${h.z} mm`, `−${h.drop}% · ${h.masked}`, h.masked !== 'no'])) : el('p', { class: 'small' }, 'Sin transiciones bruscas.'),
+    el('p', { class: 'small' }, (D.snapped.length ? 'Ajustes: ' + D.snapped.join(', ') + '. ' : '') + 'Recomendaciones de slicer en LEEME.txt.')));
+
+  info.append(fold('parts', `Piezas (${parts.length})`,
     el('table', { class: 'parts' }, el('tbody', {}, parts.map((p) => el('tr', {},
       el('td', {}, el('span', { class: 'sw', style: `background:${COLORS[p.id]}` }), `${p.name} × ${p.instances.length}`,
         el('div', { class: 'small' }, p.material)),
       el('td', {}, `${(p.volume / 1000).toFixed(1)} cm³`)))))));
 
-  if (state.result.D.insert) {
-    const I2 = state.result.D.insert;
-    info.append(el('section', { class: 'card' }, el('h3', {}, 'Inserto'),
-      kv([['Altura', mm(I2.height)], ['Alojamientos', String(I2.pockets)], ['Huecos para dedos', String(I2.notches.length)]]),
-      el('p', { class: 'small' }, 'Hueco por debajo: solo paredes de 2 líneas, cubierta y nervios. Se imprime con la cubierta sobre la cama.')));
-  }
   // Registro de la construcción (también descargable para depurar).
-  const logBtn = el('button', { class: 'ghost' }, 'Descargar');
+  const logBtn = el('button', { class: 'ghost sm' }, 'Descargar registro');
   logBtn.addEventListener('click', () => download(JSON.stringify({
-    fecha: new Date().toISOString(), version: '5', parametros: { ...state.P, contentPolys: undefined },
-    contenido: state.objName || null, logo: state.svgName || null, avisos: D.warn, registro: D.log,
+    fecha: new Date().toISOString(), version: '6', parametros: state.P,
+    objetos: state.objects.map((x) => ({ nombre: x.name, cantidad: x.qty, w: x.raw.w, h: x.raw.h })),
+    logo: state.svgName || null, avisos: D.warn, registro: D.log,
     piezas: parts.map((p) => ({ id: p.key, nombre: p.name, tri: p.tris, comp: p.components, vol: p.volume, estado: p.status, inclinada: p.tilt || null })),
   }, null, 2), `rugged-box-registro_${Date.now()}.json`, 'application/json'));
-  info.append(el('details', { class: 'card' }, el('summary', { class: 'small' }, `Registro (${(D.log || []).length} líneas)`),
-    el('div', { style: 'text-align:right;margin:6px 0' }, logBtn),
-    el('pre', { style: 'white-space:pre-wrap;font:11px var(--mono);margin:0;max-height:260px;overflow:auto' }, (D.log || []).join('\n'))));
-
-  if (D.warn.length) {
-    info.append(el('section', { class: 'card' }, el('h3', {}, 'Avisos'),
-      el('ul', { class: 'warn' }, D.warn.map((w) => el('li', {}, w)))));
-  }
+  info.append(fold('log', `Registro (${(D.log || []).length})`,
+    el('pre', { class: 'log' }, (D.log || []).join('\n')), el('div', { style: 'text-align:right' }, logBtn)));
 }
 
 /* ------------------------------------------------------------------ */
@@ -503,8 +600,7 @@ function renderInfo() {
 async function finalBuild() {
   const svg = placeSVG(state.svgRaw, state.P);
   let msg;
-  const placed = placeContent(state.objRaw, state.P);
-  do { msg = await engine.request({ ...state.P, quality: 'final', contentPolys: placed ? placed.internal : null }, svg, false); } while (msg.superseded);
+  do { msg = await engine.request({ ...state.P, quality: 'final', ...contentPayload() }, svg, false); } while (msg.superseded);
   if (!msg.ok) throw new Error(msg.error);
   schedule(); // vuelve a la vista previa
   return msg.r;
@@ -681,14 +777,15 @@ $('#btnStl').addEventListener('click', exportSingles);
 $('#btnReset').addEventListener('click', () => {
   if (!confirm('¿Restablecer todos los parámetros?')) return;
   state.P = { ...DEFAULTS };
-  localStorage.removeItem(STORE);
+  safeDel(STORE);
   history.replaceState(null, '', location.pathname);
   buildParams();
   schedule();
 });
 
 buildParams();
+if (state.objects.length) runPack(true);
 rebuild();
 
 // Acceso para depuración y pruebas automatizadas.
-window.__rugged = { state, viewer, setParam };
+window.__rugged = { state, viewer, setParam, contentChanged, buildParams };

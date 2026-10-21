@@ -103,8 +103,11 @@ export const DEFAULTS = {
   supportPitch: 3,      // paso de la rejilla de los soportes
 
   // --- Contenido (SVG calcado de la pieza real) ---
-  objClearance: 1.0,    // holgura entre el contenido y la pared interior
-  objRotate: 0,         // giro del contenido en el interior
+  objClearance: 1.0,    // margen extra entre los huecos y la pared del inserto
+  objRotate: 0,         // (obsoleto) giro manual del contenido
+  objSpacing: 3,        // pared mínima entre alojamientos
+  objRotateAllow: true, // el acomodo puede girar los objetos 90/180/270°
+  contentFit: 'auto',   // 'auto' = la caja se ajusta al contenido | 'manual'
 
   // --- Calidad ---
   quality: 'preview',
@@ -139,105 +142,136 @@ export const BED_PRESETS = {
 /*  Esquema de la interfaz (la UI se genera automáticamente)                */
 /* ------------------------------------------------------------------------ */
 
+/**
+ * Pestañas de la interfaz, en el orden del flujo de trabajo.
+ *   caja → contenido → tapa → mecánica → impresión
+ */
+export const TABS = [
+  ['caja', 'Caja', 'Medidas, forma y estructura'],
+  ['contenido', 'Contenido', 'Objetos e insertos a medida'],
+  ['tapa', 'Tapa', 'Patrón y logo'],
+  ['mecanica', 'Mecánica', 'Bisagras, cierres y sellado'],
+  ['impresion', 'Impresión', 'Impresora, soportes y acabado'],
+];
+
+/**
+ * Cada grupo pertenece a una pestaña. Los controles con `adv: true` solo se
+ * muestran en "Modo experto"; `hint` es una ayuda de una línea.
+ */
 export const SCHEMA = [
-  { group: 'Espacio interior', items: [
-    { k: 'innerL', label: 'Largo interior', type: 'range', min: 20, max: 400, step: 0.5, unit: 'mm' },
-    { k: 'innerW', label: 'Ancho interior', type: 'range', min: 20, max: 400, step: 0.5, unit: 'mm' },
-    { k: 'baseDepth', label: 'Profundidad base', type: 'range', min: 5, max: 250, step: 0.5, unit: 'mm' },
-    { k: 'lidDepth', label: 'Profundidad tapa', type: 'range', min: 0, max: 120, step: 0.5, unit: 'mm' },
-    { k: 'lidMin', label: 'Tapa mínima (objetos a ras)', type: 'toggle' },
-    { k: 'innerR', label: 'Radio esquina interior', type: 'range', min: 0.5, max: 20, step: 0.5, unit: 'mm' },
-    { k: 'cornerCut', label: 'Esquinas recortadas (octógono)', type: 'range', min: 0, max: 80, step: 0.5, unit: 'mm' },
+  /* ---------------- Caja ---------------- */
+  { tab: 'caja', group: 'Medidas interiores', items: [
+    { k: 'innerL', label: 'Largo', type: 'range', min: 20, max: 400, step: 0.5, unit: 'mm', hint: 'Espacio útil, sin paredes' },
+    { k: 'innerW', label: 'Ancho', type: 'range', min: 20, max: 400, step: 0.5, unit: 'mm' },
+    { k: 'baseDepth', label: 'Profundidad de la base', type: 'range', min: 5, max: 250, step: 0.5, unit: 'mm' },
+    { k: 'lidDepth', label: 'Profundidad de la tapa', type: 'range', min: 0, max: 120, step: 0.5, unit: 'mm' },
+    { k: 'lidMin', label: 'Tapa lo más plana posible', type: 'toggle', hint: 'Para objetos que quedan a ras del borde' },
   ]},
-  { group: 'Contenido a medida', content: true, items: [
-    { k: 'objClearance', label: 'Holgura del contenido', type: 'range', min: 0, max: 5, step: 0.1, unit: 'mm' },
-    { k: 'objRotate', label: 'Giro del contenido', type: 'range', min: -180, max: 180, step: 0.5, unit: '°' },
-  ]},
-  { group: 'Estructura', items: [
-    { k: 'wall', label: 'Espesor de pared', type: 'range', min: 1.2, max: 5, step: 0.05, unit: 'mm' },
-    { k: 'floor', label: 'Espesor de fondo', type: 'range', min: 1.2, max: 5, step: 0.1, unit: 'mm' },
-    { k: 'top', label: 'Espesor de techo', type: 'range', min: 1.2, max: 5, step: 0.1, unit: 'mm' },
-    { k: 'bandH', label: 'Altura banda', type: 'range', min: 3, max: 12, step: 0.5, unit: 'mm' },
-    { k: 'bandProud', label: 'Vuelo banda (0 = auto)', type: 'range', min: 0, max: 8, step: 0.1, unit: 'mm' },
+  { tab: 'caja', group: 'Forma', items: [
+    { k: 'innerR', label: 'Radio de las esquinas', type: 'range', min: 0.5, max: 20, step: 0.5, unit: 'mm' },
+    { k: 'cornerCut', label: 'Esquinas recortadas (octógono)', type: 'range', min: 0, max: 80, step: 0.5, unit: 'mm', hint: 'Ayuda a que una caja larga quepa en la cama' },
     { k: 'cornerRibs', label: 'Nervios de esquina', type: 'toggle' },
   ]},
-  { group: 'Mecánica', items: [
-    { k: 'sizeClass', label: 'Clase de tamaño', type: 'select', options: [
-      ['auto', 'Automática'], ['S', 'S — pequeña'], ['M', 'M — mediana'], ['L', 'L — grande']] },
-    { k: 'pinMode', label: 'Pasadores', type: 'select', options: [
-      ['auto', 'Automático'], ['filament', 'Filamento 1.75 mm'], ['printed', 'Impresos (snap)']] },
-    { k: 'hingeCount', label: 'Bisagras (0 = auto)', type: 'range', min: 0, max: 4, step: 1, unit: '' },
-    { k: 'latchCount', label: 'Cierres (0 = auto)', type: 'range', min: 0, max: 4, step: 1, unit: '' },
-    { k: 'clearance', label: 'Holgura radial', type: 'range', min: 0.1, max: 0.5, step: 0.05, unit: 'mm' },
-    { k: 'axialGap', label: 'Holgura axial', type: 'range', min: 0.2, max: 0.8, step: 0.05, unit: 'mm' },
+  { tab: 'caja', group: 'Paredes', items: [
+    { k: 'wall', label: 'Pared', type: 'range', min: 1.2, max: 5, step: 0.05, unit: 'mm' },
+    { k: 'floor', label: 'Fondo', type: 'range', min: 1.2, max: 5, step: 0.1, unit: 'mm', adv: true },
+    { k: 'top', label: 'Techo de la tapa', type: 'range', min: 1.2, max: 5, step: 0.1, unit: 'mm', adv: true },
+    { k: 'bandH', label: 'Altura de la banda', type: 'range', min: 3, max: 12, step: 0.5, unit: 'mm', adv: true },
+    { k: 'bandProud', label: 'Vuelo de la banda (0 = auto)', type: 'range', min: 0, max: 8, step: 0.1, unit: 'mm', adv: true },
   ]},
-  { group: 'Sellado', items: [
-    { k: 'sealMode', label: 'Tipo de cierre', type: 'select', options: [
-      ['tpu', 'Junta TPU (hermético)'], ['labyrinth', 'Laberinto doble'], ['simple', 'Lengüeta simple']] },
-    { k: 'gasketCompression', label: 'Compresión junta', type: 'range', min: 0.15, max: 0.35, step: 0.01, unit: '' },
+  { tab: 'caja', group: 'Apilado y Gridfinity', gridfinity: true, items: [
+    { k: 'stackable', label: 'Apilable', type: 'toggle', hint: 'La base encaja sobre la tapa de otra caja igual' },
+    { k: 'gridfinity', label: 'Gridfinity', type: 'select', options: [
+      ['off', 'No'], ['baseplate', 'Placa interior (bins dentro)'], ['feet', 'Pies (caja sobre placa)']] },
   ]},
-  { group: 'Anti línea de contracción', items: [
-    { k: 'floorChamfer', label: 'Chaflán interior 45°', type: 'range', min: 0, max: 8, step: 0.2, unit: 'mm' },
-    { k: 'shadowLine', label: 'Ranuras de sombra automáticas', type: 'toggle' },
-    { k: 'snapToPrinter', label: 'Ajustar a capas/extrusión', type: 'toggle' },
-    { k: 'lineWidth', label: 'Ancho de extrusión', type: 'range', min: 0.3, max: 0.8, step: 0.01, unit: 'mm' },
-    { k: 'layerH', label: 'Altura de capa', type: 'range', min: 0.08, max: 0.32, step: 0.02, unit: 'mm' },
+
+  /* ---------------- Contenido ---------------- */
+  { tab: 'contenido', group: 'Objetos', content: true, items: [
+    { k: 'contentFit', label: 'Tamaño de la caja', type: 'select', options: [
+      ['auto', 'Ajustarlo al contenido'], ['manual', 'Usar las medidas de la pestaña Caja']] },
+    { k: 'objSpacing', label: 'Pared entre objetos', type: 'range', min: 1.2, max: 10, step: 0.2, unit: 'mm', hint: 'Más pared = inserto más rígido' },
+    { k: 'objRotateAllow', label: 'Permitir girar objetos', type: 'toggle', hint: 'Giros de 90° y 180° para encajarlos mejor' },
+    { k: 'objClearance', label: 'Margen hasta la pared', type: 'range', min: 0, max: 10, step: 0.5, unit: 'mm', adv: true },
   ]},
-  { group: 'Tapa', items: [
+  { tab: 'contenido', group: 'Inserto', items: [
+    { k: 'insertMode', label: 'Inserto de la base', type: 'select', options: [
+      ['off', 'Sin inserto'], ['blank', 'En blanco'], ['pockets', 'Con huecos para los objetos']] },
+    { k: 'fingerCount', label: 'Huecos para los dedos', type: 'select', options: [
+      ['auto', 'Automático (2)'], ['0', 'Ninguno'], ['1', 'Uno'], ['2', 'Dos']] },
+    { k: 'fingerD', label: 'Tamaño del hueco para dedo', type: 'range', min: 10, max: 40, step: 1, unit: 'mm' },
+    { k: 'pocketTol', label: 'Holgura del objeto', type: 'range', min: 0, max: 3, step: 0.1, unit: 'mm', hint: 'Juego entre el objeto y su hueco' },
+    { k: 'insertLid', label: 'Inserto en blanco para la tapa', type: 'toggle' },
+    { k: 'insertH', label: 'Altura (0 = auto)', type: 'range', min: 0, max: 200, step: 0.5, unit: 'mm', adv: true },
+    { k: 'insertTol', label: 'Holgura con la caja', type: 'range', min: 0, max: 1.5, step: 0.05, unit: 'mm', adv: true },
+    { k: 'insertDeck', label: 'Espesor de la cubierta', type: 'range', min: 0.8, max: 4, step: 0.2, unit: 'mm', adv: true },
+    { k: 'fingerPos', label: 'Posición de los huecos', type: 'range', min: -100, max: 100, step: 5, unit: '%', adv: true },
+  ]},
+
+  /* ---------------- Tapa ---------------- */
+  { tab: 'tapa', group: 'Diseño de la tapa', items: [
     { k: 'pattern', label: 'Patrón', type: 'select', options: [
       ['smooth', 'Liso'], ['hex', 'Hexagonal'], ['stripes', 'Estriado'], ['cross', 'Reforzado cruzado'],
       ['circuit', 'Sci‑fi: circuito'], ['radial', 'Sci‑fi: radial']] },
-    { k: 'relief', label: 'Modo', type: 'select', options: [
-      ['engrave', 'Grabado (recomendado)'], ['emboss', 'Relieve']] },
-    { k: 'patternDepth', label: 'Profundidad', type: 'range', min: 0.4, max: 2, step: 0.1, unit: 'mm' },
-    { k: 'patternSize', label: 'Tamaño de celda / paso', type: 'range', min: 4, max: 40, step: 0.5, unit: 'mm' },
-    { k: 'patternRib', label: 'Nervio / trazo', type: 'range', min: 0.8, max: 5, step: 0.1, unit: 'mm' },
-    { k: 'patternMargin', label: 'Margen', type: 'range', min: 2, max: 20, step: 0.5, unit: 'mm' },
-    { k: 'stripeAngle', label: 'Ángulo estriado', type: 'range', min: 0, max: 180, step: 5, unit: '°' },
-    { k: 'patternSeed', label: 'Semilla circuito', type: 'range', min: 1, max: 999, step: 1, unit: '' },
+    { k: 'relief', label: 'Acabado', type: 'select', options: [
+      ['engrave', 'Grabado (recomendado)'], ['emboss', 'En relieve']] },
+    { k: 'patternSize', label: 'Tamaño del patrón', type: 'range', min: 4, max: 40, step: 0.5, unit: 'mm' },
+    { k: 'patternDepth', label: 'Profundidad', type: 'range', min: 0.4, max: 2, step: 0.1, unit: 'mm', adv: true },
+    { k: 'patternRib', label: 'Grosor de línea', type: 'range', min: 0.8, max: 5, step: 0.1, unit: 'mm', adv: true },
+    { k: 'patternMargin', label: 'Margen al borde', type: 'range', min: 2, max: 20, step: 0.5, unit: 'mm', adv: true },
+    { k: 'stripeAngle', label: 'Ángulo (estriado)', type: 'range', min: 0, max: 180, step: 5, unit: '°', adv: true },
+    { k: 'patternSeed', label: 'Variante (circuito)', type: 'range', min: 1, max: 999, step: 1, unit: '', adv: true },
   ]},
-  { group: 'Logo SVG', svg: true, items: [
+  { tab: 'tapa', group: 'Logo', svg: true, items: [
     { k: 'svgSize', label: 'Tamaño', type: 'range', min: 5, max: 100, step: 1, unit: '%' },
-    { k: 'svgRotate', label: 'Rotación', type: 'range', min: -180, max: 180, step: 1, unit: '°' },
-    { k: 'svgOffsetX', label: 'Desplazamiento X', type: 'range', min: -150, max: 150, step: 0.5, unit: 'mm' },
-    { k: 'svgOffsetY', label: 'Desplazamiento Y', type: 'range', min: -150, max: 150, step: 0.5, unit: 'mm' },
+    { k: 'svgRotate', label: 'Giro', type: 'range', min: -180, max: 180, step: 1, unit: '°' },
+    { k: 'svgOffsetX', label: 'Mover en X', type: 'range', min: -150, max: 150, step: 0.5, unit: 'mm', adv: true },
+    { k: 'svgOffsetY', label: 'Mover en Y', type: 'range', min: -150, max: 150, step: 0.5, unit: 'mm', adv: true },
   ]},
-  { group: 'Insertos', items: [
-    { k: 'insertMode', label: 'Inserto de la base', type: 'select', options: [
-      ['off', 'Sin inserto'], ['blank', 'En blanco (hueco por debajo)'], ['pockets', 'Con alojamientos del contenido (SVG)']] },
-    { k: 'insertLid', label: 'Inserto en blanco para la tapa', type: 'toggle' },
-    { k: 'insertH', label: 'Altura (0 = auto)', type: 'range', min: 0, max: 200, step: 0.5, unit: 'mm' },
-    { k: 'insertTol', label: 'Holgura con la caja', type: 'range', min: 0, max: 1.5, step: 0.05, unit: 'mm' },
-    { k: 'pocketTol', label: 'Holgura del alojamiento', type: 'range', min: 0, max: 3, step: 0.1, unit: 'mm' },
-    { k: 'insertDeck', label: 'Espesor de cubierta', type: 'range', min: 0.8, max: 4, step: 0.2, unit: 'mm' },
-    { k: 'fingerCount', label: 'Huecos para dedos', type: 'select', options: [
-      ['auto', 'Automático (2)'], ['0', 'Ninguno'], ['1', 'Uno'], ['2', 'Dos']] },
-    { k: 'fingerD', label: 'Diámetro hueco dedo', type: 'range', min: 10, max: 40, step: 1, unit: 'mm' },
-    { k: 'fingerPos', label: 'Posición de los huecos', type: 'range', min: -100, max: 100, step: 5, unit: '%' },
+
+  /* ---------------- Mecánica ---------------- */
+  { tab: 'mecanica', group: 'Bisagras y cierres', items: [
+    { k: 'sizeClass', label: 'Robustez', type: 'select', options: [
+      ['auto', 'Automática según tamaño'], ['S', 'S — pequeña'], ['M', 'M — mediana'], ['L', 'L — grande']] },
+    { k: 'pinMode', label: 'Pasadores', type: 'select', options: [
+      ['auto', 'Automático'], ['filament', 'Trozo de filamento 1.75 mm'], ['printed', 'Impresos (a presión)']] },
+    { k: 'hingeCount', label: 'Bisagras (0 = auto)', type: 'range', min: 0, max: 4, step: 1, unit: '', adv: true },
+    { k: 'latchCount', label: 'Cierres (0 = auto)', type: 'range', min: 0, max: 4, step: 1, unit: '', adv: true },
+    { k: 'clearance', label: 'Holgura de pasadores', type: 'range', min: 0.1, max: 0.5, step: 0.05, unit: 'mm', hint: 'Súbela si los pasadores entran duros' },
+    { k: 'axialGap', label: 'Holgura entre nudillos', type: 'range', min: 0.2, max: 0.8, step: 0.05, unit: 'mm', adv: true },
   ]},
-  { group: 'Ecosistema', gridfinity: true, items: [
-    { k: 'gridfinity', label: 'Gridfinity', type: 'select', options: [
-      ['off', 'Desactivado'], ['baseplate', 'Placa base interior (bins dentro)'], ['feet', 'Pies (caja sobre placa)']] },
-    { k: 'stackable', label: 'Apilable', type: 'toggle' },
+  { tab: 'mecanica', group: 'Sellado', items: [
+    { k: 'sealMode', label: 'Cierre tapa‑base', type: 'select', options: [
+      ['tpu', 'Junta de TPU (hermético)'], ['labyrinth', 'Laberinto doble'], ['simple', 'Lengüeta simple']] },
+    { k: 'gasketCompression', label: 'Compresión de la junta', type: 'range', min: 0.15, max: 0.35, step: 0.01, unit: '', adv: true },
   ]},
-  { group: 'Impresora', items: [
+
+  /* ---------------- Impresión ---------------- */
+  { tab: 'impresion', group: 'Impresora', items: [
     { k: 'bedPreset', label: 'Modelo', type: 'select',
       options: Object.entries(BED_PRESETS).map(([k, v]) => [k, v.name]) },
-    { k: 'bedX', label: 'Cama X', type: 'range', min: 100, max: 500, step: 1, unit: 'mm' },
-    { k: 'bedY', label: 'Cama Y', type: 'range', min: 100, max: 500, step: 1, unit: 'mm' },
-    { k: 'bedZ', label: 'Altura Z', type: 'range', min: 100, max: 500, step: 1, unit: 'mm' },
+    { k: 'bedX', label: 'Cama X', type: 'range', min: 100, max: 500, step: 1, unit: 'mm', adv: true },
+    { k: 'bedY', label: 'Cama Y', type: 'range', min: 100, max: 500, step: 1, unit: 'mm', adv: true },
+    { k: 'bedZ', label: 'Altura Z', type: 'range', min: 100, max: 500, step: 1, unit: 'mm', adv: true },
+    { k: 'lineWidth', label: 'Ancho de línea', type: 'range', min: 0.3, max: 0.8, step: 0.01, unit: 'mm', adv: true },
+    { k: 'layerH', label: 'Altura de capa', type: 'range', min: 0.08, max: 0.32, step: 0.02, unit: 'mm', adv: true },
   ]},
-  { group: 'Soportes y adherencia', items: [
-    { k: 'printAids', label: 'Ayudas', type: 'select', options: [
-      ['auto', 'Automáticas (orejas, bisel, aletas)'], ['nofins', 'Bisel y orejas, sin aletas'], ['off', 'Desactivadas']] },
-    { k: 'aidsInPart', label: 'Incluir en el STL de la pieza', type: 'toggle' },
-    { k: 'finSpacing', label: 'Separación aletas (0 = auto)', type: 'range', min: 0, max: 80, step: 1, unit: 'mm' },
-    { k: 'finReach', label: 'Alcance aletas (0 = auto)', type: 'range', min: 0, max: 100, step: 5, unit: '%' },
-    { k: 'toothPitch', label: 'Paso de dientes', type: 'range', min: 3, max: 15, step: 0.5, unit: 'mm' },
-    { k: 'finGap', label: 'Holgura aleta (0 = auto)', type: 'range', min: 0, max: 1, step: 0.05, unit: 'mm' },
-    { k: 'overhangSupports', label: 'Soportar voladizos de partes salientes', type: 'toggle' },
-    { k: 'overhangAngle', label: 'Voladizo máximo sin soporte', type: 'range', min: 40, max: 65, step: 1, unit: '°' },
-    { k: 'supportPitch', label: 'Paso rejilla de soportes', type: 'range', min: 2, max: 8, step: 0.5, unit: 'mm' },
+  { tab: 'impresion', group: 'Soportes y adherencia', items: [
+    { k: 'printAids', label: 'Ayudas de impresión', type: 'select', options: [
+      ['auto', 'Automáticas (recomendado)'], ['nofins', 'Sin aletas'], ['off', 'Ninguna']],
+      hint: 'Orejas en diagonal; bisel, aletas y soportes si va inclinada' },
+    { k: 'aidsInPart', label: 'Soportes dentro del STL de la pieza', type: 'toggle' },
+    { k: 'overhangSupports', label: 'Soportar partes que sobresalen', type: 'toggle', adv: true },
+    { k: 'overhangAngle', label: 'Voladizo máximo sin soporte', type: 'range', min: 40, max: 65, step: 1, unit: '°', adv: true },
+    { k: 'supportPitch', label: 'Densidad de soportes (paso)', type: 'range', min: 2, max: 8, step: 0.5, unit: 'mm', adv: true },
+    { k: 'finSpacing', label: 'Separación de aletas (0 = auto)', type: 'range', min: 0, max: 80, step: 1, unit: 'mm', adv: true },
+    { k: 'finReach', label: 'Alcance de aletas (0 = auto)', type: 'range', min: 0, max: 100, step: 5, unit: '%', adv: true },
+    { k: 'toothPitch', label: 'Paso de dientes de aleta', type: 'range', min: 3, max: 15, step: 0.5, unit: 'mm', adv: true },
+    { k: 'finGap', label: 'Holgura de aleta (0 = auto)', type: 'range', min: 0, max: 1, step: 0.05, unit: 'mm', adv: true },
+  ]},
+  { tab: 'impresion', group: 'Acabado (línea de contracción)', items: [
+    { k: 'shadowLine', label: 'Ranuras que ocultan la línea', type: 'toggle' },
+    { k: 'floorChamfer', label: 'Chaflán interior', type: 'range', min: 0, max: 8, step: 0.2, unit: 'mm', adv: true },
+    { k: 'snapToPrinter', label: 'Ajustar medidas a capas y líneas', type: 'toggle', adv: true },
   ]},
 ];
 

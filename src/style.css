@@ -164,3 +164,64 @@ code { font: 11px var(--mono); }
   .info { grid-row: 3; max-height: none; }
   .mini input, .mini-range { width: 80px; }
 }
+
+/* ================= v6: pestañas, modo experto, resumen ================= */
+.params { display: flex; flex-direction: column; }
+.tabhead { position: sticky; top: 0; z-index: 2; background: var(--panel); border-bottom: 1px solid var(--line); }
+.tabs { display: flex; gap: 2px; padding: 8px 8px 0; overflow-x: auto; scrollbar-width: none; }
+.tabs::-webkit-scrollbar { display: none; }
+.tab {
+  flex: 1 1 auto; min-width: 0; border: 0; border-bottom: 2px solid transparent; border-radius: 6px 6px 0 0;
+  background: transparent; color: var(--muted); padding: 8px 4px; font-weight: 600; font-size: 12px;
+}
+.tab:hover { color: var(--text); border-color: transparent; }
+.tab.on { color: var(--text); border-bottom-color: var(--accent); background: var(--panel-2); }
+.tabsub { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 7px 14px; font-size: 11px; color: var(--muted); }
+.expert { display: inline-flex; align-items: center; gap: 5px; cursor: pointer; white-space: nowrap; }
+.hint { grid-column: 1 / -1; font-size: 11px; color: var(--muted); margin-top: -2px; }
+.field .unit { font: 11px var(--mono); }
+.linkbtn { background: none; border: 0; padding: 2px 0; color: var(--accent); font-weight: 600; text-align: left; cursor: pointer; }
+.svgbox .row { flex-wrap: wrap; }
+.svgbox .thumb img { max-width: 100%; max-height: 100%; }
+
+.objlist { display: flex; flex-direction: column; gap: 6px; }
+.obj { display: grid; grid-template-columns: 40px 1fr auto; grid-template-areas: "t i d" "t q q"; gap: 2px 8px; align-items: center; padding: 6px 8px; border: 1px solid var(--line); border-radius: 8px; background: var(--panel-2); }
+.obj .thumb { grid-area: t; width: 40px; height: 40px; }
+.obj .objinfo { grid-area: i; }
+.obj .qty { grid-area: q; justify-self: start; }
+.obj > button { grid-area: d; }
+.objinfo { min-width: 0; }
+.objinfo .name { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.qty { display: inline-flex; align-items: center; gap: 4px; font: 12px var(--mono); }
+.qty button { padding: 2px 8px; }
+.empty { font-size: 12px; color: var(--muted); line-height: 1.5; }
+.packinfo { color: var(--ok); }
+
+.card.summary { border-color: color-mix(in srgb, var(--accent) 45%, var(--line)); }
+.chips { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 8px; }
+.chip { font: 600 11px var(--sans); padding: 3px 8px; border-radius: 999px; background: var(--panel); border: 1px solid var(--line); color: var(--muted); }
+.chip.ok { color: var(--ok); border-color: color-mix(in srgb, var(--ok) 50%, var(--line)); }
+.chip.warn { color: var(--warn); border-color: color-mix(in srgb, var(--warn) 50%, var(--line)); }
+.card.alert { border-color: color-mix(in srgb, var(--warn) 55%, var(--line)); }
+.card.fold { padding: 0; }
+.card.fold > summary {
+  list-style: none; cursor: pointer; padding: 10px 12px; font-size: 11px; font-weight: 700;
+  text-transform: uppercase; letter-spacing: 0.1em; color: var(--muted); display: flex; justify-content: space-between;
+}
+.card.fold > summary::-webkit-details-marker { display: none; }
+.card.fold > summary::after { content: "+"; font: 14px var(--mono); }
+.card.fold[open] > summary::after { content: "−"; }
+.card.fold[open] > summary { color: var(--text); }
+.card.fold > :not(summary) { margin: 0 12px 10px; }
+.opt { display: flex; gap: 8px; align-items: flex-start; margin: 6px 0; }
+pre.log { white-space: pre-wrap; font: 11px var(--mono); margin: 0; max-height: 260px; overflow: auto; }
+
+/* Móvil: una sola columna con desplazamiento natural (visor, parámetros, resultados). */
+@media (max-width: 720px) {
+  html, body { height: auto; overflow: auto; }
+  .layout { display: flex; flex-direction: column; flex: none; }
+  .stage { height: 55vh; flex: none; order: -1; }
+  .params, .info { overflow: visible; max-height: none; flex: none; }
+  .tabhead { top: 0; }
+  .toolbar { gap: 6px 10px; }
+}
