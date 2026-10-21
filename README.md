@@ -141,6 +141,12 @@ deslizador nunca se acumulan cálculos atrasados.
   25 % más corto (12.6 mm frente a 16.8), 3 mm menos de fondo exterior y la
   base y la tapa mínimas ~1 mm más bajas que con la clase S. Se elige sola o
   en Mecánica → Robustez.
+* **Espesor mínimo de 2 líneas (v6.3):** el techo del hueco del barril del
+  cierre, bajo la ranura de la junta, tiene ≥ 1.2 mm (antes 0.5 mm: se
+  transparentaba y podía partirse); el laberinto doble solo se usa si caben
+  paredes y lengüetas de 2 líneas (si no, una sola ranura); el cartabón de la
+  bisagra de la tapa no deja aletas finas con el bisel de apilado. Una prueba
+  corta base y tapa en tres direcciones buscando zonas de menos de 0.9 mm.
 * **Sin soportes en todas las piezas planas:** un limitador de puentes
   añade nervios finos a cualquier celda del patrón de la tapa (grabado o
   relieve) más ancha que el puente máximo (ajustable, 10 mm por defecto).
@@ -229,7 +235,7 @@ Requiere Node.js ≥ 20 (en Windows: `winget install OpenJS.NodeJS.LTS`).
 npm install
 npm run dev      # servidor local con recarga en caliente → http://localhost:5173
 npm test         # pruebas geométricas, cama y montaje real
-npm run test:assembly  # mecánica completa, pasadores montables, puentes ≤ 10 mm, apilado
+npm run test:assembly  # mecánica completa, espesor ≥ 2 líneas, pasadores montables, puentes ≤ 10 mm, apilado
 npm run test:sweep   # barrido de 20 a 380 mm con registro en logs/
 npm run build    # regenera dist/rugged-box.html
 ```
