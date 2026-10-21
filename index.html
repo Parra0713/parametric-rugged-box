@@ -1,0 +1,58 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Rugged Box</title>
+  <meta name="description" content="Generador paramétrico de cajas de alta resistencia imprimibles en 3D (FDM)." />
+  <link rel="stylesheet" href="./src/style.css" />
+</head>
+<body>
+  <header class="top">
+    <div class="brand">
+      <svg viewBox="0 0 32 32" class="mark" aria-hidden="true">
+        <rect x="3" y="9" width="26" height="18" rx="3" fill="none" stroke="currentColor" stroke-width="2.4"/>
+        <path d="M3 15h26" stroke="currentColor" stroke-width="2.4"/>
+        <rect x="11" y="12.5" width="4" height="6" rx="1" fill="currentColor"/>
+        <rect x="17" y="12.5" width="4" height="6" rx="1" fill="currentColor"/>
+        <path d="M11 9V6h10v3" fill="none" stroke="currentColor" stroke-width="2.4"/>
+      </svg>
+      <div>
+        <h1>Rugged Box</h1>
+        <p>Generador paramétrico · FDM</p>
+      </div>
+    </div>
+    <div class="status" id="status"><span class="dot"></span><span id="statusText">Cargando motor…</span></div>
+    <div class="actions">
+      <button id="btnReset" class="ghost" title="Restaurar valores por defecto">Restablecer</button>
+      <button id="btnStl" class="ghost">STL por pieza</button>
+      <button id="btnZip" class="primary">Exportar todo (.zip)</button>
+    </div>
+  </header>
+
+  <main class="layout">
+    <aside class="panel params" id="params" aria-label="Parámetros"></aside>
+
+    <section class="stage">
+      <div class="viewport" id="viewport"></div>
+      <div class="toolbar">
+        <div class="seg" role="tablist" id="modeSeg">
+          <button data-mode="assembled" class="on">Montada</button>
+          <button data-mode="exploded">Explosionada</button>
+          <button data-mode="print">Placas</button>
+        </div>
+        <label class="mini">Apertura <input type="range" id="open" min="0" max="1" step="0.01" value="0" /></label>
+        <label class="chk"><input type="checkbox" id="inner" /> Volumen interior</label>
+        <label class="chk"><input type="checkbox" id="section" /> Corte</label>
+        <input type="range" id="sectionPos" class="mini-range" min="-150" max="150" step="0.5" value="0" title="Posición del corte (X)" />
+        <button id="btnFit" class="ghost sm" title="Encuadrar">Encuadrar</button>
+      </div>
+      <div class="busy" id="busy" hidden>Recalculando…</div>
+    </section>
+
+    <aside class="panel info" id="info" aria-label="Medidas y resultados"></aside>
+  </main>
+
+  <script type="module" src="./src/main.js"></script>
+</body>
+</html>

@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 120 120">
+  <!-- Logo de ejemplo: escudo con rayo (relleno) y un círculo de trazo -->
+  <path d="M60 6 L104 22 L100 70 C96 92 80 106 60 114 C40 106 24 92 20 70 L16 22 Z
+           M60 20 L30 31 L33 68 C36 84 46 94 60 100 C74 94 84 84 87 68 L90 31 Z" fill="#000" fill-rule="evenodd"/>
+  <path d="M66 30 L44 66 L58 66 L52 92 L78 52 L63 52 Z" fill="#000"/>
+  <circle cx="60" cy="60" r="56" fill="none" stroke="#000" stroke-width="3"/>
+</svg>
