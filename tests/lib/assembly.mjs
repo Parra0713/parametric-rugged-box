@@ -188,3 +188,52 @@ export function thicknessChecks(D, base, lid, minW = 0.9) {
   }
   return res;
 }
+
+/**
+ * Ajuste de las piezas sueltas (cierre y tapones), cuyos agujeros se imprimen
+ * verticales y salen más pequeños:
+ *  - agujero del barril del cierre ≥ pasador + 2·holgura + compensación, con
+ *    chaflán de entrada en las dos caras (la de la cama anula la pata de
+ *    elefante);
+ *  - tapón tipo pinza: agujero = filamento − 0.2 + compensación, ranura
+ *    lateral abierta (una sola pared en C) y chaflán de entrada.
+ * Diámetros medidos sobre la malla real (área del hueco en un corte).
+ */
+export function printFitChecks(r, D) {
+  const out = [];
+  const pinD = D.latchPinMode === 'filament' ? 1.75 : D.latchPinD;
+  const holeDiam = (cs, cy, cz) => {
+    // Hueco = disco de referencia menos material, quedándose con la pieza que contiene el centro.
+    const disk = CS().circle(3 * pinD, 48).translate([cy, cz]);
+    const free = disk.subtract(cs).decompose().filter((p) => p.bounds().max[0] - p.bounds().min[0] < 3 * pinD);
+    const a = free.reduce((s, p) => s + p.area(), 0);
+    return 2 * Math.sqrt(a / Math.PI);
+  };
+  const latch = r.parts.find((p) => p.id === 'latch');
+  if (latch) {
+    const m = toMan(latch.mesh).rotate([0, -90, 0]);     // corte en "z" = x; coordenadas (−z, y)
+    const w = D.latchW;
+    const at = (x) => holeDiam(m.slice(x), -D.zp, -D.sp);
+    const mid = at(0), e0 = at(-w / 2 + 0.05), e1 = at(w / 2 - 0.05);
+    // Holgura diametral de giro: filamento 0.25 mm (1.75 → 2.0); pasador impreso 2·clr.
+    const need = pinD + (D.latchPinMode === 'filament' ? 0.25 : 2 * D.clr) + D.holeComp - 0.03;
+    out.push({ ok: mid >= need, msg: `cierre: agujero del barril Ø${mid.toFixed(2)} (pasador ${pinD} + holgura + compensación ≥ ${need.toFixed(2)})` });
+    out.push({ ok: e0 >= mid + 0.5 && e1 >= mid + 0.5, msg: `cierre: chaflán de entrada en las dos caras (Ø${e0.toFixed(2)} / Ø${e1.toFixed(2)})` });
+  }
+  const cap = r.parts.find((p) => p.id === 'cap');
+  if (cap) {
+    const m = toMan(cap.mesh);
+    const s = m.slice(1.4);
+    const loops = s.toPolygons().length;
+    const want = 1.75 - 0.2 + D.holeComp;
+    const inner = m.intersect(M().cylinder(1.6, want / 2 - 0.02, want / 2 - 0.02, 48).translate([0, 0, 0.7])).volume();
+    const wall = m.intersect(M().cylinder(1.6, want / 2 + 0.15, want / 2 + 0.15, 48).translate([0, 0, 0.7])).volume();
+    // Boca: en los últimos 0.15 mm no hay material dentro de Ø(agujero + 0.4).
+    const mouth = m.intersect(M().cylinder(0.15, want / 2 + 0.2, want / 2 + 0.2, 48).translate([0, 0, 2.25])).volume();
+    const top = mouth < 0.01 ? want + 0.4 : want;
+    out.push({ ok: loops === 1 && s.decompose().length === 1, msg: `tapón: pinza con ranura abierta (${loops} contorno/s en el corte)` });
+    out.push({ ok: inner < 0.01 && wall > 0.05, msg: `tapón: agujero Ø${want.toFixed(2)} (filamento − 0.2 + compensación ${D.holeComp})` });
+    out.push({ ok: top >= want + 0.4 - 1e-9, msg: `tapón: chaflán de entrada (boca Ø${top.toFixed(2)})` });
+  }
+  return out;
+}

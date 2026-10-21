@@ -59,16 +59,25 @@ export function printedPin(D, span, pinD = D.pinD) {
   return { solid: pin, length: Lp + headT };
 }
 
-/** Tapón a presión para el pasador de filamento (agujero ciego). */
+/**
+ * Tapón tipo pinza para el pasador de filamento (agujero ciego).
+ * El agujero es 0.2 mm menor que el filamento (+ D.holeComp) y una ranura
+ * lateral de 0.6 mm parte la pared: las dos mitades se abren al empujar y
+ * agarran el filamento sin depender de la precisión exacta del agujero
+ * (antes 1.70 mm macizo: con la contracción del agujero no entraba).
+ * Se imprime con el fondo cerrado sobre la cama (agujero hacia arriba).
+ */
 export function filamentCap(D) {
   // Ø4 (D.capR): cabe bajo la banda junto a la mejilla del cierre. Chaflán
   // de 0.4 en la cara vista (fondo cerrado, sobre la cama al imprimir).
-  const R = D.capR ?? 2.0;
+  const R = D.capR ?? 2.0, rh = D.capHoleD / 2;
   const outer = M().union([M().cylinder(0.4, R - 0.4, R, D.seg), M().cylinder(2.0, R, R, D.seg).translate([0, 0, 0.4])]);
-  const hole = M().cylinder(2.0, D.capHoleD / 2, D.capHoleD / 2, D.seg).translate([0, 0, 0.6]);
-  // Chaflán de entrada para guiar el filamento.
-  const lead = M().cylinder(0.4, D.capHoleD / 2, D.capHoleD / 2 + 0.3, D.seg).translate([0, 0, 2.0001]);
-  return outer.subtract(hole).subtract(lead);
+  const hole = M().cylinder(2.0, rh, rh, D.seg).translate([0, 0, 0.6]);
+  // Chaflán de entrada de 0.4 mm para guiar el filamento.
+  const lead = M().cylinder(0.41, rh, rh + 0.4, D.seg).translate([0, 0, 2.0]);
+  // Ranura de la pinza: desde el agujero hasta fuera, por encima del fondo.
+  const slot = M().cube([R + 0.5, 0.6, 2.0]).translate([0, -0.3, 0.6]);
+  return outer.subtract(hole).subtract(lead).subtract(slot);
 }
 
 /** Longitud de filamento a cortar para un tramo. */

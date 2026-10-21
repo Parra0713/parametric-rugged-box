@@ -147,6 +147,13 @@ deslizador nunca se acumulan cálculos atrasados.
   paredes y lengüetas de 2 líneas (si no, una sola ranura); el cartabón de la
   bisagra de la tapa no deja aletas finas con el bisel de apilado. Una prueba
   corta base y tapa en tres direcciones buscando zonas de menos de 0.9 mm.
+* **Ajuste del filamento en piezas sueltas (v6.4):** los agujeros verticales
+  salen 0.1–0.3 mm más pequeños al imprimir. El cierre y los tapones suman una
+  **compensación de agujeros** ajustable (0.15 mm por defecto, Impresión →
+  Impresora); el agujero del cierre lleva chaflán de 0.4 mm en las dos caras
+  (la de la cama anula la pata de elefante) y el tapón es **tipo pinza**:
+  agujero 0.2 mm menor que el filamento con una ranura lateral que se abre y
+  agarra sin depender de la precisión exacta.
 * **Sin soportes en todas las piezas planas:** un limitador de puentes
   añade nervios finos a cualquier celda del patrón de la tapa (grabado o
   relieve) más ancha que el puente máximo (ajustable, 10 mm por defecto).

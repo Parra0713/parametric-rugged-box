@@ -83,6 +83,9 @@ registro interno del motor) y `logs/sweep-latest.json` (resumen). **Ejecuta
   la junta, `D.mem` ≥ 1.2 mm) solo se ven en el corte longitudinal adecuado:
   `thicknessChecks` corta en XY, YZ y XZ. El laberinto doble solo se usa si
   cabe con paredes y puntas de lengüeta de 2 líneas; si no, una ranura.
+- **Agujeros verticales de piezas sueltas** (cierre, tapones) salen más
+  pequeños: usa `D.latchBoreD` / `D.capHoleD`, que ya incluyen `D.holeComp`.
+  Los agujeros de base y tapa son horizontales (teardrop) y no la llevan.
 - Clases de tamaño en `MECH` (params.js): XS < 50 mm, S < 90, M < 200, L.
   Las cotas de la mecánica que dependen de la clase (`rkWall`, `rlWall`, `tl`,
   `hGap`, `hh`, `bandHlMin`, `kd0`) se leen con `Mx.x ?? valor de S/M/L`.
@@ -107,6 +110,8 @@ registro interno del motor) y `logs/sweep-latest.json` (resumen). **Ejecuta
 8. Mecánica completa en base y tapa (`mechChecks`).
 9. Espesor mínimo de 2 líneas (0.9 mm) en base y tapa, lengüetas incluidas
    (`thicknessChecks`: cortes XY, YZ por la mecánica y XZ por la banda).
+10. Piezas sueltas: agujero del cierre con holgura + `holeComp` y chaflán en
+   las dos caras; tapón tipo pinza (`printFitChecks`).
 
 ## Flujo con el PC del usuario
 

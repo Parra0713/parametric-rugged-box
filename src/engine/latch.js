@@ -25,7 +25,7 @@
  *    de la tapa es un puente entre las mejillas (la tapa se imprime boca
  *    abajo) y el techo del hueco de la base es otro puente.
  */
-import { CS, poly, circle, teardrop, yzExtrude, unionAll } from './geo.js';
+import { CS, M, poly, circle, teardrop, yzExtrude, unionAll } from './geo.js';
 
 const rect = (u0, u1, v0, v1) => poly([[u0, v0], [u1, v0], [u1, v1], [u0, v1]]);
 
@@ -42,7 +42,7 @@ export function latchProfile(D) {
   const ch = 0.35;
   hook = hook.subtract(poly([[yIn + 0.1, zc - 0.1], [yIn - ch, zc - 0.1], [yIn + 0.1, zc + ch]]));
   const lip = poly([[-sh + 0.01, zc + hh], [-sh - 1.2, zc + hh], [-sh - 1.2, zc + hh - 1.0], [-sh + 0.01, zc + hh - 2.2]]);
-  return CS().union([arm, plate, hook, lip]).subtract(circle(-sp, zp, D.latchHoleD / 2, D.seg));
+  return CS().union([arm, plate, hook, lip]).subtract(circle(-sp, zp, (D.latchBoreD ?? D.latchHoleD) / 2, D.seg));
 }
 
 /** Mejilla de la base (orejeta que sostiene el barril). */
@@ -74,6 +74,20 @@ function keeperProfile(D) {
 }
 
 /**
+ * Cuerpo del cierre con chaflanes de entrada de 0.4 mm en los dos extremos
+ * del agujero del barril: guían el filamento/pasador y el de la cara que va
+ * sobre la cama anula la pata de elefante que cerraba el agujero.
+ */
+function latchBody(D, w) {
+  const body = yzExtrude(latchProfile(D), -w / 2, w / 2);
+  const r = (D.latchBoreD ?? D.latchHoleD) / 2, c = 0.4;
+  const cone = M().cylinder(c + 0.01, r + c, r, D.seg);          // eje +Z: ancho abajo
+  const atNeg = cone.rotate([0, 90, 0]).translate([-w / 2 - 0.01, -D.sp, D.zp]);   // abre hacia −X
+  const atPos = cone.rotate([0, -90, 0]).translate([w / 2 + 0.01, -D.sp, D.zp]);   // abre hacia +X
+  return body.subtract(atNeg).subtract(atPos);
+}
+
+/**
  * Geometría de cierres.
  * @returns {{lugs, lugHoles, pockets, lidCheeks, keepers, latch}}
  */
@@ -98,7 +112,7 @@ export function latches(D) {
     pockets: unionAll(pockets),
     lidCheeks: unionAll(lidCheeks),
     keepers: unionAll(keepers),
-    latch: yzExtrude(latchProfile(D), -w / 2, w / 2),
+    latch: latchBody(D, w),
   };
 }
 

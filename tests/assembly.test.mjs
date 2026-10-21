@@ -6,6 +6,8 @@
  * 1. Pasadores: tamaños de 20 a 320 mm × {filamento, impreso} × {TPU,
  *    laberinto}: tapones y pasadores no se solapan con la caja, la tapa abre
  *    sin tocarlos, se pueden colocar y el filamento entra recto.
+ *    Agujeros de las piezas sueltas con holgura, compensación y chaflán;
+ *    tapón tipo pinza.
  * 2. Sin soportes: tapa con cada patrón (grabado y relieve) y apilable en
  *    varias formas: ningún puente de las piezas planas supera 10 mm.
  * 3. Apilado: la base de arriba asienta y queda bloqueada, también con bases
@@ -16,7 +18,7 @@
 import Module from 'manifold-3d';
 import { init, build, _internal } from '../src/engine/engine.js';
 import { DEFAULTS, derive } from '../src/engine/params.js';
-import { pinChecks, bridgeChecks, mechChecks, thicknessChecks } from './lib/assembly.mjs';
+import { pinChecks, bridgeChecks, mechChecks, thicknessChecks, printFitChecks } from './lib/assembly.mjs';
 
 await init(Module);
 const { hinges, latches, buildBase, buildLid } = _internal;
@@ -32,7 +34,7 @@ function run(name, p, { pins = true, bridges = false, stack = false } = {}) {
   const res = [];
   res.push(...mechChecks(D, H, L, base, lid));
   res.push(...thicknessChecks(D, base, lid));
-  if (pins) res.push(...pinChecks(r, D, base, lid));
+  if (pins) res.push(...pinChecks(r, D, base, lid), ...printFitChecks(r, D));
   if (bridges) res.push(...bridgeChecks(r, r.D.maxBridge));
   if (stack) {
     const z = D.Hb + D.Hl;

@@ -729,7 +729,8 @@ function readme(r, layout) {
   if (!fl.latch && D.latch.headSide) lines.push(`     Cierres: mete cada pasador ${D.latch.xs.map((x, i) => sideTxt(x, D.latch.headSide[i])).filter((v, i, a) => a.indexOf(v) === i).join(' / ')} (ese lado del eje queda libre).`);
   if (fl.hinge) lines.push(`  * Bisagra: corta ${fl.hingeQty}× ${fl.hinge} mm de filamento 1.75 mm, mételo recto y fíjalo con un tapón en cada extremo.`);
   if (fl.latch) lines.push(`  * Cierres: corta ${fl.latchQty}× ${fl.latch} mm de filamento 1.75 mm, mételo recto por el eje y fíjalo con los tapones.`);
-  if (fl.hinge || fl.latch) lines.push('    Tapones (Ø4): acércalos al extremo del filamento por debajo y empújalos ~2 mm hasta que hagan tope en la orejeta.');
+  if (fl.hinge || fl.latch) lines.push('    Tapones (Ø4, tipo pinza): acércalos al extremo del filamento por debajo y empújalos ~2 mm hasta que hagan tope en la orejeta; la ranura se abre y los sujeta.',
+    `    Si el filamento entra demasiado justo en el cierre o en los tapones, sube "Compensación de agujeros" (ahora ${D.holeComp ?? 0.15} mm) y reimprime solo esas piezas.`);
   if (D.stack) lines.push('  * Apilable: el pie de la base entra en el marco de la tapa de abajo y sus ranuras abrazan los nervios.');
   if (D.gfPlate) lines.push(`  * Gridfinity: ${D.inner.gridfinity.nx}×${D.inner.gridfinity.ny} celdas, bins de hasta ${D.inner.gridfinity.units}U.`);
   if (D.warn.length) lines.push('', 'AVISOS:', ...D.warn.map((w) => '  ! ' + w));

@@ -54,6 +54,7 @@ export const DEFAULTS = {
   shadowLine: true,     // ranuras de sombra en las alturas críticas
   snapToPrinter: true,  // ajustar cotas a capas y anchos de extrusión enteros
   lineWidth: 0.45,      // ancho de extrusión de las paredes
+  holeComp: 0.15,       // compensación de agujeros verticales en piezas sueltas (cierre, tapones)
   layerH: 0.2,          // altura de capa
 
   // --- Ecosistema ---
@@ -255,6 +256,8 @@ export const SCHEMA = [
     { k: 'bedX', label: 'Cama X', type: 'range', min: 100, max: 500, step: 1, unit: 'mm', adv: true },
     { k: 'bedY', label: 'Cama Y', type: 'range', min: 100, max: 500, step: 1, unit: 'mm', adv: true },
     { k: 'bedZ', label: 'Altura Z', type: 'range', min: 100, max: 500, step: 1, unit: 'mm', adv: true },
+    { k: 'holeComp', label: 'Compensación de agujeros', type: 'range', min: 0, max: 0.6, step: 0.05, unit: 'mm',
+      hint: 'Agranda los agujeros del cierre y los tapones. Súbela si el filamento entra justo; bájala si queda flojo' },
     { k: 'lineWidth', label: 'Ancho de línea', type: 'range', min: 0.3, max: 0.8, step: 0.01, unit: 'mm', adv: true },
     { k: 'layerH', label: 'Altura de capa', type: 'range', min: 0.08, max: 0.32, step: 0.02, unit: 'mm', adv: true },
   ]},
@@ -358,7 +361,16 @@ export function derive(P) {
   // Bisagra
   if (D.pinMode === 'filament') { D.pinD = 1.75; D.holeD = 2.0; }
   else { D.pinD = Mx.pinD; D.holeD = r2(Mx.pinD + 2 * D.clr); }
-  D.capHoleD = 1.70;
+  // Piezas sueltas (cierre y tapones): sus agujeros se imprimen VERTICALES,
+  // y un agujero vertical sale 0.1–0.3 mm más pequeño (perímetros que
+  // tiran hacia dentro + pata de elefante en la primera capa). holeComp se
+  // suma al diámetro. Los agujeros de base y tapa (horizontales, teardrop)
+  // no lo necesitan.
+  D.holeComp = r2(clamp(P.holeComp ?? 0.15, 0, 0.6));
+  // Tapón tipo pinza: agujero 0.2 mm por debajo del filamento (+ compensación)
+  // con una ranura lateral: la pared se abre y agarra sin exigir una medida
+  // exacta del agujero.
+  D.capHoleD = r2(1.75 - 0.2 + D.holeComp);
   D.rk = r2(D.holeD / 2 + Math.max(Mx.rkWall ?? 2.2, D.pinD * 0.55));
 
   // Cierre (pasador propio)
@@ -366,6 +378,9 @@ export function derive(P) {
   if (D.latchPinMode === 'filament') { D.latchPinD = 1.75; D.latchHoleD = 2.0; }
   else { D.latchPinD = Mx.latchPinD; D.latchHoleD = r2(Mx.latchPinD + 2 * D.clr); }
   D.rl = r2(D.latchHoleD / 2 + Math.max(Mx.rlWall ?? 1.6, D.latchPinD * 0.45));
+  // Agujero del barril del CIERRE (pieza suelta, agujero vertical al imprimir):
+  // ajuste de giro (pasador + 2·holgura) + compensación.
+  D.latchBoreD = r2(D.latchHoleD + D.holeComp);
 
   /* ---- Banda ---- */
   D.bo = r2(P.bandProud > 0 ? P.bandProud : Mx.bo);

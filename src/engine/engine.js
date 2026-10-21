@@ -675,7 +675,7 @@ const LID_ONLY = new Set(['pattern', 'relief', 'patternDepth', 'patternSize', 'p
   'top', 'lidDepth', 'lidMin', 'bedPreset', 'bedX', 'bedY', 'bedZ', 'printAids', 'aidsInPart',
   'finSpacing', 'finReach', 'toothPitch', 'finGap', 'overhangSupports', 'overhangAngle', 'supportPitch',
   'insertMode', 'insertLid', 'insertH', 'insertTol', 'pocketTol', 'insertDeck', 'fingerCount', 'fingerD',
-  'fingerPos', 'contentPolys', 'contentObjects', 'objClearance', 'objRotate', 'objSpacing', 'objRotateAllow', 'contentFit']);
+  'fingerPos', 'holeComp', 'contentPolys', 'contentObjects', 'objClearance', 'objRotate', 'objSpacing', 'objRotateAllow', 'contentFit']);
 function baseKey(P, normals) {
   const o = {};
   for (const k of Object.keys(P).sort()) if (!LID_ONLY.has(k)) o[k] = P[k];
