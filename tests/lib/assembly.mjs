@@ -9,11 +9,15 @@
  *       está tapado, desde fuera en línea recta y luego empujándolo 2 mm; el
  *       pasador impreso entra por el lado de la cabeza;
  *     - el trozo de filamento se puede meter recto por al menos un lado.
- *  2. Piezas impresas planas: ninguna zona sin apoyo (puente o voladizo) más
+ *  2. Mecánica completa: lo que bisagras y cierres tienen por fuera de la
+ *     banda está ENTERO en la base y en la tapa (un recorte —p. ej. el pie
+ *     de apilado— no choca con nada, así que las pruebas de colisión no lo ven).
+ *  3. Piezas impresas planas: ninguna zona sin apoyo (puente o voladizo) más
  *     ancha que el puente máximo admisible (10 mm por defecto, el límite a
  *     partir del cual Orca/Bambu Studio generan soporte).
  */
-import { M, CS } from '../../src/engine/geo.js';
+import { M, CS, prism } from '../../src/engine/geo.js';
+import { rrOffset } from '../../src/engine/seal.js';
 import { overhangRegions } from '../../src/engine/tilt.js';
 
 export const toMan = (mesh, mat) => {
@@ -112,4 +116,20 @@ export function bridgeChecks(r, maxBridge = 10) {
     out.push({ ok: w <= maxBridge + 0.3, msg: `${pt.name} plana: puente/voladizo más ancho ${w.toFixed(1)} mm${w ? ` a z=${at.toFixed(1)}` : ''} (máx ${maxBridge})` });
   }
   return out;
+}
+
+/**
+ * Mecánica completa por fuera de la banda (bisagras, orejetas, mejillas,
+ * retenes). H, L = hinges(D), latches(D).
+ */
+export function mechChecks(D, H, L, base, lid) {
+  const out = M().cube([2000, 2000, 2000], true).subtract(prism(rrOffset(D, D.F + 0.05), -500, 500));
+  const mb = H.base.add(L.lugs).intersect(out).subtract(H.baseHoles).subtract(L.lugHoles).subtract(L.pockets);
+  const ml = H.lid.add(L.lidCheeks).add(L.keepers).intersect(out).subtract(H.lidHoles);
+  const vb = mb.subtract(base).volume(), vl = ml.subtract(lid).volume();
+  const tb = mb.volume(), tl = ml.volume();
+  return [
+    { ok: vb <= Math.max(0.5, 0.002 * tb), msg: `base: bisagra y orejetas completas (faltan ${vb.toFixed(1)} de ${tb.toFixed(0)} mm³)` },
+    { ok: vl <= Math.max(0.5, 0.002 * tl), msg: `tapa: bisagra, mejillas y retenes completos (faltan ${vl.toFixed(1)} de ${tl.toFixed(0)} mm³)` },
+  ];
 }

@@ -8,12 +8,14 @@
  *    sin tocarlos, se pueden colocar y el filamento entra recto.
  * 2. Sin soportes: tapa con cada patrón (grabado y relieve) y apilable en
  *    varias formas: ningún puente de las piezas planas supera 10 mm.
- * 3. Apilado: la base de arriba asienta y queda bloqueada.
+ * 3. Apilado: la base de arriba asienta y queda bloqueada, también con bases
+ *    poco profundas (el pie de apilado no puede comerse la mecánica).
+ * En todos: bisagras y cierres completos en base y tapa.
  */
 import Module from 'manifold-3d';
 import { init, build, _internal } from '../src/engine/engine.js';
 import { DEFAULTS, derive } from '../src/engine/params.js';
-import { pinChecks, bridgeChecks } from './lib/assembly.mjs';
+import { pinChecks, bridgeChecks, mechChecks } from './lib/assembly.mjs';
 
 await init(Module);
 const { hinges, latches, buildBase, buildLid } = _internal;
@@ -27,6 +29,7 @@ function run(name, p, { pins = true, bridges = false, stack = false } = {}) {
   const base = buildBase(D, H, L, []);
   const lid = buildLid(D, P, H, L, null, []).lid;
   const res = [];
+  res.push(...mechChecks(D, H, L, base, lid));
   if (pins) res.push(...pinChecks(r, D, base, lid));
   if (bridges) res.push(...bridgeChecks(r, r.D.maxBridge));
   if (stack) {
@@ -65,6 +68,11 @@ for (const [name, p] of [
   ['120×80 octógono', { cornerCut: 18 }],
   ['160×100 + Gridfinity interior', { innerL: 168.5, innerW: 84.5, gridfinity: 'baseplate' }],
   ['200×140 tapa mínima', { innerL: 200, innerW: 140, baseDepth: 45, lidMin: true }],
+  // Bases poco profundas: antes el pie de apilado se comía bisagra y cierres.
+  ['20×20 base 5 + tapa mínima', { innerL: 20, innerW: 20, baseDepth: 5, lidMin: true }],
+  ['40×30 base 8', { innerL: 40, innerW: 30, baseDepth: 8, lidDepth: 5 }],
+  ['120×80 base 10', { baseDepth: 10, lidDepth: 5 }],
+  ['250×170 base 12', { innerL: 250, innerW: 170, baseDepth: 12, lidDepth: 6 }],
 ]) run(`apilable ${name}`, { ...p, stackable: true }, { bridges: true, stack: true });
 
 console.log(`\n${fails ? '✘' : '✔'} ${checks} comprobaciones, ${fails} fallos`);

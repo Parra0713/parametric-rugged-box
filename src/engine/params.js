@@ -38,7 +38,7 @@ export const DEFAULTS = {
   cornerRibs: true,     // nervios/parachoques verticales en las esquinas
 
   // --- Mecánica ---
-  sizeClass: 'auto',    // 'auto' | 'S' | 'M' | 'L'
+  sizeClass: 'auto',    // 'auto' | 'XS' | 'S' | 'M' | 'L'
   pinMode: 'auto',      // 'auto' | 'filament' | 'printed'
   clearance: 0.25,      // holgura radial de ajuste
   axialGap: 0.4,        // holgura axial entre nudillos/orejetas
@@ -233,7 +233,8 @@ export const SCHEMA = [
   /* ---------------- Mecánica ---------------- */
   { tab: 'mecanica', group: 'Bisagras y cierres', items: [
     { k: 'sizeClass', label: 'Robustez', type: 'select', options: [
-      ['auto', 'Automática según tamaño'], ['S', 'S — pequeña'], ['M', 'M — mediana'], ['L', 'L — grande']] },
+      ['auto', 'Automática según tamaño'], ['XS', 'XS — ultrapequeña (< 50 mm)'], ['S', 'S — pequeña'], ['M', 'M — mediana'], ['L', 'L — grande']],
+      hint: 'Escala bisagras y cierres; automática elige XS por debajo de 50 mm exteriores' },
     { k: 'pinMode', label: 'Pasadores', type: 'select', options: [
       ['auto', 'Automático'], ['filament', 'Trozo de filamento 1.75 mm'], ['printed', 'Impresos (a presión)']] },
     { k: 'hingeCount', label: 'Bisagras (0 = auto)', type: 'range', min: 0, max: 4, step: 1, unit: '', adv: true },
@@ -293,6 +294,11 @@ export const SCHEMA = [
  *    cierre y bisagra son refuerzos locales (proporción "maletín").
  */
 const MECH = {
+  // XS (ultrapequeña, < 50 mm por fuera): todo a escala, sin bajar de los
+  // mínimos de impresión (≥ 3.5 líneas alrededor de cada agujero, placas de
+  // 4 capas, cotas de 2 líneas). Ver la tabla comparativa en el README.
+  XS: { pinD: 2.5, latchPin: 'filament', latchPinD: 2.5, plate: 1.6, latchW: 7, cheek: 2.4, kth: 1.6, bo: 1.8, hinges: 1, latches: 1,
+    rkWall: 1.6, rlWall: 1.3, tl: 1.8, hGap: 0.4, hh: 1.6, bandHlMin: 2.4, kd0: 1.3 },
   S: { pinD: 3.0, latchPin: 'filament', latchPinD: 3.0, plate: 2.0, latchW: 10, cheek: 3.0, kth: 2.0, bo: 2.4, hinges: 1, latches: 1 },
   M: { pinD: 3.5, latchPin: 'printed', latchPinD: 3.0, plate: 2.4, latchW: 14, cheek: 3.5, kth: 2.4, bo: 3.0, hinges: 2, latches: 2 },
   L: { pinD: 5.0, latchPin: 'printed', latchPinD: 3.5, plate: 3.0, latchW: 20, cheek: 4.5, kth: 3.0, bo: 3.6, hinges: 2, latches: 2 },
@@ -343,9 +349,9 @@ export function derive(P) {
 
   /* ---- Clase de tamaño ---- */
   const maxDim = Math.max(D.Lo, D.Wo);
-  D.cls = P.sizeClass !== 'auto' ? P.sizeClass : maxDim < 90 ? 'S' : maxDim < 200 ? 'M' : 'L';
+  D.cls = P.sizeClass !== 'auto' ? P.sizeClass : maxDim < 50 ? 'XS' : maxDim < 90 ? 'S' : maxDim < 200 ? 'M' : 'L';
   const Mx = MECH[D.cls];
-  D.pinMode = P.pinMode !== 'auto' ? P.pinMode : D.cls === 'S' ? 'filament' : 'printed';
+  D.pinMode = P.pinMode !== 'auto' ? P.pinMode : D.cls === 'S' || D.cls === 'XS' ? 'filament' : 'printed';
   D.clr = P.clearance;
   D.ag = P.axialGap;
 
@@ -353,13 +359,13 @@ export function derive(P) {
   if (D.pinMode === 'filament') { D.pinD = 1.75; D.holeD = 2.0; }
   else { D.pinD = Mx.pinD; D.holeD = r2(Mx.pinD + 2 * D.clr); }
   D.capHoleD = 1.70;
-  D.rk = r2(D.holeD / 2 + Math.max(2.2, D.pinD * 0.55));
+  D.rk = r2(D.holeD / 2 + Math.max(Mx.rkWall ?? 2.2, D.pinD * 0.55));
 
   // Cierre (pasador propio)
   D.latchPinMode = P.pinMode === 'filament' ? 'filament' : P.pinMode === 'printed' ? 'printed' : Mx.latchPin;
   if (D.latchPinMode === 'filament') { D.latchPinD = 1.75; D.latchHoleD = 2.0; }
   else { D.latchPinD = Mx.latchPinD; D.latchHoleD = r2(Mx.latchPinD + 2 * D.clr); }
-  D.rl = r2(D.latchHoleD / 2 + Math.max(1.6, D.latchPinD * 0.45));
+  D.rl = r2(D.latchHoleD / 2 + Math.max(Mx.rlWall ?? 1.6, D.latchPinD * 0.45));
 
   /* ---- Banda ---- */
   D.bo = r2(P.bandProud > 0 ? P.bandProud : Mx.bo);
@@ -367,7 +373,7 @@ export function derive(P) {
 
   /* ---- Sellado ---- */
   D.sealMode = P.sealMode;
-  D.tl = 2.4;                        // longitud de la lengüeta
+  D.tl = Mx.tl ?? 2.4;               // longitud de la lengüeta
   if (D.sealMode === 'tpu') {
     // Juntas estáticas: compresión 20–30 % y llenado del alojamiento ≤ 85 %
     // (elastómero casi incompresible): gkw ≤ 0.85·gw·(1−c).
@@ -408,11 +414,11 @@ export function derive(P) {
   // Filamento: el eje queda por fuera de la cara de la banda/nervios de
   // esquina (sb) con holgura, para poder meter el trozo de filamento recto.
   if (D.latchPinMode === 'filament') D.sp = r2(Math.max(D.sp, D.sb + 0.9 + 0.2));
-  D.skt = r2(Math.max(D.sb + 1.6, 2 * (D.sp + 0.4) - D.sb - 0.3 + D.kc));
+  D.skt = r2(Math.max(D.sb + (Mx.kd0 ?? 1.6), 2 * (D.sp + 0.4) - D.sb - 0.3 + D.kc));
   D.kd = r2(D.skt - D.sb);
   D.spi = r2(D.skt + 0.4);
   D.sh = r2(D.spi + D.lt);
-  D.hh = Math.max(2.0, D.lt);
+  D.hh = Math.max(Mx.hh ?? 2.0, D.lt);
   // y en el marco interno (frente = −Y)
   D.yw = -D.sw; D.yfb = -D.sb; D.yp = -D.sp;
 
@@ -444,19 +450,34 @@ export function derive(P) {
   D.pd = P.patternDepth;
   D.stack = !!P.stackable;
   D.hs = 2.0;                        // altura del marco de apilado
-  D.fw = 3.0;                        // ancho del marco de apilado
   D.sclr = 0.3;                      // holgura de apilado
+  D.db = 1.6;                        // bisel de 45° del borde superior de la tapa (bajo zTop)
+  D.fwT = 1.6;                       // ancho de la cara superior del marco
+  D.chB = 0.4;                       // chaflán exterior inferior de la base (apilable)
+  D.frameIn = r2(D.t - D.db - D.hs - D.fwT);   // offset de la cara interior del marco
+  D.sFoot = r2(D.frameIn - D.sclr);           // offset del pie de la base
   // Puente máximo sin soporte: Orca/Bambu Studio soportan cualquier puente
   // de más de 10 mm (por defecto). Toda zona en el aire de una pieza impresa
   // plana se diseña por debajo de este valor.
   D.maxBridge = clamp(P.maxBridge || 10, 4, 30);
-  // Interfaz de apilado (ver lidRelief en pattern.js):
-  //  tapa → marco perimetral + nervios paralelos al lado largo, todo a altura
-  //         hs. Se imprime boca abajo: marco y nervios apoyan en la cama y la
-  //         piel puentea entre nervios ≤ 0.8·maxBridge (sin soportes).
-  //  base → pie estrecho de altura hf que entra en el marco, con ranuras donde
-  //         encajan los nervios (techo de ranura = puente de ~2.3 mm). El
-  //         marco bloquea en X e Y; las ranuras tienen holgura amplia.
+  // Interfaz de apilado (v6.2, ver lidRelief en pattern.js y buildBase):
+  //
+  //        base de arriba:  pared recta hasta la cama ─┐
+  //        faldón (cara interior a 45°) ──────────►  ╲ │
+  //        canal oculto (techo = puente ~1.9 mm) ─►  ▔▔│
+  //        pie ───────────►  ███  ┌──╱  ← marco: cara exterior a 45° (asiento cónico)
+  //        tapa de abajo:  piel ──┘ ╱    nervios dentro del marco
+  //                               ╱ ← bisel de 45° del borde de la tapa (db)
+  //
+  //  tapa → bisel de 45° en el borde que sube hasta el marco + nervios
+  //         paralelos al lado largo a altura hs. Boca abajo: marco y nervios
+  //         apoyan en la cama, todo lo demás crece a 45° o puentea ≤ 8 mm.
+  //  base → la pared baja RECTA hasta la cama (bisagras y cierres intactos,
+  //         igual que sin apilado); por debajo, un faldón con cara interior a
+  //         45° y un canal donde entra el marco, y el pie con ranuras para los
+  //         nervios. El asiento cónico centra y bloquea en X e Y.
+  //  (Antes el pie se ensanchaba con un cono de 45° que recortaba la mecánica
+  //   en bases poco profundas: hasta el 90 % de bisagra y orejetas.)
   D.hf = r2(D.hs + 0.3);             // altura del pie (> hs: apoya en la piel, no en el marco)
   D.rw = r2(Math.max(1.2, 3 * P.lineWidth));   // ancho de nervio
   D.gwS = r2(D.rw + 1.0);           // ancho de ranura del pie (0.5 mm por lado)
@@ -495,7 +516,7 @@ export function derive(P) {
   if (D.stack) {
     // Nervios paralelos al lado largo (menos nervios y ranuras más largas y
     // rectas en la base), con paso ≤ 0.8·maxBridge + nervio entre bordes.
-    const inW = D.Wi + 2 * (D.t - D.fw);
+    const inW = D.Wi + 2 * D.frameIn;
     const pitch = 0.8 * D.maxBridge + D.rw;
     const n = Math.max(0, Math.ceil(inW / pitch) - 1);
     D.stackRibs.ys = Array.from({ length: n }, (_, i) => r2(-inW / 2 + (inW * (i + 1)) / (n + 1)));
@@ -514,7 +535,7 @@ export function derive(P) {
   D.Db = r2(D.Hb - D.floorTop);
 
   // Tapa: banda + retén. Altura mínima para alojar el retén y la carcasa.
-  D.bandHl = r2(snapH(Math.max(3.0, D.kth + 1.0)));
+  D.bandHl = r2(snapH(Math.max(Mx.bandHlMin ?? 3.0, D.kth + 1.0)));
   const HlMin = r2(D.bandHl + 1.6);
   const DlMin = r2(Math.max(0, HlMin - D.topT));
   let Dl = P.lidMin ? DlMin : P.lidDepth;
@@ -530,7 +551,7 @@ export function derive(P) {
   D.zc = r2(D.zkt - D.pre);                  // cara de agarre del gancho
 
   /* ---- Bisagra ---- */
-  D.hGap = 0.5;
+  D.hGap = Mx.hGap ?? 0.5;
   D.yb = D.Wi / 2 + D.F;                     // cara trasera de la banda
   D.ya = r2(D.yb + D.hGap + D.rk);
   // Eje a la altura de la PUNTA de la lengüeta: al abrir, la lengüeta sale

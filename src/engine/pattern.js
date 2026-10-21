@@ -15,7 +15,7 @@
  * Todo se trabaja en 2D (CrossSection) y se extruye una única vez: es la
  * forma más barata de generar cientos de celdas.
  */
-import { CS, poly, prism, unionAll } from './geo.js';
+import { CS, poly, prism, frustum, unionAll } from './geo.js';
 import { rrOffset, stackLines } from './seal.js';
 
 /** Región útil de la cara superior. */
@@ -285,22 +285,23 @@ export function lidRelief(D, P, svg) {
   let logo = logoSection(svg);
 
   if (D.stack) {
-    // Interfaz de apilado: marco perimetral + nervios paralelos al lado largo,
-    // misma altura hs. Impresa boca abajo, marco y nervios apoyan en la cama
-    // y la piel de la tapa solo puentea entre nervios (≤ 0.8·maxBridge: sin
-    // soportes). El pie de la caja de arriba entra en el marco y sus ranuras
-    // abrazan los nervios.
-    const outerA = rrOffset(D, D.t - 0.5);
-    const inner = rrOffset(D, D.t - D.fw);
-    let raised = outerA.subtract(inner);
-    const ribs = stackLines(D, D.rw, 400);
-    if (ribs) raised = raised.add(ribs.intersect(inner.offset(-0.01)));
+    // Interfaz de apilado: marco con cara exterior a 45° (continúa el bisel
+    // del borde de la tapa: asiento cónico) + nervios paralelos al lado
+    // largo, altura hs. Impresa boca abajo, marco y nervios apoyan en la cama
+    // y la piel solo puentea entre nervios (≤ 0.8·maxBridge: sin soportes).
+    const o0 = D.t - D.db;                         // cara exterior del marco en zTop
+    const inner = rrOffset(D, D.frameIn);
+    const frame = frustum(rrOffset(D, o0), zTop - 0.01, rrOffset(D, o0 - D.hs), zTop + D.hs)
+      .subtract(prism(inner, zTop - 1, zTop + D.hs + 1));
+    let ribs = stackLines(D, D.rw, 400);
+    ribs = ribs ? ribs.intersect(inner.offset(-0.01)) : null;
     // Garantía: cualquier zona entre nervios más ancha que el límite (p. ej.
     // en un octógono) recibe un nervio extra.
-    const lim = limitBridges(inner.subtract(raised), D.maxBridge, D.rw);
-    if (lim.split) raised = inner.subtract(lim.cs).add(outerA.subtract(inner));
+    const free = ribs ? inner.subtract(ribs) : inner;
+    const lim = limitBridges(free, D.maxBridge, D.rw);
+    if (lim.split) ribs = inner.subtract(lim.cs || CS());
     if (D.pattern !== 'smooth' || logo) warn.push('Apilable: la cara superior de la tapa es la interfaz de apilado; el patrón y el logo no se aplican.');
-    return { cut: null, add: prism(raised, zTop - 0.01, zTop + D.hs), warn };
+    return { cut: null, add: ribs ? frame.add(prism(ribs, zTop - 0.01, zTop + D.hs)) : frame, warn };
   }
 
   const area = patternArea(D, P);

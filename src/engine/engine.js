@@ -126,9 +126,10 @@ function buildBase(D, H, L, report) {
   }
   const ft = D.floorTop;
 
+  const chB = D.stack ? D.chB : 0.5;
   const outer = D.gfFeet
     ? prism(rr(t), 0, Hb)
-    : unionAll([frustum(rr(t - 0.5), 0, rr(t), 0.5), prism(rr(t), 0.5, Hb)]);
+    : unionAll([frustum(rr(t - chB), 0, rr(t), chB), prism(rr(t), chB, Hb)]);
   // Banda con chaflán inferior de 45° (área de capa creciente, sin voladizos).
   const zb = Hb - D.bandH;
   const zc = Math.max(0, zb - bo);
@@ -143,7 +144,7 @@ function buildBase(D, H, L, report) {
 
   // Frente 3: análisis por capas → ranuras de sombra donde cae el tiempo de capa.
   const crit = criticalLayers(core, D.lh, Hb);
-  const zLo = D.stack ? D.hs + D.fw + D.sclr + 1 : 1.0;
+  const zLo = D.stack ? D.hf + 1 : 1.0;
   const zHi = zc - 1.2;
   const grooves = [];
   for (const c of crit) {
@@ -158,8 +159,8 @@ function buildBase(D, H, L, report) {
   // marca horizontal y protegen las esquinas en caídas).
   if (D.ribs) {
     let bump = unionAll([
-      D.gfFeet ? prism(rr(F), 0, 0.5) : frustum(rr(F - 0.5), 0, rr(F), 0.5),
-      prism(rr(F), 0.5, Hb),
+      D.gfFeet ? prism(rr(F), 0, chB) : frustum(rr(F - chB), 0, rr(F), chB),
+      prism(rr(F), chB, Hb),
     ]).intersect(prism(cornerZones(D).subtract(rr(t - 0.3)), -1, Hb + 1));   // solo por fuera de la pared
     for (const z of grooves) bump = bump.subtract(vGroove(D, F, z));
     core = core.add(bump);
@@ -181,23 +182,17 @@ function buildBase(D, H, L, report) {
   for (const g of grooveCut(D)) body = body.subtract(g);
   body = body.subtract(L.pockets).subtract(H.baseHoles).subtract(L.lugHoles);
 
-  // Apilado: la parte inferior se estrecha (vertical + 45°) para encajar en
-  // el marco de la tapa de la caja de abajo.
+  // Apilado: la pared baja recta hasta la cama (la mecánica no se toca). Por
+  // debajo: faldón con cara interior a 45° (paralela a la cara exterior del
+  // marco de la tapa de abajo + holgura) y canal hasta hf donde entra el
+  // marco; dentro, el pie con ranuras para los nervios.
   if (D.stack) {
-    // Pie de apilado: más estrecho que el marco de la tapa (holgura sclr),
-    // altura hf, y luego se ensancha a 45° (imprimible sin soporte).
-    const s0 = t - D.fw - D.sclr;
-    const big = F + 20;
-    const env = unionAll([
-      frustum(rr(s0 - 0.4), 0, rr(s0), 0.4),
-      prism(rr(s0), 0.4, D.hf),
-      frustum(rr(s0), D.hf, rr(big), D.hf + (big - s0)),
-      prism(rr(big), D.hf + (big - s0) - 0.01, Hb + 60),
-    ]);
-    body = body.intersect(env);
-    // Ranuras del pie donde encajan los nervios de la tapa de abajo.
+    const a = t - D.db + D.sclr;                 // cara interior del faldón en z = 0
+    const channel = frustum(rr(a), -0.01, rr(a - D.hf - 0.01), D.hf)
+      .subtract(prism(rr(D.sFoot), -1, D.hf + 1));
+    body = body.subtract(channel);
     const slots = stackLines(D, D.gwS, 400);
-    if (slots) body = body.subtract(prism(slots.intersect(rr(s0 + 1)), -1, D.hs + 0.3));
+    if (slots) body = body.subtract(prism(slots.intersect(rr(D.sFoot + 1)), -1, D.hf));
   }
   if (D.gfFeet) body = body.add(gridfinityFeet(D));
   return body;
@@ -231,7 +226,8 @@ function buildLid(D, P, H, L, svg, report) {
   const { t, Hb, Hl, F, bo } = D;
   const fc = D.fcl;
   const zB = Hb, zT = Hb + Hl;
-  const outer = unionAll([prism(rr(t), zB, zT - 0.5), frustum(rr(t), zT - 0.5, rr(t - 0.5), zT)]);
+  const ce = D.stack ? D.db : 0.5;              // apilable: bisel de 45° que sube al marco
+  const outer = unionAll([prism(rr(t), zB, zT - ce), frustum(rr(t), zT - ce, rr(t - ce), zT)]);
   const zbt = zB + D.bandHl;
   const zc = Math.min(zT - 0.5, zbt + bo);
   const band = unionAll([prism(rr(F), zB, zbt), frustum(rr(F), zbt, rr(F - (zc - zbt)), zc)]);
