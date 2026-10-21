@@ -15,6 +15,7 @@ import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 
 const COLORS = {
+  insert: 0x7fb3d5, insertLid: 0xa9cce3,
   base: 0x343a3f, lid: 0xd9601a, latch: 0xe8b10c, gasket: 0x1fa596,
   hingePin: 0xc8cbce, latchPin: 0xc8cbce, cap: 0xc8cbce,
 };
@@ -190,6 +191,11 @@ export class Viewer {
         } else if (p.id === 'latch') {
           m = about(assembly.latch.y, assembly.latch.z, latchAng).multiply(m);
           m = exOff(0, -30, 0).multiply(m);
+        } else if (p.id === 'insert') {
+          m = exOff(0, 0, D.Hl + D.Db + 70).multiply(m);
+        } else if (p.id === 'insertLid') {
+          m = about(assembly.hinge.y, assembly.hinge.z, -lidAng).multiply(m);
+          m = exOff(0, 0, D.Hl + 35 + 25).multiply(m);
         } else if (p.id === 'gasket') {
           m = exOff(0, 0, D.Hl * 0.5 + 15).multiply(m);
         } else if (p.id === 'hingePin' || (p.id === 'cap' && m.elements[13] > 0)) {

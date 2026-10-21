@@ -262,7 +262,8 @@ async function rebuild() {
   const busy = $('#busy');
   const t = setTimeout(() => { busy.hidden = false; }, 150);
   const svg = placeSVG(state.svgRaw, state.P);
-  const msg = await engine.request({ ...state.P, quality: 'preview' }, svg, true);
+  const placed = placeContent(state.objRaw, state.P);
+  const msg = await engine.request({ ...state.P, quality: 'preview', contentPolys: placed ? placed.internal : null }, svg, true);
   clearTimeout(t);
   if (msg.superseded) return;
   busy.hidden = true;
@@ -344,7 +345,7 @@ function computeLayout(res) {
 /* ------------------------------------------------------------------ */
 /*  Panel de información                                              */
 /* ------------------------------------------------------------------ */
-const COLORS = { base: '#343a3f', lid: '#d9601a', latch: '#e8b10c', gasket: '#1fa596', hingePin: '#c8cbce', latchPin: '#c8cbce', cap: '#c8cbce' };
+const COLORS = { insert: '#7fb3d5', insertLid: '#a9cce3', base: '#343a3f', lid: '#d9601a', latch: '#e8b10c', gasket: '#1fa596', hingePin: '#c8cbce', latchPin: '#c8cbce', cap: '#c8cbce' };
 const mm = (v) => `${Number(v).toFixed(2).replace(/\.?0+$/, '')} mm`;
 
 function kv(rows) {
@@ -473,6 +474,23 @@ function renderInfo() {
         el('div', { class: 'small' }, p.material)),
       el('td', {}, `${(p.volume / 1000).toFixed(1)} cm³`)))))));
 
+  if (state.result.D.insert) {
+    const I2 = state.result.D.insert;
+    info.append(el('section', { class: 'card' }, el('h3', {}, 'Inserto'),
+      kv([['Altura', mm(I2.height)], ['Alojamientos', String(I2.pockets)], ['Huecos para dedos', String(I2.notches.length)]]),
+      el('p', { class: 'small' }, 'Hueco por debajo: solo paredes de 2 líneas, cubierta y nervios. Se imprime con la cubierta sobre la cama.')));
+  }
+  // Registro de la construcción (también descargable para depurar).
+  const logBtn = el('button', { class: 'ghost' }, 'Descargar');
+  logBtn.addEventListener('click', () => download(JSON.stringify({
+    fecha: new Date().toISOString(), version: '5', parametros: { ...state.P, contentPolys: undefined },
+    contenido: state.objName || null, logo: state.svgName || null, avisos: D.warn, registro: D.log,
+    piezas: parts.map((p) => ({ id: p.key, nombre: p.name, tri: p.tris, comp: p.components, vol: p.volume, estado: p.status, inclinada: p.tilt || null })),
+  }, null, 2), `rugged-box-registro_${Date.now()}.json`, 'application/json'));
+  info.append(el('details', { class: 'card' }, el('summary', { class: 'small' }, `Registro (${(D.log || []).length} líneas)`),
+    el('div', { style: 'text-align:right;margin:6px 0' }, logBtn),
+    el('pre', { style: 'white-space:pre-wrap;font:11px var(--mono);margin:0;max-height:260px;overflow:auto' }, (D.log || []).join('\n'))));
+
   if (D.warn.length) {
     info.append(el('section', { class: 'card' }, el('h3', {}, 'Avisos'),
       el('ul', { class: 'warn' }, D.warn.map((w) => el('li', {}, w)))));
@@ -485,7 +503,8 @@ function renderInfo() {
 async function finalBuild() {
   const svg = placeSVG(state.svgRaw, state.P);
   let msg;
-  do { msg = await engine.request({ ...state.P, quality: 'final' }, svg, false); } while (msg.superseded);
+  const placed = placeContent(state.objRaw, state.P);
+  do { msg = await engine.request({ ...state.P, quality: 'final', contentPolys: placed ? placed.internal : null }, svg, false); } while (msg.superseded);
   if (!msg.ok) throw new Error(msg.error);
   schedule(); // vuelve a la vista previa
   return msg.r;
@@ -519,7 +538,7 @@ function printMesh(p, angle) {
 const IDENT = [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1];
 
 const fileName = (p) => FILE[p.id] + (p.key !== p.id ? '_' + (Number(p.key.replace(/\D/g, '')) + 1) : '');
-const FILE = { base: 'base', lid: 'tapa', latch: 'cierre', gasket: 'junta_TPU', hingePin: 'pasador_bisagra', latchPin: 'pasador_cierre', cap: 'tapon_pasador' };
+const FILE = { insert: 'inserto_base', insertLid: 'inserto_tapa',  base: 'base', lid: 'tapa', latch: 'cierre', gasket: 'junta_TPU', hingePin: 'pasador_bisagra', latchPin: 'pasador_cierre', cap: 'tapon_pasador' };
 
 async function exportZip() {
   const btn = $('#btnZip');
