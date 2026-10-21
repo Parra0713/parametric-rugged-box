@@ -85,19 +85,10 @@ function filterSmall(cs, minArea) {
   return parts.length ? CS().compose(parts) : null;
 }
 
-/**
- * Construye el logo a partir de los datos preprocesados en el hilo principal
- * (svg.js): rellenos como polígonos con agujeros y trazos como polilíneas con
- * grosor. Todo ya está escalado a mm y colocado en coordenadas de la tapa.
- */
-export function logoSection(svg) {
-  if (!svg) return null;
+/** Convierte polilíneas con grosor en una sección 2D (segmentos + uniones). */
+export function strokesSection(strokes) {
   const parts = [];
-  for (const sh of svg.fills || []) {
-    if (!sh.outer || sh.outer.length < 3) continue;
-    parts.push(CS().ofPolygons([sh.outer, ...(sh.holes || [])], 'EvenOdd'));
-  }
-  for (const st of svg.strokes || []) {
+  for (const st of strokes) {
     const r = st.width / 2;
     if (r <= 0.05) continue;
     const pts = st.points;
@@ -112,24 +103,165 @@ export function logoSection(svg) {
       }
     }
   }
+  return parts.length ? CS().union(parts) : null;
+}
+
+/** Generador pseudoaleatorio determinista (mulberry32): mismo dibujo con la misma semilla. */
+function rng(seed) {
+  let a = seed >>> 0;
+  return () => {
+    a = (a + 0x6d2b79f5) >>> 0;
+    let t = Math.imul(a ^ (a >>> 15), 1 | a);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+/**
+ * Sci‑fi "circuito": pistas ortogonales y a 45° sobre una rejilla de paso p,
+ * que salen de los bordes y terminan en pads (como una PCB). Las pistas no se
+ * cruzan: cada nodo de la rejilla solo se ocupa una vez.
+ */
+function circuitCells(D, P, area) {
+  const b = area.bounds();
+  const p = Math.max(P.patternSize / 2, P.patternRib * 2.5);
+  const nx = Math.floor((b.max[0] - b.min[0]) / p) - 1;
+  const ny = Math.floor((b.max[1] - b.min[1]) / p) - 1;
+  if (nx < 2 || ny < 2) return null;
+  const x0 = (b.min[0] + b.max[0]) / 2 - ((nx - 1) * p) / 2;
+  const y0 = (b.min[1] + b.max[1]) / 2 - ((ny - 1) * p) / 2;
+  const used = new Set();
+  const key = (i, j) => i * 10007 + j;
+  const rand = rng(P.patternSeed | 0);
+  const dirs = [[1, 0], [0, 1], [-1, 0], [0, -1], [1, 1], [1, -1], [-1, 1], [-1, -1]];
+  const strokes = [], pads = [];
+  const nTraces = Math.round((nx * ny) / 6);
+  for (let k = 0; k < nTraces; k++) {
+    let i = Math.floor(rand() * nx), j = Math.floor(rand() * ny);
+    if (used.has(key(i, j))) continue;
+    used.add(key(i, j));
+    const pts = [[x0 + i * p, y0 + j * p]];
+    let d = dirs[Math.floor(rand() * 4)];
+    const len = 3 + Math.floor(rand() * 8);
+    for (let s = 0; s < len; s++) {
+      if (rand() < 0.35) {          // giro a 45° (estética PCB)
+        const opts = dirs.filter((q) => q[0] * d[0] + q[1] * d[1] > 0 && (q[0] !== d[0] || q[1] !== d[1]));
+        d = opts[Math.floor(rand() * opts.length)];
+      }
+      const ni = i + d[0], nj = j + d[1];
+      if (ni < 0 || nj < 0 || ni >= nx || nj >= ny || used.has(key(ni, nj))) break;
+      // Evita cruces en diagonal.
+      if (d[0] && d[1] && used.has(key(i + d[0], j)) && used.has(key(i, j + d[1]))) break;
+      i = ni; j = nj; used.add(key(i, j));
+      pts.push([x0 + i * p, y0 + j * p]);
+    }
+    if (pts.length < 2) continue;
+    strokes.push({ points: pts, width: P.patternRib });
+    pads.push(CS().circle(P.patternRib * 1.3, 16).translate(pts[0]));
+    const end = pts[pts.length - 1];
+    pads.push(rand() < 0.5
+      ? CS().circle(P.patternRib * 1.3, 16).translate(end)
+      : CS().square([P.patternRib * 2.6, P.patternRib * 2.6], true).translate(end));
+  }
+  const tr = strokesSection(strokes);
+  if (!tr) return null;
+  return CS().union([tr, ...pads]).intersect(area.offset(-P.patternRib, 'Round', 2, 24));
+}
+
+/**
+ * Sci‑fi "radial": anillos concéntricos segmentados y radios, como un
+ * blasón/HUD. Los segmentos se alternan para que ninguna isla quede suelta.
+ */
+function radialCells(D, P, area) {
+  const b = area.bounds();
+  const R = Math.min(b.max[0] - b.min[0], b.max[1] - b.min[1]) / 2 - P.patternRib;
+  const p = Math.max(P.patternSize * 0.6, P.patternRib * 3);
+  const rib = P.patternRib;
+  const parts = [CS().circle(Math.max(rib * 1.5, p * 0.35), 48)];
+  const rand = rng(P.patternSeed | 0);
+  for (let r = p; r < R; r += p) {
+    const ring = CS().circle(r + rib / 2, 96).subtract(CS().circle(r - rib / 2, 96));
+    const n = 4 + 2 * Math.floor(r / p);
+    const sectors = [];
+    for (let k = 0; k < n; k++) {
+      if ((k + Math.floor(r / p)) % 3 === 0) continue;       // huecos alternados
+      const a0 = (k / n) * 360, a1 = ((k + 0.82) / n) * 360;
+      const pts = [[0, 0]];
+      for (let a = a0; a <= a1; a += 4) pts.push([Math.cos(a * Math.PI / 180) * (R + p), Math.sin(a * Math.PI / 180) * (R + p)]);
+      sectors.push(poly(pts));
+    }
+    if (sectors.length) parts.push(ring.intersect(CS().union(sectors)));
+  }
+  const nSp = 8;
+  const off = rand() * 22.5;
+  for (let k = 0; k < nSp; k++) {
+    const a = off + (k * 360) / nSp;
+    parts.push(CS().square([R * 2.2, rib], false).translate([0, -rib / 2]).rotate(a));
+  }
+  return CS().union(parts).intersect(area.offset(-rib, 'Round', 2, 24));
+}
+
+/**
+ * Construye el logo a partir de los datos preprocesados en el hilo principal
+ * (svg.js): rellenos como polígonos con agujeros y trazos como polilíneas con
+ * grosor, ya en mm y en el marco interno.
+ */
+export function logoSection(svg) {
+  if (!svg) return null;
+  const parts = [];
+  for (const sh of svg.fills || []) {
+    if (!sh.outer || sh.outer.length < 3) continue;
+    parts.push(CS().ofPolygons([sh.outer, ...(sh.holes || [])], 'EvenOdd'));
+  }
+  const st = strokesSection(svg.strokes || []);
+  if (st) parts.push(st);
   if (!parts.length) return null;
   return CS().union(parts);
 }
 
+/** Celdas del patrón elegido dentro de `area`. */
+function cellsFor(D, P, area, kind) {
+  if (kind === 'hex') return hexCells(D, P, area);
+  if (kind === 'stripes') return stripeCells(D, P, area);
+  if (kind === 'cross') return crossCells(D, P, area);
+  if (kind === 'circuit') return circuitCells(D, P, area);
+  if (kind === 'radial') return radialCells(D, P, area);
+  return null;
+}
+
 /**
- * Relieve final de la tapa (coordenadas de mundo).
- * @returns {{cut: Manifold|null, add: Manifold|null, warn: string[]}}
+ * Relieve final de la tapa (marco interno).
+ *
+ * Modo apilable: la tapa se imprime boca abajo, así que su cara superior es la
+ * primera capa. El marco de apilado y una retícula de nervios (hexagonal por
+ * defecto) apoyan en la cama; la piel de la tapa se imprime encima como
+ * puentes cortos entre nervios. Los patrones de líneas (circuito, radial) se
+ * añaden en relieve sobre esa retícula.
+ * @returns {{cut, add, warn}}
  */
 export function lidRelief(D, P, svg) {
   const warn = [];
-  const area = patternArea(D, P);
   const zTop = D.Hb + D.Hl;
-  let cells = null;
-  if (D.pattern === 'hex') cells = hexCells(D, P, area);
-  else if (D.pattern === 'stripes') cells = stripeCells(D, P, area);
-  else if (D.pattern === 'cross') cells = crossCells(D, P, area);
-
   let logo = logoSection(svg);
+
+  if (D.stack) {
+    const outerA = rrOffset(D, D.t - 0.5);
+    const inner = rrOffset(D, D.t - D.fw);
+    const frame = outerA.subtract(inner);
+    const support = ['hex', 'stripes', 'cross'].includes(D.pattern) ? D.pattern : 'hex';
+    const cells = cellsFor(D, { ...P, patternRib: Math.max(P.patternRib, 1.2), patternSize: Math.min(P.patternSize, 14) }, inner, support);
+    let raised = cells ? inner.subtract(cells) : inner;
+    if (D.pattern === 'circuit' || D.pattern === 'radial') {
+      const extra = cellsFor(D, P, inner, D.pattern);
+      if (extra) raised = raised.add(extra);
+    }
+    if (logo) { logo = logo.intersect(inner); raised = raised.subtract(logo.offset(P.patternRib, 'Round', 2, 16)).add(logo); }
+    raised = raised.add(frame);
+    return { cut: null, add: prism(raised, zTop - 0.01, zTop + D.hs), warn };
+  }
+
+  const area = patternArea(D, P);
+  let cells = cellsFor(D, P, area, D.pattern);
   if (logo) logo = logo.intersect(area);
   if (logo && logo.isEmpty()) logo = null;
   if (logo && cells) cells = cells.subtract(logo.offset(P.patternRib, 'Round', 2, 16));
@@ -140,16 +272,17 @@ export function lidRelief(D, P, svg) {
     return { cut: prism(region, zTop - D.pd, zTop + 1), add: null, warn };
   }
   // Relieve: marco perimetral + nervios + logo.
+  const lineArt = D.pattern === 'circuit' || D.pattern === 'radial';
   let raised;
-  if (cells) {
-    const keep = logo ? logo.offset(P.patternRib, 'Round', 2, 16) : null;
+  if (cells && !lineArt) {
     raised = area.subtract(cells);
-    if (keep) raised = raised.subtract(keep);
+    if (logo) raised = raised.subtract(logo.offset(P.patternRib, 'Round', 2, 16));
   } else {
     raised = area.subtract(area.offset(-Math.max(2, P.patternRib * 1.5), 'Round', 2, 24));
-    warn.push('Relieve sin patrón: la tapa solo apoya en el marco y el interior se imprime como puente largo. Usa "Grabado" o un patrón denso.');
+    if (lineArt && cells) raised = raised.add(cells);
+    warn.push('Relieve con patrón abierto: la tapa se imprime sobre líneas finas y el resto como puente. Usa "Grabado" o hexagonal/cruzado.');
   }
-  if (cells && P.patternSize > 18) warn.push('Celdas grandes en relieve: puentes > 15 mm en la primera capa sobre la cama.');
+  if (cells && !lineArt && P.patternSize > 18) warn.push('Celdas grandes en relieve: puentes > 15 mm en la primera capa sobre la cama.');
   if (logo) raised = raised.add(logo);
   return { cut: null, add: prism(raised, zTop - 0.01, zTop + D.pd), warn };
 }
