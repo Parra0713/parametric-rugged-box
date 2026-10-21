@@ -17,6 +17,7 @@
  *   7. Insertos: encajan sin interferencia y no invaden el contenido.
  *   8. Montaje real: pasadores y tapones no se solapan con la caja y se pueden
  *      colocar (camino libre); el filamento entra recto.
+ *  10. Mecánica completa en base y tapa (nada la recorta).
  *   9. Sin soportes: en las piezas planas ningún puente > puente máximo (10 mm).
  * Escribe el detalle en logs/sweep-<fecha>.log y un resumen en logs/sweep-latest.json.
  */
@@ -27,7 +28,7 @@ import { DEFAULTS, derive } from '../src/engine/params.js';
 import { M, CS } from '../src/engine/geo.js';
 import { overhangRegions } from '../src/engine/tilt.js';
 import { pack } from '../src/packer.js';
-import { pinChecks, bridgeChecks } from './lib/assembly.mjs';
+import { pinChecks, bridgeChecks, mechChecks } from './lib/assembly.mjs';
 
 await init(Module);
 const { hinges, latches, buildBase, buildLid } = _internal;
@@ -82,8 +83,15 @@ cases.push({ name: '45×30 pasadores impresos', p: { innerL: 45, innerW: 30, bas
 cases.push({ name: '160×100 filamento + laberinto', p: { innerL: 160, innerW: 100, baseDepth: 40, lidDepth: 15, pinMode: 'filament', sealMode: 'labyrinth' } });
 cases.push({ name: '320×220 impresos (3 bisagras)', p: { innerL: 320, innerW: 220, baseDepth: 40, lidDepth: 15, pinMode: 'printed' } });
 cases.push({ name: '120×80 apilable + octógono', p: { stackable: true, cornerCut: 18 } });
+// Clase XS (ultrapequeña): toda la combinatoria que rompía la mecánica.
+for (const [L, W, bd, ld] of [[20, 20, 5, 15], [25, 18, 8, 3], [35, 30, 12, 5]]) {
+  for (const [vn, v] of [['', {}], [' apilable + tapa mínima', { stackable: true, lidMin: true }], [' laberinto + impresos', { sealMode: 'labyrinth', pinMode: 'printed' }]])
+    cases.push({ name: `XS ${L}×${W}×${bd}${vn}`, p: { innerL: L, innerW: W, baseDepth: bd, lidDepth: ld, ...v } });
+}
+cases.push({ name: 'XS 20×40 girada + octógono', p: { innerL: 20, innerW: 40, baseDepth: 10, lidDepth: 4, cornerCut: 4 } });
+cases.push({ name: 'XS forzada en 60×40', p: { innerL: 60, innerW: 40, baseDepth: 15, lidDepth: 5, sizeClass: 'XS' } });
 cases.push({ name: '60×40 apilable + filamento', p: { innerL: 60, innerW: 40, baseDepth: 21, lidDepth: 9, stackable: true } });
-if (args.quick) cases = cases.filter((c) => /^(20×20|60×40|120×80|250×170|380×260) estándar|apilable|alojamiento|varios|impresos \(/.test(c.name)).slice(0, 9);
+if (args.quick) cases = cases.filter((c) => /^(20×20|60×40|120×80|250×170|380×260) estándar|apilable|alojamiento|varios|impresos \(|^XS 20×20×5/.test(c.name)).slice(0, 12);
 if (args.filter) cases = cases.filter((c) => c.name.includes(args.filter));
 if (args.chunk) {
   const [k, n] = String(args.chunk).split('/').map(Number);
@@ -172,6 +180,7 @@ for (const c of cases) {
     }
   }
   // Montaje real de pasadores y tapones + impresión plana sin soportes.
+  for (const x of mechChecks(D, H, L, base, lid)) check(x.ok, x.msg);
   for (const x of pinChecks(r, D, base, lid)) check(x.ok, x.msg);
   for (const x of bridgeChecks(r, r.D.maxBridge)) check(x.ok, x.msg);
   say(`  ${res.fails.length ? '✘ ' + res.fails.join(' | ') : '✔ correcto'} (${res.ms} ms)`);

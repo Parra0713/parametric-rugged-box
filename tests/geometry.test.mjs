@@ -40,6 +40,8 @@ const cases = [
   { name: 'Octógono + apilable + pies', p: { innerL: 160, innerW: 90, cornerCut: 15, stackable: true } },
   { name: 'Mini 30×25', p: { innerL: 30, innerW: 25, baseDepth: 15, lidDepth: 5 } },
   { name: 'Mini 35×35 tapa mínima', p: { innerL: 35, innerW: 35, baseDepth: 12, lidMin: true } },
+  { name: 'XS 20×20 base 5 + tapa mínima + apilable', p: { innerL: 20, innerW: 20, baseDepth: 5, lidMin: true, stackable: true } },
+  { name: 'XS 25×18 laberinto', p: { innerL: 25, innerW: 18, baseDepth: 8, lidDepth: 3, sealMode: 'labyrinth' } },
   { name: 'M + logo SVG (relleno + trazo)', p: { pattern: 'hex' }, svg: {
     fills: [{ outer: [[-20, -10], [20, -10], [20, 10], [-20, 10]], holes: [[[-5, -5], [5, -5], [5, 5], [-5, 5]]] }],
     strokes: [{ points: [[-30, -20], [0, 15], [30, -20]], width: 2 }],

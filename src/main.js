@@ -561,7 +561,7 @@ function renderInfo() {
   const fl = D.filament || {};
   info.append(fold('mech', 'Mecánica y sellado',
     kv([
-      ['Robustez', D.cls === 'S' ? 'S — pequeña' : D.cls === 'M' ? 'M — mediana' : 'L — grande'],
+      ['Robustez', { XS: 'XS — ultrapequeña', S: 'S — pequeña', M: 'M — mediana', L: 'L — grande' }[D.cls] || D.cls],
       ['Bisagras', `${D.hinge.n} × ${D.hinge.nk} nudillos (${D.hinge.len} mm)`],
       ['Cierres', `${D.latch.n} empotrados, ${D.latchW} mm`],
       ['Pasador bisagra', fl.hinge ? `filamento 1.75 · ${fl.hingeQty}× ${fl.hinge} mm` : `impreso Ø${D.pinD}`],
