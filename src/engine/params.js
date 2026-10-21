@@ -386,10 +386,23 @@ export function derive(P) {
     D.fill = r2((D.gkw * D.gkh) / (D.gw * D.gap));
     D.grooves = [{ off: D.F / 2, w: D.gw }];
   } else if (D.sealMode === 'labyrinth') {
-    const gw2 = r2(clamp((D.F - 3 * 1.0) / 2, 1.2, 3.0));
-    D.gw = gw2;
+    // Doble ranura solo si cabe sin bajar de 2 líneas: paredes entre ranuras
+    // ≥ 2 líneas y punta de cada lengüeta (gw − 2·clr − 0.4) ≥ 2 líneas.
+    // Antes, con banda estrecha, quedaban paredes de 0.1–0.7 mm y lengüetas
+    // de 0.7 mm (se transparentan y se parten).
+    const wmin = Math.max(0.9, 2 * lw);
+    const gwMin = r2(wmin + 0.4 + 2 * D.clr);
     D.gd = r2(D.tl + 0.5);
-    D.grooves = [{ off: 1.0 + gw2 / 2, w: gw2 }, { off: D.F - 1.0 - gw2 / 2, w: gw2 }];
+    if (3 * wmin + 2 * gwMin <= D.F + 1e-6) {
+      const gw2 = r2(clamp((D.F - 3 * wmin) / 2, gwMin, 3.0));
+      const w = (D.F - 2 * gw2) / 3;
+      D.gw = gw2;
+      D.grooves = [{ off: w + gw2 / 2, w: gw2 }, { off: D.F - w - gw2 / 2, w: gw2 }];
+    } else {
+      D.gw = r2(clamp(0.45 * D.F, Math.max(2.0, gwMin), 3.6));
+      D.grooves = [{ off: D.F / 2, w: D.gw }];
+      D.snapped.push(`laberinto de una sola ranura (banda de ${r2(D.F)} mm: la doble necesita ${r2(3 * wmin + 2 * gwMin)} mm)`);
+    }
   } else {
     D.gw = r2(clamp(0.45 * D.F, 2.0, 3.6));
     D.gd = r2(D.tl + 0.5);
@@ -421,6 +434,10 @@ export function derive(P) {
   D.hh = Math.max(Mx.hh ?? 2.0, D.lt);
   // y en el marco interno (frente = −Y)
   D.yw = -D.sw; D.yfb = -D.sb; D.yp = -D.sp;
+  // Techo del hueco del barril bajo la ranura de la junta: antes quedaba una
+  // membrana de 0.5 mm (2.5 capas) que se transparentaba y podía partirse,
+  // justo donde la junta empuja. Mínimo 6 capas / 3 líneas.
+  D.mem = r2(Math.max(1.2, 6 * lh, 3 * lw));
 
   /* ---- Montaje real de los pasadores del cierre ----
    * El tapón del filamento (o la cabeza del pasador impreso) se apoya en la
@@ -431,7 +448,7 @@ export function derive(P) {
   D.capR = 2.0;                                   // tapón Ø4 (agujero ciego 1.70)
   {
     const R = (D.latchPinMode === 'filament' ? D.capR : pinHeadR(D.latchPinD)) + 0.25;
-    const zb = -D.bandH, zc = zb - D.bo, zp0 = -D.gd - 1.0 - D.rl;
+    const zb = -D.bandH, zc = zb - D.bo, zp0 = -D.gd - D.mem - 0.5 - D.rl;
     let zp = Math.min(zp0, zc + (D.sp - D.sw) - Math.SQRT2 * R);          // chaflán a 45°
     const dy = D.sp - D.sb;
     if (dy < R) zp = Math.min(zp, zb - Math.sqrt(R * R - Math.max(0, dy) ** 2));   // cara inferior
@@ -527,7 +544,7 @@ export function derive(P) {
   /* ---- Alturas ---- */
   // Base: el barril del cierre va bajo el fondo de la ranura; se necesita
   // sitio para él y su orejeta.
-  const latchNeed = D.gd + 1.0 + 2 * D.rl + 0.8 + D.zpDrop;
+  const latchNeed = D.gd + D.mem + 0.5 + 2 * D.rl + 0.8 + D.zpDrop;
   const DbMin = r2(Math.max(latchNeed - D.floorTop, D.fc + 2, 5));
   let Db = P.baseDepth;
   if (Db < DbMin) { warn.push(`Base demasiado baja para los cierres: profundidad ajustada a ${DbMin} mm.`); Db = DbMin; }
@@ -546,7 +563,7 @@ export function derive(P) {
   D.fcl = r2(Math.max(0, Math.min(D.fc, D.Dl - 0.4)));  // chaflán interior de la tapa
 
   /* ---- Cierre: alturas ---- */
-  D.zp = r2(D.Hb - D.gd - 1.0 - D.rl - D.zpDrop);   // eje del barril
+  D.zp = r2(D.Hb - D.gd - D.mem - 0.5 - D.rl - D.zpDrop);   // eje del barril (0.5 de holgura bajo el techo)
   D.zkt = r2(D.Hb + D.bandHl);               // cara superior del retén
   D.zc = r2(D.zkt - D.pre);                  // cara de agarre del gancho
 

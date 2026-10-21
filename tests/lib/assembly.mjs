@@ -133,3 +133,58 @@ export function mechChecks(D, H, L, base, lid) {
     { ok: vl <= Math.max(0.5, 0.002 * tl), msg: `tapa: bisagra, mejillas y retenes completos (faltan ${vl.toFixed(1)} de ${tl.toFixed(0)} mm³)` },
   ];
 }
+
+/**
+ * Espesor mínimo: ninguna zona de la base o la tapa más delgada que 2 líneas
+ * (0.9 mm) en cortes horizontales (cada 0.4 mm), verticales transversales
+ * (plano YZ por cada cierre, sus mejillas y cada bisagra) y longitudinales
+ * (plano XZ cada 0.4 mm entre la pared y el borde de la banda). Detecta membranas que se
+ * transparentan y se parten (p. ej. el techo del hueco del barril bajo la
+ * ranura de la junta, que medía 0.5 mm). Se ignoran las astillas de los
+ * chaflanes (cuñas de < 0.5 mm² o < 1.2 mm de largo) y la cara de unión.
+ */
+export function thicknessChecks(D, base, lid, minW = 0.9) {
+  const thinOf = (s) => {
+    const open = s.offset(-minW / 2 + 0.01, 'Round', 2, 16).offset(minW / 2 - 0.01, 'Round', 2, 16);
+    return s.subtract(open).offset(-0.02).offset(0.02).decompose().filter((p) => {
+      const b = p.bounds();
+      return p.area() >= 0.5 && Math.max(b.max[0] - b.min[0], b.max[1] - b.min[1]) >= 1.2;
+    });
+  };
+  const xs = [...D.latch.xs.flatMap((x) => [x, x - D.latchW / 2 - D.ag - D.cheekW / 2, x + D.latchW / 2 + D.ag + D.cheekW / 2]), ...D.hinge.xs];
+  const res = [];
+  // La tapa incluye sus lengüetas (bajo la cara de unión). En la placa
+  // Gridfinity interior el borde superior entre celdas es una arista viva por
+  // norma del estándar: se excluye ese último medio milímetro.
+  const gfTop = D.gfPlate ? [D.floorTop - 0.6, D.floorTop + 0.1] : null;
+  for (const [name, part, z0, z1] of [['base', base, 0.3, D.Hb - 0.6], ['tapa', lid, D.Hb - D.tl + 0.3, D.Hb + D.Hl - 0.3]]) {
+    const found = [];
+    for (let z = z0; z < z1; z += 0.4) {
+      if (name === 'base' && gfTop && z > gfTop[0] && z < gfTop[1]) continue;
+      if (name === 'tapa' && Math.abs(z - D.Hb) < 0.3) continue;     // cara de unión
+      for (const p of thinOf(part.slice(z))) found.push(`z=${z.toFixed(1)}`);
+    }
+    const R = part.rotate([0, -90, 0]);       // plano YZ: el corte en "z" es x
+    for (const x of xs) for (const p of thinOf(R.slice(x))) {
+      const b = p.bounds();
+      const zr = [-b.max[0], -b.min[0]];        // vuelve a z de mundo
+      if (name === 'base' ? zr[1] > D.Hb - 0.6 : Math.abs((zr[0] + zr[1]) / 2 - D.Hb) < 0.6) continue;   // cara de unión
+      found.push(`x=${x.toFixed(1)} z ${zr[0].toFixed(1)}–${zr[1].toFixed(1)} y ${b.min[1].toFixed(1)}…${b.max[1].toFixed(1)}`);
+    }
+    // Cortes longitudinales (plano XZ) por la zona del cierre y de la
+    // bisagra, entre la pared y el borde de la banda: una membrana corta en Y
+    // pero larga en X (como el techo del hueco del barril) solo se ve aquí.
+    const Q = part.rotate([90, 0, 0]);         // el corte en "z" es y; (x, −z)
+    const ys = [];
+    for (let k = 0.2; k <= D.bo + 0.01; k += 0.4) ys.push(-(D.sw + k), D.sw + k);
+    for (const y of ys) for (const p of thinOf(Q.slice(y))) {
+      const b = p.bounds();
+      const zr = [-b.max[1], -b.min[1]];
+      if (name === 'base' ? zr[1] > D.Hb - 0.6 : Math.abs((zr[0] + zr[1]) / 2 - D.Hb) < 0.6) continue;
+      if (name === 'base' && gfTop && zr[0] > gfTop[0]) continue;
+      found.push(`y=${y.toFixed(1)} z ${zr[0].toFixed(1)}–${zr[1].toFixed(1)} x ${b.min[0].toFixed(1)}…${b.max[0].toFixed(1)}`);
+    }
+    res.push({ ok: !found.length, msg: `${name}: sin zonas más delgadas que ${minW} mm${found.length ? ' — ' + found.slice(0, 4).join(', ') : ''}` });
+  }
+  return res;
+}

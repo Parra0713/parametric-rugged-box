@@ -14,8 +14,9 @@
  *
  *  - Empotrado: la cara exterior de la placa coincide con la de las mejillas
  *    (sh), así el cierre queda protegido y no se engancha.
- *  - Corto: el barril sube hasta justo debajo del fondo de la ranura de la
- *    junta (se abre un hueco local en la banda), ~25 % más corto que un
+ *  - Corto: el barril sube hasta debajo del fondo de la ranura de la junta,
+ *    dejando un techo de ≥ 1.2 mm / 3 líneas (D.mem) que no se transparenta
+ *    ni se parte (se abre un hueco local en la banda), ~25 % más corto que un
  *    cierre colgado bajo la banda.
  *  - Autobloqueo: el centro del contacto gancho‑retén queda fuera del eje
  *    (skt calculado en params.js). La reacción de la junta empuja el cierre
@@ -89,7 +90,7 @@ export function latches(D) {
     keepers.push(yzExtrude(kp, a - D.cheekW, b + D.cheekW));
     holes.push(yzExtrude(teardrop(-D.sp, D.zp, D.latchHoleD / 2, true, D.seg), a - D.cheekW - 1, b + D.cheekW + 1));
     // Hueco para el barril bajo el fondo de la ranura (entre las mejillas).
-    pockets.push(yzExtrude(rect(-D.sh - 2, -(D.sw + 0.3), D.zp - D.rl - 1.2, D.Hb - D.gd - 0.5), a, b));
+    pockets.push(yzExtrude(rect(-D.sh - 2, -(D.sw + 0.3), D.zp - D.rl - 1.2, D.Hb - D.gd - D.mem), a, b));
   }
   return {
     lugs: unionAll(lugs),

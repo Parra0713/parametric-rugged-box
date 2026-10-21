@@ -10,12 +10,13 @@
  *    varias formas: ningún puente de las piezas planas supera 10 mm.
  * 3. Apilado: la base de arriba asienta y queda bloqueada, también con bases
  *    poco profundas (el pie de apilado no puede comerse la mecánica).
- * En todos: bisagras y cierres completos en base y tapa.
+ * En todos: bisagras y cierres completos en base y tapa, y ninguna zona más
+ * delgada que 2 líneas (0.9 mm).
  */
 import Module from 'manifold-3d';
 import { init, build, _internal } from '../src/engine/engine.js';
 import { DEFAULTS, derive } from '../src/engine/params.js';
-import { pinChecks, bridgeChecks, mechChecks } from './lib/assembly.mjs';
+import { pinChecks, bridgeChecks, mechChecks, thicknessChecks } from './lib/assembly.mjs';
 
 await init(Module);
 const { hinges, latches, buildBase, buildLid } = _internal;
@@ -30,6 +31,7 @@ function run(name, p, { pins = true, bridges = false, stack = false } = {}) {
   const lid = buildLid(D, P, H, L, null, []).lid;
   const res = [];
   res.push(...mechChecks(D, H, L, base, lid));
+  res.push(...thicknessChecks(D, base, lid));
   if (pins) res.push(...pinChecks(r, D, base, lid));
   if (bridges) res.push(...bridgeChecks(r, r.D.maxBridge));
   if (stack) {

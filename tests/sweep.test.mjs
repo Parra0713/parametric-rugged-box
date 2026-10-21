@@ -18,6 +18,7 @@
  *   8. Montaje real: pasadores y tapones no se solapan con la caja y se pueden
  *      colocar (camino libre); el filamento entra recto.
  *  10. Mecánica completa en base y tapa (nada la recorta).
+ *  11. Espesor mínimo de 2 líneas (sin membranas que se transparenten).
  *   9. Sin soportes: en las piezas planas ningún puente > puente máximo (10 mm).
  * Escribe el detalle en logs/sweep-<fecha>.log y un resumen en logs/sweep-latest.json.
  */
@@ -28,7 +29,7 @@ import { DEFAULTS, derive } from '../src/engine/params.js';
 import { M, CS } from '../src/engine/geo.js';
 import { overhangRegions } from '../src/engine/tilt.js';
 import { pack } from '../src/packer.js';
-import { pinChecks, bridgeChecks, mechChecks } from './lib/assembly.mjs';
+import { pinChecks, bridgeChecks, mechChecks, thicknessChecks } from './lib/assembly.mjs';
 
 await init(Module);
 const { hinges, latches, buildBase, buildLid } = _internal;
@@ -181,6 +182,7 @@ for (const c of cases) {
   }
   // Montaje real de pasadores y tapones + impresión plana sin soportes.
   for (const x of mechChecks(D, H, L, base, lid)) check(x.ok, x.msg);
+  for (const x of thicknessChecks(D, base, lid)) check(x.ok, x.msg);
   for (const x of pinChecks(r, D, base, lid)) check(x.ok, x.msg);
   for (const x of bridgeChecks(r, r.D.maxBridge)) check(x.ok, x.msg);
   say(`  ${res.fails.length ? '✘ ' + res.fails.join(' | ') : '✔ correcto'} (${res.ms} ms)`);

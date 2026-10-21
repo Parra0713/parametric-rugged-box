@@ -70,7 +70,11 @@ function baseLeafProfile(D) {
  */
 function lidLeafProfile(D) {
   const u0 = D.yb - D.bo - 0.8;                // hasta la cara de la pared
-  const vHigh = Math.min(D.Hb + D.Hl - 0.4, D.za + (D.ya - u0) + D.rk * Math.SQRT2);
+  // El vértice del cartabón queda siempre dentro de la pared: con el bisel
+  // de apilado (D.db) la pared se retira arriba y el vértice quedaba como una
+  // aleta de 0.3 mm.
+  const edge = D.stack ? D.db : 0.5;
+  const vHigh = Math.min(D.Hb + D.Hl - Math.max(0.4, edge - 0.4), D.za + (D.ya - u0) + D.rk * Math.SQRT2);
   const web = CS().hull([
     circle(D.ya, D.za, D.rk, D.seg),
     poly([[u0, D.Hb], [u0 - 0.01, D.Hb], [u0, vHigh]]),
