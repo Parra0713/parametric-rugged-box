@@ -219,3 +219,100 @@ export function wedgeVolume(R, lh) {
   return Math.round(Math.max(0, v - R.volume()));
 }
 
+
+/* ---------- 4. Voladizos de partes salientes (bisagras, cierres) ---------- */
+
+/**
+ * Detector de voladizos por capas.
+ *
+ * Una capa k está soportada si cada punto queda a ≤ step·tan(θ) de la capa
+ * anterior (θ = ángulo máximo de voladizo, 50° por defecto: imprimible sin
+ * soporte en PLA/PETG con buena ventilación). Lo que no cumple es un voladizo
+ * o una "isla" que empezaría en el aire (típico del primer borde de un nudillo
+ * o de una mejilla de cierre cuando la caja se inclina 45°).
+ * @param R       sólido en orientación de impresión (z ≥ 0)
+ * @param helper  sólido que ya da soporte (aletas), o null
+ * @returns [{ z, region: CrossSection, area }]
+ */
+export function overhangRegions(R, helper, opt = {}) {
+  const step = opt.step || 0.6;
+  const tanT = Math.tan(((opt.angle || 50) * Math.PI) / 180);
+  const minA = opt.minArea || 1.0;
+  const bb = R.boundingBox();
+  const all = helper ? R.add(helper) : R;
+  const out = [];
+  let prev = all.slice(Math.min(0.1, step / 2));
+  for (let z = step; z < bb.max[2] - 0.05; z += step) {
+    const cur = R.slice(z);
+    if (!cur.isEmpty()) {
+      let U = cur.subtract(prev.offset(step * tanT, 'Round', 2, 12));
+      // Quita astillas de menos de ~0.6 mm de ancho (ruido de teselado).
+      U = U.offset(-0.3, 'Square').offset(0.3, 'Square');
+      for (const piece of U.decompose()) {
+        const a = piece.area();
+        if (a >= minA) out.push({ z, region: piece, area: a });
+      }
+    }
+    prev = all.slice(z);
+  }
+  return out;
+}
+
+/**
+ * Soportes locales para los voladizos detectados.
+ *
+ * Estrategia (equivale a los soportes "de rejilla con interfaz" de un slicer,
+ * pero generados en el modelo, solo donde hacen falta):
+ *  - Columna vertical bajo cada voladizo, hasta la cama o hasta la superficie
+ *    de la pieza que haya debajo (separación de 1 capa en Z y 0.4 mm en XY).
+ *  - Interior en rejilla de paredes de 2 líneas cada `pitch` mm (ligera y
+ *    rígida), con una interfaz maciza de 2 capas arriba (superficie plana para
+ *    que el voladizo apoye) y un pie macizo de 2 capas abajo (adherencia).
+ *  - La separación de 1 capa con la pieza hace que se desprendan a mano.
+ */
+export function overhangSupports(R, regions, lw, lh, opt = {}) {
+  if (!regions.length) return null;
+  const gapZ = opt.gapZ ?? lh;
+  const gapXY = opt.gapXY ?? 0.4;
+  const pitch = opt.pitch || 3;
+  const cols = [];
+  for (const { z, region } of regions) {
+    const top = z - gapZ;
+    // Incluso un voladizo a 0.4 mm de la cama necesita algo debajo: 1–2
+    // capas de soporte actúan como una mini‑balsa local.
+    if (top < lh * 0.99) continue;
+    cols.push(prism(region.offset(0.3, 'Square'), 0, top));
+  }
+  if (!cols.length) return null;
+  let S = M().union(cols);
+  // Holgura con la pieza: solo el trozo de pieza que rodea las columnas
+  // (las columnas engordadas 1 mm), así las uniones son pequeñas y rápidas.
+  const near = R.intersect(M().union(regions.filter((r) => r.z - gapZ >= lh * 0.99)
+    .map((r) => prism(r.region.offset(1.5, 'Square'), -1, r.z + 2))));
+  if (!near.isEmpty()) {
+    const clear = M().union([
+      near, near.translate([0, 0, gapZ]),
+      near.translate([gapXY, 0, 0]), near.translate([-gapXY, 0, 0]),
+      near.translate([0, gapXY, 0]), near.translate([0, -gapXY, 0]),
+    ]);
+    S = S.subtract(clear);
+  }
+  if (S.isEmpty()) return null;
+  // Descarta restos sueltos minúsculos.
+  const parts = S.decompose().filter((p) => p.volume() > 2);
+  if (!parts.length) return null;
+  S = M().union(parts);
+  const b = S.boundingBox();
+  // Rejilla de paredes de 2 líneas.
+  const t = 2 * lw;
+  const strips = [];
+  for (let x = Math.floor(b.min[0] / pitch) * pitch; x <= b.max[0]; x += pitch)
+    strips.push(CS().square([t, b.max[1] - b.min[1] + 2], false).translate([x - t / 2, b.min[1] - 1]));
+  for (let y = Math.floor(b.min[1] / pitch) * pitch; y <= b.max[1]; y += pitch)
+    strips.push(CS().square([b.max[0] - b.min[0] + 2, t], false).translate([b.min[0] - 1, y - t / 2]));
+  const grid = prism(CS().union(strips), -1, b.max[2] + 1);
+  const topSkin = S.subtract(S.translate([0, 0, -2 * lh]));          // 2 capas superiores
+  const foot = S.intersect(M().cube([b.max[0] - b.min[0] + 2, b.max[1] - b.min[1] + 2, 2 * lh]).translate([b.min[0] - 1, b.min[1] - 1, 0]));
+  const solid = M().union([S.intersect(grid), topSkin, foot]);
+  return { solid, volume: Math.round(solid.volume()), count: parts.length, fullVolume: Math.round(S.volume()) };
+}

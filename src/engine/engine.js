@@ -16,14 +16,15 @@
  */
 import { installGC, cleanup, prism, frustum, unionAll, toMesh, M, CS, roundRect } from './geo.js';
 import { derive } from './params.js';
-import { rrOffset, grooveCut, tongues, gasket } from './seal.js';
+import { rrOffset, grooveCut, tongues, gasket, stackLines } from './seal.js';
 import { hinges, knuckleSpans } from './hinge.js';
 import { latches } from './latch.js';
 import { printedPin, filamentCap, filamentLength } from './pins.js';
 import { gridfinityFeet } from './gridfinity.js';
 import { lidRelief } from './pattern.js';
+import { baseInsert, lidInsert } from './insert.js';
 import { transformVerts, hull2D, fitAngle, tiltChoose, rotatedExtent } from '../bedfit.js';
-import { contactCut, supportFins, wedgeVolume, rotAxis, invRigid } from './tilt.js';
+import { contactCut, supportFins, wedgeVolume, rotAxis, invRigid, overhangRegions, overhangSupports } from './tilt.js';
 
 /* ---------------- Matrices 4×4 (columna mayor) ---------------- */
 const I4 = () => [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1];
@@ -171,15 +172,20 @@ function buildBase(D, H, L, report) {
   // Apilado: la parte inferior se estrecha (vertical + 45°) para encajar en
   // el marco de la tapa de la caja de abajo.
   if (D.stack) {
+    // Pie de apilado: más estrecho que el marco de la tapa (holgura sclr),
+    // altura hf, y luego se ensancha a 45° (imprimible sin soporte).
     const s0 = t - D.fw - D.sclr;
     const big = F + 20;
     const env = unionAll([
       frustum(rr(s0 - 0.4), 0, rr(s0), 0.4),
-      prism(rr(s0), 0.4, D.hs),
-      frustum(rr(s0), D.hs, rr(big), D.hs + (big - s0)),
-      prism(rr(big), D.hs + (big - s0) - 0.01, Hb + 60),
+      prism(rr(s0), 0.4, D.hf),
+      frustum(rr(s0), D.hf, rr(big), D.hf + (big - s0)),
+      prism(rr(big), D.hf + (big - s0) - 0.01, Hb + 60),
     ]);
     body = body.intersect(env);
+    // Ranuras del pie donde encajan los nervios de la tapa de abajo.
+    const slots = stackLines(D, D.gwS, 400);
+    if (slots) body = body.subtract(prism(slots.intersect(rr(s0 + 1)), -1, D.hs + 0.3));
   }
   if (D.gfFeet) body = body.add(gridfinityFeet(D));
   return body;
@@ -331,7 +337,23 @@ function addAids(D, P, pt, solidNative, normals) {
   const tilt = tiltChoose(hv, bed, 'Y');
   if (!tilt.ok) return;
   const Rm = rotAxis(tilt.axis, tilt.alpha);
-  const Q = solidNative().transform(pt.print);
+  let Q = solidNative().transform(pt.print);
+  // El chaflán interior anti línea de contracción (45°) del extremo que sube
+  // queda HORIZONTAL al inclinar 45° (techo en el aire). Inclinada, las capas
+  // ya no son paralelas al fondo, así que ese chaflán no aporta nada: se
+  // elimina en ese extremo y el rincón queda a 90° (dos caras a 45°).
+  const fcI = pt.id === 'base' ? D.fc : D.fcl;
+  if (fcI > 0) {
+    for (const sx of [-1, 1]) {
+      const nz = Rm[2] * (-sx) / Math.SQRT2 + Rm[10] / Math.SQRT2;   // z de Rm·n, n = (−sx,0,1)/√2
+      if (nz > -Math.cos((50 * Math.PI) / 180)) continue;
+      const half = CS().square([fcI + 1, 4 * D.Wi + 100], false).translate([sx > 0 ? D.Li / 2 - fcI - 0.05 : -D.Li / 2 - 0.95, -2 * D.Wi - 50]);
+      const zone = rrOffset(D, 0).intersect(half);
+      const z0 = pt.id === 'base' ? D.floorTop : D.Hb + D.Hl - D.topT - fcI;
+      Q = Q.subtract(prism(zone, z0 - 0.01, z0 + fcI + 0.01).translate([0, 0, D.z0 * (pt.id === 'base' ? 1 : 0)]).transform(pt.print));
+      log(D, `${pt.id}: chaflán interior del extremo ${sx > 0 ? '+X' : '−X'} eliminado (sería un techo horizontal al inclinar)`);
+    }
+  }
   const R0 = Q.transform(Rm);
   const zmin = R0.boundingBox().min[2];
   const bq = Q.boundingBox();
@@ -357,7 +379,19 @@ function addAids(D, P, pt, solidNative, normals) {
       [[sa, 0, ca], [-D.Lo / 2, 0, zb]], [[-sa, 0, ca], [D.Lo / 2, 0, zb]],
       [[0, sa, ca], [0, -D.Wo / 2, zb]], [[0, -sa, ca], [0, D.Wo / 2, zb]],
     ];
-    for (const [ni, Ci] of sides) Q2 = Q2.trimByPlane(ni, ni[0] * Ci[0] + ni[1] * Ci[1] + ni[2] * Ci[2] + s0);
+    // Zonas mecánicas (bisagras y cierres, por fuera de la pared): el bisel
+    // NUNCA las toca. Antes el bisel de las aristas largas recortaba nudillos,
+    // cartabones y mejillas (piezas "incompletas o raras" en modo inclinado).
+    const keep = mechanicsKeepOut(D, pt.print, bq);
+    const big = 4 * Math.max(bq.max[0] - bq.min[0], bq.max[1] - bq.min[1], bq.max[2] - bq.min[2]) + 100;
+    const cube = M().cube([big, big, big], true).translate([(bq.min[0] + bq.max[0]) / 2, (bq.min[1] + bq.max[1]) / 2, (bq.min[2] + bq.max[2]) / 2]);
+    for (const [ni, Ci] of sides) {
+      const off = ni[0] * Ci[0] + ni[1] * Ci[1] + ni[2] * Ci[2] + s0;
+      // Región que se elimina = lado negativo del plano, menos la mecánica.
+      let cutter = cube.trimByPlane([-ni[0], -ni[1], -ni[2]], -off);
+      if (keep) cutter = cutter.subtract(keep);
+      Q2 = Q2.subtract(cutter);
+    }
     if (!sides.length) Q2 = Q.trimByPlane(n, zc);
     symmetric = sides.length > 0;
     // El bisel es parte del diseño: vuelve al marco nativo (ensamblaje y STL).
@@ -374,6 +408,43 @@ function addAids(D, P, pt, solidNative, normals) {
     finVol: fins?.volume ?? 0, finCount: fins?.count ?? 0, wedgeVol: wedgeVolume(R, D.lh),
   };
   if (fins) pt.aids.push({ name: `Aletas de soporte (${fins.count} × ${tilt.alpha}° sobre ${tilt.axis})`, ...meshOf(fins.solid) });
+  // Voladizos de las partes salientes (nudillos, mejillas, retenes): se
+  // detectan capa a capa contando con lo que ya sostienen las aletas.
+  if (P.overhangSupports !== false) {
+    const t0 = performance.now();
+    const regions = overhangRegions(R, fins?.solid ?? null, { angle: P.overhangAngle || 50 });
+    const ov = overhangSupports(R, regions, D.lw, D.lh, { pitch: P.supportPitch || 3 });
+    pt.tilt.overhangs = regions.length;
+    pt.tilt.overhangArea = Math.round(regions.reduce((a, r) => a + r.area, 0));
+    if (ov) {
+      pt.aids.push({ name: `Soportes de voladizos (${ov.count} zonas)`, ...meshOf(ov.solid) });
+      pt.tilt.ovVol = ov.volume;
+      pt.tilt.ovCount = ov.count;
+    }
+    log(D, `${pt.id}: ${regions.length} voladizos (${pt.tilt.overhangArea} mm²), soportes ${ov?.volume ?? 0} mm³ en ${Math.round(performance.now() - t0)} ms`);
+  }
+}
+
+/** Registro interno de la construcción (se muestra en la interfaz y en las pruebas). */
+function log(D, msg) { (D.log ||= []).push(msg); }
+
+/**
+ * Volumen protegido del bisel: tramos X de bisagras y cierres (+2 mm), por
+ * fuera de la cara interior de la pared, en el lado de cada mecanismo.
+ * `print` es la matriz nativo → impresión (la tapa invierte Y).
+ */
+function mechanicsKeepOut(D, print, bq) {
+  const sY = Math.sign(print[5]) || 1;
+  const H = 4 * (bq.max[2] - bq.min[2] + 50), Wd = 200;
+  const z0 = (bq.min[2] + bq.max[2]) / 2;
+  const blocks = [];
+  const add = (xc, half, side) => {
+    const y0 = side > 0 ? D.Wi / 2 : -D.Wi / 2 - Wd;
+    blocks.push(M().cube([2 * half + 4, Wd, H]).translate([xc - half - 2, y0, z0 - H / 2]));
+  };
+  for (const xc of D.hinge.xs) add(xc, D.hinge.len / 2, sY);
+  for (const xc of D.latch.xs) add(xc, D.latch.span / 2, -sY);
+  return blocks.length ? M().union(blocks) : null;
 }
 
 function meshOf(man) {
@@ -397,6 +468,11 @@ export function build(P, svg, opt = {}) {
   const parts = [];
   const normals = opt.normals !== false;
   const report = [];
+  D.log = [];
+  let tS = performance.now();
+  const stage = (name) => { const t = performance.now(); log(D, `${name}: ${Math.round(t - tS)} ms`); tS = t; };
+  log(D, `clase ${D.cls} · interior ${D.Li}×${D.Wi} · base ${D.Db} + tapa ${D.Dl} mm · pared ${D.t} · banda ${D.bo}${D.cham ? ` · octógono ${D.cham}` : ''}${D.stack ? ' · apilable' : ''}${D.rot90 ? ' · girada 90°' : ''}`);
+  log(D, `bisagras ${D.hinge.n}×${D.hinge.nk} (nudillo ${D.hinge.kl} mm) en x=${D.hinge.xs.join(', ')} · cierres ${D.latch.n}×${D.latchW} mm en x=${D.latch.xs.join(', ')}`);
   try {
     const H = hinges(D);
     const L = latches(D);
@@ -417,8 +493,10 @@ export function build(P, svg, opt = {}) {
       }, normals);
       baseCache = { key, part: clonePart(bp), report: rep };
     }
+    stage('base');
     addAids(D, P, bp, () => buildBase(D, H, L, []), normals);
     parts.push(bp);
+    stage('ayudas base');
 
     const { lid, warn } = buildLid(D, P, H, L, svg, report);
     D.warn.push(...warn);
@@ -426,8 +504,10 @@ export function build(P, svg, opt = {}) {
     const lp = part('lid', 'Tapa', lid, {
       print: lidFlip(D, extra), instances: [T(0, 0, z0)], qty: 1, material: 'PETG / PLA / ASA',
     }, normals);
+    stage('tapa');
     addAids(D, P, lp, () => lid, normals);
     parts.push(lp);
+    stage('ayudas tapa');
 
     // Cierre: perfil acostado (X → Z de impresión).
     const lay = [0, 0, 1, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, D.latchW / 2, 1];
@@ -464,6 +544,26 @@ export function build(P, svg, opt = {}) {
         }
         D.warn.push(`La junta no cabe entera en la cama: se divide en ${n} tramos rectos.`);
       }
+    }
+
+    // Insertos interiores.
+    if (P.insertMode && P.insertMode !== 'off') {
+      const t1 = performance.now();
+      const polys = P.insertMode === 'pockets' ? (P.contentPolys || null) : null;
+      if (P.insertMode === 'pockets' && !polys) D.warn.push('Inserto con alojamientos: carga el contorno SVG del contenido (se genera en blanco).');
+      const ins = baseInsert(D, P, polys);
+      parts.push(part('insert', polys ? 'Inserto con alojamientos' : 'Inserto', ins.solid, {
+        print: ins.print, instances: [T(0, 0, z0)], qty: 1, material: 'PLA (relleno 0 %, 2 paredes)',
+      }, normals));
+      D.insert = ins.info;
+      log(D, `inserto base: altura ${ins.info.height} mm, ${ins.info.pockets} alojamientos, ${ins.info.notches.length} huecos para dedos (${Math.round(performance.now() - t1)} ms)`);
+    }
+    if (P.insertLid) {
+      const li = lidInsert(D, P);
+      if (li) parts.push(part('insertLid', 'Inserto de tapa', li.solid, {
+        print: li.print, instances: [T(0, 0, z0)], qty: 1, material: 'PLA (relleno 0 %, 2 paredes)',
+      }, normals));
+      else D.warn.push('Tapa demasiado baja para un inserto (< 3 mm de profundidad).');
     }
 
     // Pasadores: impresos o filamento + tapones, por separado para bisagra y cierre.
@@ -503,7 +603,17 @@ export function build(P, svg, opt = {}) {
       }, normals));
     }
 
-    for (const p of parts) if (p.status !== 'NoError') D.warn.push(`${p.name}: malla con error (${p.status}).`);
+    stage('resto de piezas');
+    // Integridad: una pieza rígida debe ser UN solo sólido (trozos sueltos =
+    // geometría incompleta) y la malla debe ser válida.
+    for (const p of parts) {
+      if (p.status !== 'NoError') D.warn.push(`${p.name}: malla con error (${p.status}).`);
+      if (p.components > 1 && p.id !== 'gasket') {
+        D.warn.push(`${p.name}: ${p.components} trozos separados (revisa el registro).`);
+        log(D, `AVISO ${p.name}: ${p.components} componentes`);
+      }
+    }
+    log(D, `piezas: ${parts.map((p) => `${p.name} ${p.tris} tri ${p.components} comp`).join(' · ')}`);
     D.hullLine = report;
 
     return {
@@ -523,6 +633,7 @@ function part(id, name, man, extra, normals) {
     id, key: id, name, mesh: toMesh(man, normals),
     status: String(man.status()?.value ?? man.status()),
     volume: Math.round(man.volume()),
+    components: man.decompose().length,
     tris: man.numTri(),
     bbox: man.boundingBox(),
     ...extra,
@@ -533,7 +644,10 @@ function part(id, name, man, extra, normals) {
 let baseCache = null;
 const LID_ONLY = new Set(['pattern', 'relief', 'patternDepth', 'patternSize', 'patternRib',
   'patternMargin', 'stripeAngle', 'patternSeed', 'svgSize', 'svgRotate', 'svgOffsetX', 'svgOffsetY',
-  'top', 'lidDepth', 'lidMin', 'bedPreset', 'bedX', 'bedY', 'bedZ', 'printAids']);
+  'top', 'lidDepth', 'lidMin', 'bedPreset', 'bedX', 'bedY', 'bedZ', 'printAids', 'aidsInPart',
+  'finSpacing', 'finReach', 'toothPitch', 'finGap', 'overhangSupports', 'overhangAngle', 'supportPitch',
+  'insertMode', 'insertLid', 'insertH', 'insertTol', 'pocketTol', 'insertDeck', 'fingerCount', 'fingerD',
+  'fingerPos', 'contentPolys', 'objClearance', 'objRotate']);
 function baseKey(P, normals) {
   const o = {};
   for (const k of Object.keys(P).sort()) if (!LID_ONLY.has(k)) o[k] = P[k];
