@@ -716,16 +716,21 @@ function readme(r, layout) {
     '  - Cierres: imprimir acostados (como vienen), 100 % de perímetros o 5+ paredes, PETG preferible (más elástico).',
     '  - Pasadores: acostados sobre la cara plana, 100 % de relleno.',
     '  - Junta: TPU 95A, 0.2 mm, velocidad baja, 100 % de relleno.',
-    '  - Tapa: la cara decorada va contra la cama.', '',
+    '  - Tapa: la cara decorada va contra la cama.',
+    `  - Sin soportes: en las piezas planas ningún puente supera ${D.maxBridge ?? 10} mm (desactiva los soportes del laminador).`, '',
     'MONTAJE:',
     '  1. Coloca la junta TPU en la ranura de la base (si aplica).',
     '  2. Alinea los nudillos de la tapa entre los de la base e inserta el pasador por el lado de la cabeza hasta que los dientes salten.',
+    '     Bisagras: la cabeza de cada pasador va hacia el extremo de la caja más cercano.',
     '  3. Coloca cada cierre entre sus orejetas e inserta su pasador.',
   ];
   const fl = D.filament || {};
-  if (fl.hinge) lines.push(`  * Bisagra: corta ${fl.hingeQty}× ${fl.hinge} mm de filamento 1.75 mm y fíjalos con los tapones a presión.`);
-  if (fl.latch) lines.push(`  * Cierres: corta ${fl.latchQty}× ${fl.latch} mm de filamento 1.75 mm y fíjalos con los tapones a presión.`);
-  if (D.stack) lines.push('  * Apilable: la base de una caja encaja en el marco de la tapa de otra.');
+  const sideTxt = (x, s) => (Math.abs(x) < 1e-6 ? (s < 0 ? 'por la izquierda' : 'por la derecha') : s * x < 0 ? 'desde el centro de la caja' : 'desde el extremo de la caja');
+  if (!fl.latch && D.latch.headSide) lines.push(`     Cierres: mete cada pasador ${D.latch.xs.map((x, i) => sideTxt(x, D.latch.headSide[i])).filter((v, i, a) => a.indexOf(v) === i).join(' / ')} (ese lado del eje queda libre).`);
+  if (fl.hinge) lines.push(`  * Bisagra: corta ${fl.hingeQty}× ${fl.hinge} mm de filamento 1.75 mm, mételo recto y fíjalo con un tapón en cada extremo.`);
+  if (fl.latch) lines.push(`  * Cierres: corta ${fl.latchQty}× ${fl.latch} mm de filamento 1.75 mm, mételo recto por el eje y fíjalo con los tapones.`);
+  if (fl.hinge || fl.latch) lines.push('    Tapones (Ø4): acércalos al extremo del filamento por debajo y empújalos ~2 mm hasta que hagan tope en la orejeta.');
+  if (D.stack) lines.push('  * Apilable: el pie de la base entra en el marco de la tapa de abajo y sus ranuras abrazan los nervios.');
   if (D.gfPlate) lines.push(`  * Gridfinity: ${D.inner.gridfinity.nx}×${D.inner.gridfinity.ny} celdas, bins de hasta ${D.inner.gridfinity.units}U.`);
   if (D.warn.length) lines.push('', 'AVISOS:', ...D.warn.map((w) => '  ! ' + w));
   return lines.join('\r\n');

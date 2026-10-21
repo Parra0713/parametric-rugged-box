@@ -5,10 +5,12 @@
  * con el acabado de la placa (PEI texturizado, liso, etc.).
  *
  *  - Grabado (engrave, recomendado): las celdas son cavidades. Su "techo" se
- *    imprime como puente; con celdas ≤ ~15 mm el puente es limpio.
+ *    imprime como puente.
  *  - Relieve (emboss): los nervios sobresalen. Se añade SIEMPRE un marco
  *    perimetral para que la tapa apoye plana; la superficie entre nervios se
- *    imprime como puente, así que solo es recomendable con patrones densos.
+ *    imprime como puente.
+ *  En ambos casos `limitBridges` garantiza que ningún puente supere
+ *  D.maxBridge (10 mm: a partir de ahí Orca/Bambu Studio ponen soporte).
  *
  * Todo se trabaja en 2D (CrossSection) y se extruye una única vez: es la
  * forma más barata de generar cientos de celdas.
@@ -77,6 +79,44 @@ function crossCells(D, P, area) {
     ribs.push(a.subtract(a.offset(-rib, 'Round', 2, 24)));
   }
   return filterSmall(inner.subtract(CS().union(ribs)), rib * rib * 4);
+}
+
+/** ¿Cabe un círculo de diámetro w dentro de la sección? */
+const widerThan = (cs, w) => !cs.offset(-w / 2, 'Round', 2, 12).isEmpty();
+
+/**
+ * Limitador de puentes. La tapa se imprime boca abajo: toda cavidad de su cara
+ * superior es un techo en el aire. Las celdas más anchas que `maxW` reciben
+ * nervios finos paralelos a su eje mayor, con paso ≤ 0.8·maxW, de modo que
+ * ningún puente supere el límite a partir del cual el laminador pone soporte.
+ */
+export function limitBridges(cs, maxW, rib) {
+  if (!cs) return { cs, split: 0 };
+  let split = 0;
+  const out = [];
+  for (const piece of cs.decompose()) {
+    if (!widerThan(piece, maxW)) { out.push(piece); continue; }
+    // Eje mayor (PCA de los vértices).
+    const pts = piece.toPolygons().flat();
+    let mx = 0, my = 0;
+    for (const [x, y] of pts) { mx += x; my += y; }
+    mx /= pts.length; my /= pts.length;
+    let sxx = 0, syy = 0, sxy = 0;
+    for (const [x, y] of pts) { sxx += (x - mx) ** 2; syy += (y - my) ** 2; sxy += (x - mx) * (y - my); }
+    const ang = (0.5 * Math.atan2(2 * sxy, sxx - syy) * 180) / Math.PI;
+    const loc = piece.translate([-mx, -my]).rotate(-ang);
+    const b = loc.bounds();
+    const W = b.max[1] - b.min[1], Lx = b.max[0] - b.min[0] + 2;
+    const n = Math.max(1, Math.ceil(W / (0.8 * maxW + rib)) - 1);
+    const bars = [];
+    for (let i = 1; i <= n; i++) {
+      const y = b.min[1] + (W * i) / (n + 1);
+      bars.push(CS().square([Lx, rib], true).translate([(b.min[0] + b.max[0]) / 2, y]));
+    }
+    out.push(loc.subtract(CS().union(bars)).rotate(ang).translate([mx, my]));
+    split++;
+  }
+  return { cs: out.length ? CS().compose(out.flatMap((o) => o.decompose())) : null, split };
 }
 
 /** Elimina astillas: islas con área menor a `minArea`. */
@@ -245,15 +285,20 @@ export function lidRelief(D, P, svg) {
   let logo = logoSection(svg);
 
   if (D.stack) {
-    // Interfaz de apilado: marco perimetral + nervios rectos, misma altura hs.
-    // Impresa boca abajo, marco y nervios apoyan en la cama y la piel de la
-    // tapa solo puentea entre nervios (≤ 30 mm). El pie de la caja de arriba
-    // entra en el marco y sus ranuras abrazan los nervios.
+    // Interfaz de apilado: marco perimetral + nervios paralelos al lado largo,
+    // misma altura hs. Impresa boca abajo, marco y nervios apoyan en la cama
+    // y la piel de la tapa solo puentea entre nervios (≤ 0.8·maxBridge: sin
+    // soportes). El pie de la caja de arriba entra en el marco y sus ranuras
+    // abrazan los nervios.
     const outerA = rrOffset(D, D.t - 0.5);
     const inner = rrOffset(D, D.t - D.fw);
     let raised = outerA.subtract(inner);
     const ribs = stackLines(D, D.rw, 400);
     if (ribs) raised = raised.add(ribs.intersect(inner.offset(-0.01)));
+    // Garantía: cualquier zona entre nervios más ancha que el límite (p. ej.
+    // en un octógono) recibe un nervio extra.
+    const lim = limitBridges(inner.subtract(raised), D.maxBridge, D.rw);
+    if (lim.split) raised = inner.subtract(lim.cs).add(outerA.subtract(inner));
     if (D.pattern !== 'smooth' || logo) warn.push('Apilable: la cara superior de la tapa es la interfaz de apilado; el patrón y el logo no se aplican.');
     return { cut: null, add: prism(raised, zTop - 0.01, zTop + D.hs), warn };
   }
@@ -263,8 +308,14 @@ export function lidRelief(D, P, svg) {
   if (logo) logo = logo.intersect(area);
   if (logo && logo.isEmpty()) logo = null;
   if (logo && cells) cells = cells.subtract(logo.offset(P.patternRib, 'Round', 2, 16));
+  const maxW = D.maxBridge || 10;
 
   if (D.relief === 'engrave') {
+    // Cavidades = puentes al imprimir boca abajo.
+    const lim = limitBridges(cells, maxW, P.patternRib);
+    cells = lim.cs;
+    if (lim.split) warn.push(`Patrón: ${lim.split} celdas superaban ${maxW} mm de puente y llevan un nervio fino (sin soportes).`);
+    if (logo && widerThan(logo, maxW)) warn.push(`Logo grabado con zonas de más de ${maxW} mm: el laminador pondrá soporte ahí. Usa "Relieve" o un logo de trazo.`);
     const region = unionAll([cells, logo]);
     if (!region || region.isEmpty()) return { cut: null, add: null, warn };
     return { cut: prism(region, zTop - D.pd, zTop + 1), add: null, warn };
@@ -278,9 +329,13 @@ export function lidRelief(D, P, svg) {
   } else {
     raised = area.subtract(area.offset(-Math.max(2, P.patternRib * 1.5), 'Round', 2, 24));
     if (lineArt && cells) raised = raised.add(cells);
-    warn.push('Relieve con patrón abierto: la tapa se imprime sobre líneas finas y el resto como puente. Usa "Grabado" o hexagonal/cruzado.');
   }
-  if (cells && !lineArt && P.patternSize > 18) warn.push('Celdas grandes en relieve: puentes > 15 mm en la primera capa sobre la cama.');
   if (logo) raised = raised.add(logo);
+  // Lo que no está en relieve es un techo en el aire (impresión boca abajo).
+  const lim = limitBridges(area.subtract(raised), maxW, P.patternRib);
+  if (lim.split) {
+    raised = lim.cs ? area.subtract(lim.cs) : area;
+    warn.push(`Relieve: ${lim.split} zonas superaban ${maxW} mm de puente y llevan nervios finos (sin soportes).`);
+  }
   return { cut: null, add: prism(raised, zTop - 0.01, zTop + D.pd), warn };
 }

@@ -20,6 +20,7 @@
  * impresos a presión (agujero ciego de 1.70 mm). Cero tornillería.
  */
 import { M } from './geo.js';
+import { pinHeadR } from './params.js';
 
 // Matriz (u,v,w) → (y,z,x): el eje Z de un cilindro pasa a ser X.
 const ZX = [0, 1, 0, 0, 0, 0, 1, 0, 1, 0, 0, 0, 0, 0, 0, 1];
@@ -40,7 +41,7 @@ export function printedPin(D, span, pinD = D.pinD) {
   const barb = D.clr + 0.4;                        // sobresale 0.4 mm del taladro
   const Lp = span + barbH + 0.3;                   // el hombro sale 0.3 mm
   const body = xCyl(0, Lp, rp, rp, seg);
-  const head = xCyl(-headT, headT, rp * 1.75, rp * 1.75, seg);
+  const head = xCyl(-headT, headT, pinHeadR(pinD), pinHeadR(pinD), seg);
   // Rampa: ancha en el hombro (x = Lp − barbH), estrecha en la punta.
   let teeth = xCyl(Lp - barbH, barbH, rp + barb, rp - 0.2, seg);
   // Dientes solo en ±Y: se recortan en Z para que la flexión sea en el plano.
@@ -60,7 +61,10 @@ export function printedPin(D, span, pinD = D.pinD) {
 
 /** Tapón a presión para el pasador de filamento (agujero ciego). */
 export function filamentCap(D) {
-  const outer = M().cylinder(2.4, 2.6, 2.6, D.seg);
+  // Ø4 (D.capR): cabe bajo la banda junto a la mejilla del cierre. Chaflán
+  // de 0.4 en la cara vista (fondo cerrado, sobre la cama al imprimir).
+  const R = D.capR ?? 2.0;
+  const outer = M().union([M().cylinder(0.4, R - 0.4, R, D.seg), M().cylinder(2.0, R, R, D.seg).translate([0, 0, 0.4])]);
   const hole = M().cylinder(2.0, D.capHoleD / 2, D.capHoleD / 2, D.seg).translate([0, 0, 0.6]);
   // Chaflán de entrada para guiar el filamento.
   const lead = M().cylinder(0.4, D.capHoleD / 2, D.capHoleD / 2 + 0.3, D.seg).translate([0, 0, 2.0001]);

@@ -15,6 +15,9 @@
  *      no quedan voladizos sin soporte (contando aletas y soportes).
  *   6. Apilable: asienta sin interferencia y bloquea desplazamientos de 0.6 mm.
  *   7. Insertos: encajan sin interferencia y no invaden el contenido.
+ *   8. Montaje real: pasadores y tapones no se solapan con la caja y se pueden
+ *      colocar (camino libre); el filamento entra recto.
+ *   9. Sin soportes: en las piezas planas ningún puente > puente máximo (10 mm).
  * Escribe el detalle en logs/sweep-<fecha>.log y un resumen en logs/sweep-latest.json.
  */
 import Module from 'manifold-3d';
@@ -24,6 +27,7 @@ import { DEFAULTS, derive } from '../src/engine/params.js';
 import { M, CS } from '../src/engine/geo.js';
 import { overhangRegions } from '../src/engine/tilt.js';
 import { pack } from '../src/packer.js';
+import { pinChecks, bridgeChecks } from './lib/assembly.mjs';
 
 await init(Module);
 const { hinges, latches, buildBase, buildLid } = _internal;
@@ -73,7 +77,13 @@ SIZES.forEach(([L, W, bd, ld], i) => {
 }
 // Casos girados (ancho > largo) y del barrido rápido.
 cases.push({ name: '25×120 girada', p: { innerL: 25, innerW: 120, baseDepth: 20, lidDepth: 5 } });
-if (args.quick) cases = cases.filter((c) => /^(20×20|60×40|120×80|250×170|380×260) estándar|apilable|alojamiento|varios/.test(c.name)).slice(0, 8);
+// Pasadores forzados (montaje real) y apilado en más formas.
+cases.push({ name: '45×30 pasadores impresos', p: { innerL: 45, innerW: 30, baseDepth: 18, lidDepth: 6, pinMode: 'printed' } });
+cases.push({ name: '160×100 filamento + laberinto', p: { innerL: 160, innerW: 100, baseDepth: 40, lidDepth: 15, pinMode: 'filament', sealMode: 'labyrinth' } });
+cases.push({ name: '320×220 impresos (3 bisagras)', p: { innerL: 320, innerW: 220, baseDepth: 40, lidDepth: 15, pinMode: 'printed' } });
+cases.push({ name: '120×80 apilable + octógono', p: { stackable: true, cornerCut: 18 } });
+cases.push({ name: '60×40 apilable + filamento', p: { innerL: 60, innerW: 40, baseDepth: 21, lidDepth: 9, stackable: true } });
+if (args.quick) cases = cases.filter((c) => /^(20×20|60×40|120×80|250×170|380×260) estándar|apilable|alojamiento|varios|impresos \(/.test(c.name)).slice(0, 9);
 if (args.filter) cases = cases.filter((c) => c.name.includes(args.filter));
 if (args.chunk) {
   const [k, n] = String(args.chunk).split('/').map(Number);
@@ -161,6 +171,9 @@ for (const c of cases) {
       check(vo < 0.05, `${pt.name}: el contenido cabe en su alojamiento (${vo.toFixed(3)} mm³)`);
     }
   }
+  // Montaje real de pasadores y tapones + impresión plana sin soportes.
+  for (const x of pinChecks(r, D, base, lid)) check(x.ok, x.msg);
+  for (const x of bridgeChecks(r, r.D.maxBridge)) check(x.ok, x.msg);
   say(`  ${res.fails.length ? '✘ ' + res.fails.join(' | ') : '✔ correcto'} (${res.ms} ms)`);
   summary.push(res);
   _internal.cleanup();

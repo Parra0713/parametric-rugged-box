@@ -25,7 +25,7 @@
  * holgura objeto‑alojamiento 0.5–3 mm y huecos para dedo de Ø20 mm
  * (Tooltrace), alojamientos pasantes o con profundidad única por bandeja.
  */
-import { CS, prism, frustum, unionAll } from './geo.js';
+import { CS, prism, frustum, unionAll, steppedChamfer } from './geo.js';
 import { rrOffset } from './seal.js';
 
 /** Eje principal (PCA) de un polígono: centroide, dirección mayor y menor. */
@@ -164,7 +164,9 @@ export function baseInsert(D, P, contentPolys) {
   if (pocket) {
     solid = solid.subtract(prism(pocket, -1, H + 1));
     // Chaflán de entrada de 0.6 mm (guía al meter el objeto).
-    solid = solid.subtract(frustum(pocket, H - 0.6, pocket.offset(0.6, 'Round', 2, 24), H + 0.01));
+    // (Escalonado: el alojamiento no es convexo; un frustum —envolvente
+    // convexa— se comía la cubierta entre huecos en los primeros 0.6 mm.)
+    solid = solid.subtract(steppedChamfer(pocket, H - 0.6, H + 0.01, 0.6, D.lh));
   }
   solid = solid.translate([0, 0, D.floorTop]);
   // Impresión: cubierta sobre la cama (voltear en Z e Y).

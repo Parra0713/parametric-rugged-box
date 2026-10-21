@@ -14,8 +14,8 @@
  *       aids       → mallas auxiliares ya en coordenadas de impresión
  *                    (orejas anti‑warping, cuna de soporte)
  */
-import { installGC, cleanup, prism, frustum, unionAll, toMesh, M, CS, roundRect } from './geo.js';
-import { derive } from './params.js';
+import { installGC, cleanup, prism, frustum, unionAll, toMesh, M, CS, roundRect, yzExtrude, teardrop } from './geo.js';
+import { derive, pinHeadR } from './params.js';
 import { rrOffset, grooveCut, tongues, gasket, stackLines } from './seal.js';
 import { hinges, knuckleSpans } from './hinge.js';
 import { latches } from './latch.js';
@@ -165,6 +165,18 @@ function buildBase(D, H, L, report) {
     core = core.add(bump);
   }
 
+  // Canal de montaje del pasador del cierre a través del nervio de esquina
+  // (solo si ningún lado del eje tiene recorrido libre): teardrop hacia
+  // arriba, imprimible sin soporte.
+  if (D.ribs && D.latch.grooves?.length) {
+    const r = pinHeadR(D.latchPinD) + 0.3;
+    const ribZone = prism(cornerZones(D).subtract(rrOffset(D, D.t - 0.3)), -1, Hb + 1);
+    for (const g of D.latch.grooves) {
+      const x0 = g.side > 0 ? g.x : -D.Lo, x1 = g.side > 0 ? D.Lo : g.x;
+      core = core.subtract(yzExtrude(teardrop(D.yp, D.zp, r, true, D.seg), x0, x1).intersect(ribZone));
+    }
+  }
+
   let body = unionAll([core, H.base, L.lugs]);
   for (const g of grooveCut(D)) body = body.subtract(g);
   body = body.subtract(L.pockets).subtract(H.baseHoles).subtract(L.lugHoles);
@@ -193,7 +205,7 @@ function buildBase(D, H, L, report) {
 
 /** Huecos de la placa base Gridfinity (perfil estándar, abiertos hasta el fondo). */
 function gridfinitySockets(D) {
-  const z = D.floor;
+  const z = D.floorTop - D.gbH;                 // sobre el pie de apilado si lo hay
   const a = roundRect(36.3, 36.3, 1.15, D.seg);
   const b = roundRect(37.7, 37.7, 1.85, D.seg);
   const c = roundRect(42, 42, 4, D.seg);
@@ -587,11 +599,14 @@ export function build(P, svg, opt = {}) {
     const caps = [];
     D.filament = {};
     const axisZ = (d) => d / 2 - 0.12 * d;
+    // Pasador con la cabeza en el lado `side` (−1: −X; +1: +X, girado 180° en Z).
+    // Holgura axial de 0.2 mm entre la cabeza y la cara del nudillo/mejilla.
+    const pinAt = (xc, span, side, y, z) => (side > 0 ? mul(T(xc + span / 2 + 0.2, y, z), ROTZ180) : T(xc - span / 2 - 0.2, y, z));
     if (D.pinMode === 'printed') {
-      const hp = printedPin(D, D.hinge.len, D.pinD);
+      const hp = printedPin(D, D.hinge.len + 0.2, D.pinD);
       parts.push(part('hingePin', 'Pasador bisagra', hp.solid, {
         print: I4(),
-        instances: D.hinge.xs.map((xc) => T(xc - D.hinge.len / 2, D.ya, D.za + z0 - axisZ(D.pinD))),
+        instances: D.hinge.xs.map((xc, i) => pinAt(xc, D.hinge.len, D.hinge.headSide[i], D.ya, D.za + z0 - axisZ(D.pinD))),
         qty: D.hinge.n, material: 'PETG / PLA (acostado)', length: hp.length,
       }, normals));
     } else {
@@ -599,10 +614,10 @@ export function build(P, svg, opt = {}) {
       D.filament.hinge = filamentLength(D.hinge.len); D.filament.hingeQty = D.hinge.n;
     }
     if (D.latchPinMode === 'printed') {
-      const lpn = printedPin(D, D.latch.span, D.latchPinD);
+      const lpn = printedPin(D, D.latch.span + 0.2, D.latchPinD);
       parts.push(part('latchPin', 'Pasador cierre', lpn.solid, {
         print: I4(),
-        instances: D.latch.xs.map((xc) => T(xc - D.latch.span / 2, D.yp, D.zp + z0 - axisZ(D.latchPinD))),
+        instances: D.latch.xs.map((xc, i) => pinAt(xc, D.latch.span, D.latch.headSide[i], D.yp, D.zp + z0 - axisZ(D.latchPinD))),
         qty: D.latch.n, material: 'PETG / PLA (acostado)', length: lpn.length,
       }, normals));
     } else {

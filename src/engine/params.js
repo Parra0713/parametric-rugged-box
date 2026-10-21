@@ -64,7 +64,7 @@ export const DEFAULTS = {
   pattern: 'hex',       // 'smooth' | 'hex' | 'stripes' | 'cross' | 'circuit' | 'radial'
   relief: 'engrave',    // 'engrave' (grabado) | 'emboss' (relieve)
   patternDepth: 0.8,
-  patternSize: 12,
+  patternSize: 11.5,    // celda de 9.9 mm: puente < 10 mm al imprimir boca abajo
   patternRib: 1.6,
   patternMargin: 5,
   stripeAngle: 45,
@@ -100,6 +100,7 @@ export const DEFAULTS = {
   // --- Soportes ---
   overhangSupports: true, // soportes automáticos en voladizos de partes salientes
   overhangAngle: 50,    // ángulo máximo de voladizo sin soporte
+  maxBridge: 10,        // puente más largo sin soporte (Orca/Bambu: 10 mm por defecto)
   supportPitch: 3,      // paso de la rejilla de los soportes
 
   // --- Contenido (SVG calcado de la pieza real) ---
@@ -123,6 +124,7 @@ export function migrate(saved) {
   }
   if (s.gridfinity === true) s.gridfinity = 'feet';
   if (s.gridfinity === false) s.gridfinity = 'off';
+  if (s.patternSize === 12) s.patternSize = 11.5;   // antiguo valor por defecto (celda > 10 mm)
   delete s.innerH; delete s.lidFrac;
   return s;
 }
@@ -262,6 +264,7 @@ export const SCHEMA = [
     { k: 'aidsInPart', label: 'Soportes dentro del STL de la pieza', type: 'toggle' },
     { k: 'overhangSupports', label: 'Soportar partes que sobresalen', type: 'toggle', adv: true },
     { k: 'overhangAngle', label: 'Voladizo máximo sin soporte', type: 'range', min: 40, max: 65, step: 1, unit: '°', adv: true },
+    { k: 'maxBridge', label: 'Puente máximo sin soporte', type: 'range', min: 5, max: 20, step: 0.5, unit: 'mm', adv: true, hint: 'Orca/Bambu soportan puentes > 10 mm: el diseño se mantiene por debajo' },
     { k: 'supportPitch', label: 'Densidad de soportes (paso)', type: 'range', min: 2, max: 8, step: 0.5, unit: 'mm', adv: true },
     { k: 'finSpacing', label: 'Separación de aletas (0 = auto)', type: 'range', min: 0, max: 80, step: 1, unit: 'mm', adv: true },
     { k: 'finReach', label: 'Alcance de aletas (0 = auto)', type: 'range', min: 0, max: 100, step: 5, unit: '%', adv: true },
@@ -402,6 +405,9 @@ export function derive(P) {
   D.sw = D.Wi / 2 + D.t;
   D.sb = D.sw + D.bo;
   D.sp = r2(D.sw + 0.6 + D.rl);
+  // Filamento: el eje queda por fuera de la cara de la banda/nervios de
+  // esquina (sb) con holgura, para poder meter el trozo de filamento recto.
+  if (D.latchPinMode === 'filament') D.sp = r2(Math.max(D.sp, D.sb + 0.9 + 0.2));
   D.skt = r2(Math.max(D.sb + 1.6, 2 * (D.sp + 0.4) - D.sb - 0.3 + D.kc));
   D.kd = r2(D.skt - D.sb);
   D.spi = r2(D.skt + 0.4);
@@ -409,6 +415,22 @@ export function derive(P) {
   D.hh = Math.max(2.0, D.lt);
   // y en el marco interno (frente = −Y)
   D.yw = -D.sw; D.yfb = -D.sb; D.yp = -D.sp;
+
+  /* ---- Montaje real de los pasadores del cierre ----
+   * El tapón del filamento (o la cabeza del pasador impreso) se apoya en la
+   * cara exterior de la mejilla, justo bajo la banda. Antes el chaflán de 45°
+   * de la banda invadía ese sitio (tapones imposibles de montar). Se baja el
+   * eje lo justo para que el elemento de retención (radio R + holgura) libre
+   * el chaflán y la cara inferior de la banda. Cotas relativas a Hb = 0.  */
+  D.capR = 2.0;                                   // tapón Ø4 (agujero ciego 1.70)
+  {
+    const R = (D.latchPinMode === 'filament' ? D.capR : pinHeadR(D.latchPinD)) + 0.25;
+    const zb = -D.bandH, zc = zb - D.bo, zp0 = -D.gd - 1.0 - D.rl;
+    let zp = Math.min(zp0, zc + (D.sp - D.sw) - Math.SQRT2 * R);          // chaflán a 45°
+    const dy = D.sp - D.sb;
+    if (dy < R) zp = Math.min(zp, zb - Math.sqrt(R * R - Math.max(0, dy) ** 2));   // cara inferior
+    D.zpDrop = r2(Math.max(0, zp0 - zp));
+  }
 
   /* ---- Anti hull‑line ---- */
   D.fc = r2(snapH(clamp(P.floorChamfer, 0, Math.min(D.Li, D.Wi) / 4)));
@@ -424,14 +446,20 @@ export function derive(P) {
   D.hs = 2.0;                        // altura del marco de apilado
   D.fw = 3.0;                        // ancho del marco de apilado
   D.sclr = 0.3;                      // holgura de apilado
-  // Interfaz de apilado (ver stackInterface en pattern.js):
-  //  tapa → marco perimetral + nervios rectos, todo a altura hs (se imprime
-  //         boca abajo: todo apoya en la cama, la piel solo puentea ≤ 30 mm);
+  // Puente máximo sin soporte: Orca/Bambu Studio soportan cualquier puente
+  // de más de 10 mm (por defecto). Toda zona en el aire de una pieza impresa
+  // plana se diseña por debajo de este valor.
+  D.maxBridge = clamp(P.maxBridge || 10, 4, 30);
+  // Interfaz de apilado (ver lidRelief en pattern.js):
+  //  tapa → marco perimetral + nervios paralelos al lado largo, todo a altura
+  //         hs. Se imprime boca abajo: marco y nervios apoyan en la cama y la
+  //         piel puentea entre nervios ≤ 0.8·maxBridge (sin soportes).
   //  base → pie estrecho de altura hf que entra en el marco, con ranuras donde
-  //         encajan los nervios (puentes de ~2 mm). Bloqueo en X e Y.
+  //         encajan los nervios (techo de ranura = puente de ~2.3 mm). El
+  //         marco bloquea en X e Y; las ranuras tienen holgura amplia.
   D.hf = r2(D.hs + 0.3);             // altura del pie (> hs: apoya en la piel, no en el marco)
   D.rw = r2(Math.max(1.2, 3 * P.lineWidth));   // ancho de nervio
-  D.gwS = r2(D.rw + 0.7);           // ancho de ranura del pie
+  D.gwS = r2(D.rw + 1.0);           // ancho de ranura del pie (0.5 mm por lado)
   D.stackRibs = { xs: [], ys: [] };
   const engr = !D.stack && P.relief === 'engrave' && P.pattern !== 'smooth';
   D.topT = r2(snapH(engr ? Math.max(P.top, D.pd + 1.2) : P.top));
@@ -465,18 +493,20 @@ export function derive(P) {
   }
   D.floorTop = r2(D.floor + (D.gfPlate ? D.gbH : 0) + (D.stack ? D.hf : 0));   // suelo útil
   if (D.stack) {
-    // Nervios cada ≤ 30 mm dentro del marco, en las dos direcciones si el
-    // ancho lo justifica (y siempre lejos del borde del marco).
-    const inL = D.Li + 2 * (D.t - D.fw) - 8, inW = D.Wi + 2 * (D.t - D.fw) - 8;
-    const lines = (len) => { const n = Math.max(1, Math.ceil(len / 30) - 1); return Array.from({ length: n }, (_, i) => r2(-len / 2 + (len * (i + 1)) / (n + 1))); };
-    D.stackRibs.xs = inL > 20 ? lines(inL) : [];
-    D.stackRibs.ys = inW > 60 ? lines(inW) : [];
+    // Nervios paralelos al lado largo (menos nervios y ranuras más largas y
+    // rectas en la base), con paso ≤ 0.8·maxBridge + nervio entre bordes.
+    const inW = D.Wi + 2 * (D.t - D.fw);
+    const pitch = 0.8 * D.maxBridge + D.rw;
+    const n = Math.max(0, Math.ceil(inW / pitch) - 1);
+    D.stackRibs.ys = Array.from({ length: n }, (_, i) => r2(-inW / 2 + (inW * (i + 1)) / (n + 1)));
+    D.stackRibs.xs = [];
+    D.stackRibs.pitch = r2(inW / (n + 1));
   }
 
   /* ---- Alturas ---- */
   // Base: el barril del cierre va bajo el fondo de la ranura; se necesita
   // sitio para él y su orejeta.
-  const latchNeed = D.gd + 1.0 + 2 * D.rl + 0.8;
+  const latchNeed = D.gd + 1.0 + 2 * D.rl + 0.8 + D.zpDrop;
   const DbMin = r2(Math.max(latchNeed - D.floorTop, D.fc + 2, 5));
   let Db = P.baseDepth;
   if (Db < DbMin) { warn.push(`Base demasiado baja para los cierres: profundidad ajustada a ${DbMin} mm.`); Db = DbMin; }
@@ -495,7 +525,7 @@ export function derive(P) {
   D.fcl = r2(Math.max(0, Math.min(D.fc, D.Dl - 0.4)));  // chaflán interior de la tapa
 
   /* ---- Cierre: alturas ---- */
-  D.zp = r2(D.Hb - D.gd - 1.0 - D.rl);       // eje del barril
+  D.zp = r2(D.Hb - D.gd - 1.0 - D.rl - D.zpDrop);   // eje del barril
   D.zkt = r2(D.Hb + D.bandHl);               // cara superior del retén
   D.zc = r2(D.zkt - D.pre);                  // cara de agarre del gancho
 
@@ -544,6 +574,13 @@ export function derive(P) {
   while (nH > 1 && nH * Math.max(Lh, minHinge) + (nH - 1) * 8 > avail) nH--;
   Lh = clamp(Math.min(Lh, (avail - 8 * (nH - 1)) / nH), minHinge, 1e9);
   if (nH === 1) Lh = Math.max(Lh, Math.min(avail, 0.5 * D.Lo));   // cajas pequeñas: usa el largo disponible
+  // Con 3+ bisagras y pasador impreso, la central se monta por un hueco entre
+  // bisagras: ese hueco debe admitir el pasador entero (cabeza incluida).
+  if (nH >= 3 && D.pinMode === 'printed') {
+    const pinNeed = (len) => len + 0.2 + 1.5 + Math.max(1.6, 0.45 * D.pinD) + 3;
+    const gap = (len) => { const xs = spread(nH, avail, len); return xs[1] - xs[0] - len; };
+    while (Lh > minHinge + 1 && gap(Lh) < pinNeed(Lh)) Lh -= 1;
+  }
   let nk = 5;
   let kl = (Lh - (nk - 1) * D.ag) / nk;
   if (kl < Math.max(minKl, 6)) { nk = 3; kl = (Lh - 2 * D.ag) / 3; }
@@ -560,6 +597,50 @@ export function derive(P) {
     span = D.latchW + 2 * (D.ag + D.cheekW);
   }
   D.latch = { n: nL, span: r2(span), xs: spread(nL, avail, span) };
+
+  // Margen de montaje: entre el extremo de cada mecanismo y el nervio de
+  // esquina quedan ≥ 6 mm libres (tapón 2.4 + empuje 2.2 + holgura) para
+  // colocar tapones y meter el filamento/pasador. Los nervios ceden.
+  if (D.ribs) {
+    const acc = 6;
+    const maxEnd = Math.max(...D.hinge.xs.map((x) => Math.abs(x) + D.hinge.len / 2),
+      ...D.latch.xs.map((x) => Math.abs(x) + D.latch.span / 2));
+    const cwMax = D.Lo / 2 - D.ro - maxEnd - acc;
+    if (cwMax < D.cw) {
+      if (cwMax < 2.5) { D.ribs = false; D.cw = 0; D.snapped.push('nervios de esquina omitidos: dejan sitio para montar los pasadores'); }
+      else { D.cw = r2(cwMax); D.snapped.push(`nervios de esquina acortados a ${D.cw} mm para montar los pasadores`); }
+    }
+  }
+
+  /* ---- Lado por el que se monta cada pasador ----
+   * headSide = lado de la cabeza (−1 = −X, +1 = +X): el pasador impreso entra
+   * por ese lado y necesita ese tramo del eje libre en toda su longitud.
+   *  - Bisagras: cabezas hacia los extremos de la caja (nunca atravesando la
+   *    otra bisagra), donde el eje queda fuera de banda y nervios.
+   *  - Cierres: el eje pasa bajo la banda y junto a los nervios de esquina;
+   *    se elige el lado con recorrido libre suficiente (hacia el centro si
+   *    hay otro cierre lejos). Si ninguno basta, la cabeza va hacia fuera y
+   *    se abre un canal de montaje en el nervio de esquina (grooves).   */
+  D.hinge.headSide = D.hinge.xs.map((x) => (x > 1e-6 ? 1 : -1));
+  {
+    const headT = Math.max(1.6, 0.45 * D.latchPinD);
+    D.latch.pinLen = r2(D.latch.span + 1.2 + 0.3 + headT);
+    const need = D.latch.pinLen + 3;
+    const ribStart = D.ribs ? D.Lo / 2 - D.ro - D.cw : Infinity;
+    const xs = D.latch.xs, h = D.latch.span / 2;
+    D.latch.headSide = []; D.latch.grooves = [];
+    xs.forEach((x, i) => {
+      const freeL = i > 0 ? (x - h) - (xs[i - 1] + h) : (x - h) + ribStart;
+      const freeR = i < xs.length - 1 ? (xs[i + 1] - h) - (x + h) : ribStart - (x + h);
+      let side = freeL >= need ? -1 : freeR >= need ? 1 : 0;
+      if (freeL >= need && freeR >= need) side = x > 1e-6 ? -1 : 1;   // hacia el centro
+      if (!side) {
+        side = x > 1e-6 ? 1 : -1;                                      // hacia fuera + canal
+        if (D.latchPinMode === 'printed' && D.ribs) D.latch.grooves.push({ x: x + side * h, side });
+      }
+      D.latch.headSide.push(side);
+    });
+  }
 
   /* ---- Pies Gridfinity / origen vertical ---- */
   D.z0 = D.gfFeet ? D.gfH : 0;
@@ -591,6 +672,9 @@ export function derive(P) {
   D.seg = P.quality === 'final' ? 96 : 40;
   return D;
 }
+
+/** Radio de la cabeza del pasador impreso (pins.js usa el mismo). */
+export const pinHeadR = (d) => 0.875 * d;
 
 /** Octógono alargado (rectángulo L×W con esquinas recortadas c a 45°), antihorario. */
 export function octagonPts(L, W, c) {

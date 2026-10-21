@@ -119,6 +119,22 @@ export function frustum(csA, z0, csB, z1) {
   return M().hull([a, b]);
 }
 
+/**
+ * Chaflán de 45° para secciones NO convexas (frustum usa la envolvente
+ * convexa y rellenaría el espacio entre huecos). Escalones de una capa:
+ * en z0 la sección original, en z1 la sección crecida `d` (z0 < z1).
+ */
+export function steppedChamfer(cs, z0, z1, d, lh = 0.2) {
+  const n = Math.max(2, Math.round((z1 - z0) / lh));
+  const steps = [];
+  for (let i = 0; i < n; i++) {
+    const za = z0 + ((z1 - z0) * i) / n, zb = z0 + ((z1 - z0) * (i + 1)) / n;
+    const off = (d * (i + 0.5)) / n;
+    steps.push(prism(off > 0.01 ? cs.offset(off, 'Round', 2, 24) : cs, za, zb + 1e-3));
+  }
+  return M().union(steps);
+}
+
 // Matriz (columna mayor) que lleva (u, v, w) → (y, z, x).
 const YZ = [0, 1, 0, 0, 0, 0, 1, 0, 1, 0, 0, 0, 0, 0, 0, 1];
 
