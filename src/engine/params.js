@@ -86,6 +86,22 @@ export const DEFAULTS = {
   toothPitch: 6,        // paso de los dientes de contacto
   finGap: 0,            // holgura aleta‑pieza (0 = 1.5 capas)
 
+  // --- Insertos interiores ---
+  insertMode: 'off',    // 'off' | 'blank' | 'pockets' (alojamientos del contenido SVG)
+  insertLid: false,     // inserto en blanco para la tapa
+  insertH: 0,           // altura del inserto (0 = auto: profundidad de la base − 0.5)
+  insertTol: 0.3,       // holgura inserto ↔ caja
+  pocketTol: 0.6,       // holgura objeto ↔ alojamiento
+  insertDeck: 1.6,      // espesor de la cubierta
+  fingerCount: 'auto',  // 'auto' (2) | '0' | '1' | '2'
+  fingerD: 20,          // diámetro del hueco para dedos
+  fingerPos: 0,         // posición a lo largo del eje mayor del objeto (−100…100 %)
+
+  // --- Soportes ---
+  overhangSupports: true, // soportes automáticos en voladizos de partes salientes
+  overhangAngle: 50,    // ángulo máximo de voladizo sin soporte
+  supportPitch: 3,      // paso de la rejilla de los soportes
+
   // --- Contenido (SVG calcado de la pieza real) ---
   objClearance: 1.0,    // holgura entre el contenido y la pared interior
   objRotate: 0,         // giro del contenido en el interior
@@ -186,6 +202,19 @@ export const SCHEMA = [
     { k: 'svgOffsetX', label: 'Desplazamiento X', type: 'range', min: -150, max: 150, step: 0.5, unit: 'mm' },
     { k: 'svgOffsetY', label: 'Desplazamiento Y', type: 'range', min: -150, max: 150, step: 0.5, unit: 'mm' },
   ]},
+  { group: 'Insertos', items: [
+    { k: 'insertMode', label: 'Inserto de la base', type: 'select', options: [
+      ['off', 'Sin inserto'], ['blank', 'En blanco (hueco por debajo)'], ['pockets', 'Con alojamientos del contenido (SVG)']] },
+    { k: 'insertLid', label: 'Inserto en blanco para la tapa', type: 'toggle' },
+    { k: 'insertH', label: 'Altura (0 = auto)', type: 'range', min: 0, max: 200, step: 0.5, unit: 'mm' },
+    { k: 'insertTol', label: 'Holgura con la caja', type: 'range', min: 0, max: 1.5, step: 0.05, unit: 'mm' },
+    { k: 'pocketTol', label: 'Holgura del alojamiento', type: 'range', min: 0, max: 3, step: 0.1, unit: 'mm' },
+    { k: 'insertDeck', label: 'Espesor de cubierta', type: 'range', min: 0.8, max: 4, step: 0.2, unit: 'mm' },
+    { k: 'fingerCount', label: 'Huecos para dedos', type: 'select', options: [
+      ['auto', 'Automático (2)'], ['0', 'Ninguno'], ['1', 'Uno'], ['2', 'Dos']] },
+    { k: 'fingerD', label: 'Diámetro hueco dedo', type: 'range', min: 10, max: 40, step: 1, unit: 'mm' },
+    { k: 'fingerPos', label: 'Posición de los huecos', type: 'range', min: -100, max: 100, step: 5, unit: '%' },
+  ]},
   { group: 'Ecosistema', gridfinity: true, items: [
     { k: 'gridfinity', label: 'Gridfinity', type: 'select', options: [
       ['off', 'Desactivado'], ['baseplate', 'Placa base interior (bins dentro)'], ['feet', 'Pies (caja sobre placa)']] },
@@ -206,6 +235,9 @@ export const SCHEMA = [
     { k: 'finReach', label: 'Alcance aletas (0 = auto)', type: 'range', min: 0, max: 100, step: 5, unit: '%' },
     { k: 'toothPitch', label: 'Paso de dientes', type: 'range', min: 3, max: 15, step: 0.5, unit: 'mm' },
     { k: 'finGap', label: 'Holgura aleta (0 = auto)', type: 'range', min: 0, max: 1, step: 0.05, unit: 'mm' },
+    { k: 'overhangSupports', label: 'Soportar voladizos de partes salientes', type: 'toggle' },
+    { k: 'overhangAngle', label: 'Voladizo máximo sin soporte', type: 'range', min: 40, max: 65, step: 1, unit: '°' },
+    { k: 'supportPitch', label: 'Paso rejilla de soportes', type: 'range', min: 2, max: 8, step: 0.5, unit: 'mm' },
   ]},
 ];
 
@@ -358,6 +390,15 @@ export function derive(P) {
   D.hs = 2.0;                        // altura del marco de apilado
   D.fw = 3.0;                        // ancho del marco de apilado
   D.sclr = 0.3;                      // holgura de apilado
+  // Interfaz de apilado (ver stackInterface en pattern.js):
+  //  tapa → marco perimetral + nervios rectos, todo a altura hs (se imprime
+  //         boca abajo: todo apoya en la cama, la piel solo puentea ≤ 30 mm);
+  //  base → pie estrecho de altura hf que entra en el marco, con ranuras donde
+  //         encajan los nervios (puentes de ~2 mm). Bloqueo en X e Y.
+  D.hf = r2(D.hs + 0.3);             // altura del pie (> hs: apoya en la piel, no en el marco)
+  D.rw = r2(Math.max(1.2, 3 * P.lineWidth));   // ancho de nervio
+  D.gwS = r2(D.rw + 0.7);           // ancho de ranura del pie
+  D.stackRibs = { xs: [], ys: [] };
   const engr = !D.stack && P.relief === 'engrave' && P.pattern !== 'smooth';
   D.topT = r2(snapH(engr ? Math.max(P.top, D.pd + 1.2) : P.top));
   D.floor = r2(snapH(P.floor)); note('Fondo', P.floor, D.floor);
@@ -388,7 +429,15 @@ export function derive(P) {
     }
     if (!D.gfCells.length) { warn.push('Ninguna celda Gridfinity cabe en este contorno.'); D.gfMode = 'off'; D.gfFeet = false; D.gfPlate = false; }
   }
-  D.floorTop = r2(D.floor + (D.gfPlate ? D.gbH : 0));   // suelo útil
+  D.floorTop = r2(D.floor + (D.gfPlate ? D.gbH : 0) + (D.stack ? D.hf : 0));   // suelo útil
+  if (D.stack) {
+    // Nervios cada ≤ 30 mm dentro del marco, en las dos direcciones si el
+    // ancho lo justifica (y siempre lejos del borde del marco).
+    const inL = D.Li + 2 * (D.t - D.fw) - 8, inW = D.Wi + 2 * (D.t - D.fw) - 8;
+    const lines = (len) => { const n = Math.max(1, Math.ceil(len / 30) - 1); return Array.from({ length: n }, (_, i) => r2(-len / 2 + (len * (i + 1)) / (n + 1))); };
+    D.stackRibs.xs = inL > 20 ? lines(inL) : [];
+    D.stackRibs.ys = inW > 60 ? lines(inW) : [];
+  }
 
   /* ---- Alturas ---- */
   // Base: el barril del cierre va bajo el fondo de la ranura; se necesita

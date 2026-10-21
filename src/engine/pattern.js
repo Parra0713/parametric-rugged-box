@@ -14,7 +14,7 @@
  * forma más barata de generar cientos de celdas.
  */
 import { CS, poly, prism, unionAll } from './geo.js';
-import { rrOffset } from './seal.js';
+import { rrOffset, stackLines } from './seal.js';
 
 /** Región útil de la cara superior. */
 export function patternArea(D, P) {
@@ -245,18 +245,16 @@ export function lidRelief(D, P, svg) {
   let logo = logoSection(svg);
 
   if (D.stack) {
+    // Interfaz de apilado: marco perimetral + nervios rectos, misma altura hs.
+    // Impresa boca abajo, marco y nervios apoyan en la cama y la piel de la
+    // tapa solo puentea entre nervios (≤ 30 mm). El pie de la caja de arriba
+    // entra en el marco y sus ranuras abrazan los nervios.
     const outerA = rrOffset(D, D.t - 0.5);
     const inner = rrOffset(D, D.t - D.fw);
-    const frame = outerA.subtract(inner);
-    const support = ['hex', 'stripes', 'cross'].includes(D.pattern) ? D.pattern : 'hex';
-    const cells = cellsFor(D, { ...P, patternRib: Math.max(P.patternRib, 1.2), patternSize: Math.min(P.patternSize, 14) }, inner, support);
-    let raised = cells ? inner.subtract(cells) : inner;
-    if (D.pattern === 'circuit' || D.pattern === 'radial') {
-      const extra = cellsFor(D, P, inner, D.pattern);
-      if (extra) raised = raised.add(extra);
-    }
-    if (logo) { logo = logo.intersect(inner); raised = raised.subtract(logo.offset(P.patternRib, 'Round', 2, 16)).add(logo); }
-    raised = raised.add(frame);
+    let raised = outerA.subtract(inner);
+    const ribs = stackLines(D, D.rw, 400);
+    if (ribs) raised = raised.add(ribs.intersect(inner.offset(-0.01)));
+    if (D.pattern !== 'smooth' || logo) warn.push('Apilable: la cara superior de la tapa es la interfaz de apilado; el patrón y el logo no se aplican.');
     return { cut: null, add: prism(raised, zTop - 0.01, zTop + D.hs), warn };
   }
 
