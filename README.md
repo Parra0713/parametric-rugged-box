@@ -6,6 +6,8 @@ hermética en TPU y pasadores, sin tornillería.
 
 ![Caja abierta](docs/captura-abierta.png)
 
+![Cierres empotrados](docs/captura-cierres.png)
+
 ---
 
 ## Fase 1 — Tecnología elegida y por qué
@@ -52,12 +54,34 @@ deslizador nunca se acumulan cálculos atrasados.
 * **Tolerancias:** 0.25 mm radial en ajustes deslizantes, 0.4 mm axial entre
   nudillos, agujeros horizontales en *teardrop* (45°) y todos los voladizos
   ≤ 45° → **sin soportes** en ninguna pieza.
-* **Línea de contracción ("Benchy hull line"):** se produce cuando el tiempo
-  de capa cae de golpe (fondo macizo → solo paredes) y la capa se enfría y
-  contrae distinto. Se evita con un **chaflán interior de 45°** suelo/pared
-  (el área por capa disminuye gradualmente), la banda con **chaflán
-  inferior de 45°** (misma idea arriba) y una **ranura de sombra en V** que
-  hace coincidir cualquier marca residual con una arista intencionada.
+* **Línea de contracción ("Benchy hull line") — ataque en 4 frentes.**
+  Causa (Prusa Knowledge Base y foros Bambu/Prusa): en la transición de
+  relleno macizo a solo paredes el tiempo de capa cae de golpe; el último
+  macizo se contrae tirando de los perímetros y la capa siguiente se imprime
+  más caliente. Aparece justo encima del fondo macizo.
+  1. **Gradiente geométrico:** chaflán interior de 45° suelo/pared y
+     techo/pared; banda y bloques con chaflanes de 45° (el área por capa
+     cambia gradualmente).
+  2. **Desacople:** paredes = número entero de líneas de extrusión (sin
+     relleno ni *gap fill* pegado al perímetro exterior) y espesores
+     horizontales = capas enteras.
+  3. **Detección y ocultación:** el programa corta la pieza capa a capa en su
+     orientación de impresión, localiza las caídas de área > 40 % y coloca
+     una ranura de sombra en V exactamente en esa altura (en la base y la
+     tapa). El panel muestra cada altura crítica y cómo quedó resuelta.
+  4. **Ruptura visual + ajustes de slicer:** nervios de esquina y, en el
+     `LEEME.txt`, perímetro exterior primero, flujo de macizo 95 % y tiempo
+     mínimo de capa.
+* **Cierres empotrados y cortos:** el barril se aloja en un hueco local bajo
+  la ranura de la junta y el cierre queda al ras de dos mejillas; el retén de
+  la tapa es una barra-puente entre ellas. ~25 % más corto que la v1.
+* **Mecánica siempre en el lado largo** y reparto adaptado a la longitud
+  disponible (número y ancho de cierres/bisagras).
+* **Impresión en diagonal o inclinada:** orejas anti‑warping de 2 capas en
+  las esquinas cuando la pieza va en diagonal o casi llena la cama; si solo
+  cabe inclinada, se genera una **cuna de soporte** (placa base maciza de 3
+  capas + retícula de nervios + interfaz desprendible de 1 capa). La junta TPU
+  se divide en tramos si no cabe entera.
 
 ![Sección](docs/seccion.png)
 
@@ -65,14 +89,21 @@ deslizador nunca se acumulan cálculos atrasados.
 
 ## Fase 2 — Funciones
 
-* Medidas **interiores** como entrada; el panel muestra el `inner_corner_radius`,
+* Medidas **interiores** como entrada, con profundidad propia para base y
+  tapa (o **tapa mínima** para objetos a ras del borde); el panel muestra el `inner_corner_radius`,
   profundidades exactas y holguras recomendadas para insertos (botón *Copiar
   JSON*, y `interior.json` dentro del ZIP).
 * Bisagras y cierres adaptativos (clase S/M/L automática o forzada).
 * Junta TPU / laberinto / lengüeta simple.
-* Tapa: liso, hexagonal, estriado, reforzado cruzado + **SVG propio**, en
-  grabado (recomendado) o relieve.
-* Pies **Gridfinity** opcionales (desactivados por defecto).
+* Tapa: liso, hexagonal, estriado, reforzado cruzado, **sci‑fi circuito**
+  (semilla editable) y **sci‑fi radial** + **SVG propio**, en grabado o
+  relieve.
+* **Gridfinity:** placa base interior (los bins van dentro; botón para ajustar
+  el interior a celdas enteras) o pies bajo la caja.
+* **Apilable:** la base se estrecha con un escalón a 45° que encaja en un
+  marco sobre la tapa; la cara superior se imprime sobre una retícula de
+  nervios para no tener puentes largos.
+* Nervios de esquina y banda fina proporcionada.
 * **Optimizador de cama:** recta → 90° → **ángulo diagonal mínimo** → si no
   cabe plana, inclinación mínima sugerida (con soportes). Empaqueta todas las
   piezas en placas.
@@ -94,7 +125,7 @@ funciona sin internet.
 
 ### Opción B: desarrollo
 
-Requiere Node.js ≥ 20.
+Requiere Node.js ≥ 20 (en Windows: `winget install OpenJS.NodeJS.LTS`).
 
 ```bash
 npm install
@@ -148,3 +179,10 @@ tests/                  pruebas geométricas en Node
 ```
 
 Licencia MIT.
+
+## Fuentes de la investigación
+
+* [The Benchy hull line — Prusa Knowledge Base](https://help.prusa3d.com/en/article/the-benchy-hull-line_124745/)
+* [Layer line at transition between floor and wall — Bambu Lab Forum](https://forum.bambulab.com/t/layer-line-at-transition-between-floor-and-wall/40994)
+* [Problem with layer after solid bottom — Prusa Forum](https://forum.prusa3d.com/forum/original-prusa-i3-mk3s-mk3-how-do-i-print-this-printing-help/problem-with-layer-after-solid-bottom)
+* Especificación Gridfinity (Zack Freedman, CC‑BY): perfiles de pie y placa base.
