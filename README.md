@@ -124,11 +124,22 @@ deslizador nunca se acumulan cálculos atrasados.
   capas y separación de 1 capa con la pieza. Bisagras y cierres intactos son
   autoportantes a 45°; lo que sí necesita soporte (p. ej. la cara inferior de
   la banda en el extremo alto) queda cubierto.
-* **Apilable (rediseñado):** la tapa lleva un marco perimetral y nervios rectos
-  a la misma altura (impresa boca abajo todo apoya en la cama y la piel solo
-  puentea ≤ 30 mm); la base lleva un pie más estrecho con ranuras finas
-  (puentes de ~2 mm) donde encajan los nervios. La caja de arriba asienta
-  sobre la piel de la tapa y queda bloqueada en X e Y.
+* **Apilable sin soportes (v6.1):** la tapa lleva un marco perimetral y
+  nervios paralelos al lado largo a la misma altura, con paso ≤ 0.8 × el
+  puente máximo (impresa boca abajo, marco y nervios apoyan en la cama y la
+  piel puentea ≤ 8 mm, por debajo de los 10 mm a partir de los que Orca/Bambu
+  ponen soporte). La base lleva un pie más estrecho con ranuras de 0.5 mm de
+  holgura por lado donde entran los nervios. El marco bloquea en X e Y.
+* **Sin soportes en todas las piezas planas:** un limitador de puentes
+  añade nervios finos a cualquier celda del patrón de la tapa (grabado o
+  relieve) más ancha que el puente máximo (ajustable, 10 mm por defecto).
+* **Montaje real de pasadores (v6.1):** tapones Ø4 para el filamento; el eje
+  del cierre baja lo justo para que tapón o cabeza del pasador libren la banda;
+  con filamento el eje queda fuera de la cara de los nervios de esquina (entra
+  recto); las cabezas de las bisagras miran a los extremos y cada pasador del
+  cierre entra por el lado del eje que tiene recorrido libre; los nervios de
+  esquina dejan ≥ 6 mm para colocar tapones; con 3 bisagras impresas la
+  central tiene hueco para meter su pasador.
 * **Insertos interiores:** siguen la forma exacta del interior (también el
   octógono y el chaflán del suelo) con holgura ajustable. Solo paredes de
   2 líneas, cubierta y nervios cada ~40 mm: huecos por debajo (~10 % del
@@ -154,7 +165,7 @@ deslizador nunca se acumulan cálculos atrasados.
 * **Registro y pruebas:** tarjeta "Registro" en la interfaz (descargable en
   JSON) y barrido de regresión de 20 a 380 mm (`npm run test:sweep`) que
   comprueba integridad de piezas, colisiones, mecánica tras el bisel,
-  voladizos, apilado e insertos.
+  voladizos, apilado, insertos, montaje de pasadores y tapones, y puentes.
 * **Robustez en cajas pequeñas:** la mecánica tiene longitudes mínimas
   (nudillo ≥ 4 mm, cierre ≥ 6 mm); los nervios de esquina ceden longitud o
   se omiten antes que recortar bisagras y cierres.
@@ -177,8 +188,8 @@ deslizador nunca se acumulan cálculos atrasados.
 * **Gridfinity:** placa base interior (los bins van dentro; botón para ajustar
   el interior a celdas enteras) o pies bajo la caja.
 * **Apilable:** la base se estrecha con un escalón a 45° que encaja en un
-  marco sobre la tapa; la cara superior se imprime sobre una retícula de
-  nervios para no tener puentes largos.
+  marco sobre la tapa; la cara superior se imprime sobre nervios paralelos
+  (puentes ≤ 8 mm, sin soportes).
 * Nervios de esquina y banda fina proporcionada.
 * **Optimizador de cama:** recta → 90° → **ángulo diagonal mínimo** → si no
   cabe plana, inclinación mínima sugerida (con soportes). Empaqueta todas las
@@ -206,7 +217,8 @@ Requiere Node.js ≥ 20 (en Windows: `winget install OpenJS.NodeJS.LTS`).
 ```bash
 npm install
 npm run dev      # servidor local con recarga en caliente → http://localhost:5173
-npm test         # pruebas geométricas (interferencias, apertura, junta, cama)
+npm test         # pruebas geométricas, cama y montaje real
+npm run test:assembly  # pasadores/tapones montables + puentes ≤ 10 mm + apilado
 npm run test:sweep   # barrido de 20 a 380 mm con registro en logs/
 npm run build    # regenera dist/rugged-box.html
 ```

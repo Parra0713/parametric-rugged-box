@@ -9,7 +9,8 @@ español**. Unidades: milímetros y grados.
 ```bash
 npm run dev          # servidor Vite con recarga (http://localhost:5173)
 npm run build        # dist/rugged-box.html: UN archivo autocontenido (doble clic)
-npm test             # pruebas geométricas + optimizador de cama (~1 min)
+npm test             # geometría + cama + montaje real (~2 min)
+npm run test:assembly   # pasadores/tapones montables, puentes ≤ 10 mm, apilado (~40 s)
 npm run test:quick   # barrido rápido de tamaños (7 casos, ~15 s)
 npm run test:sweep   # barrido completo de 20 a 380 mm (~25 casos, ~30 s–2 min)
 node tests/sweep.test.mjs --chunk=1/3   # trocear en máquinas lentas
@@ -27,7 +28,7 @@ registro interno del motor) y `logs/sweep-latest.json` (resumen). **Ejecuta
 | `src/engine/params.js` | `DEFAULTS`, `SCHEMA` (la UI se genera de aquí), `derive(P)` → objeto `D` con TODAS las cotas. Función pura. |
 | `src/engine/geo.js` | Primitivas sobre manifold-3d, `installGC`/`cleanup` (memoria WASM). |
 | `src/engine/seal.js` | `rrOffset(D, d)`: contorno interior desplazado (rectángulo u octógono). Ranuras, lengüetas, junta, `stackLines`. |
-| `src/engine/hinge.js`, `latch.js`, `pins.js` | Mecánica. |
+| `src/engine/hinge.js`, `latch.js`, `pins.js` | Mecánica. Lado de montaje de cada pasador: `D.hinge.headSide`, `D.latch.headSide` (params.js). |
 | `src/engine/pattern.js` | Patrones de tapa, logo SVG, interfaz de apilado. |
 | `src/engine/insert.js` | Insertos interiores (en blanco / con alojamientos + huecos para dedos). |
 | `src/engine/tilt.js` | Impresión inclinada: bisel de contacto, aletas, detector de voladizos y soportes. |
@@ -65,6 +66,17 @@ registro interno del motor) y `logs/sweep-latest.json` (resumen). **Ejecuta
   parámetro `G` describe el contorno y si hay mecánica que proteger.
 - Memoria WASM: todo objeto creado se libera en `cleanup()` al final de
   `build`; no guardes `Manifold`/`CrossSection` entre llamadas.
+- `frustum(a, z0, b, z1)` es una ENVOLVENTE CONVEXA: solo para secciones
+  convexas (offsets de `rrOffset`). Para chaflanes de formas cualquiera
+  (alojamientos de insertos) usa `steppedChamfer`. El frustum se comía la
+  cubierta entre alojamientos.
+- **Sin soportes**: toda pieza plana debe quedar con puentes ≤ `D.maxBridge`
+  (10 mm, límite de Orca/Bambu). La tapa se imprime boca abajo: cualquier
+  cavidad de su cara superior es un techo → `limitBridges` en pattern.js.
+- **Montaje real**: un pasador/tapón no solo debe no solaparse; tiene que
+  poder llegar a su sitio. Ver `tests/lib/assembly.mjs` (`pinChecks`). La
+  cabeza del pasador impreso va en `headSide` (params.js); con `side > 0` la
+  instancia se gira 180° en Z.
 - Evita importaciones circulares (p. ej. `pattern.js` ↔ `engine.js`): las
   utilidades compartidas van en `seal.js` o `geo.js`.
 
@@ -75,6 +87,9 @@ registro interno del motor) y `logs/sweep-latest.json` (resumen). **Ejecuta
 3. Inclinada: mecánica intacta y sin voladizos > 50° sin soporte.
 4. Apilable: asienta sin interferencia y bloquea ±0.6 mm en X e Y.
 5. Insertos: sin interferencia con la caja ni con el contenido.
+6. Pasadores y tapones: no se solapan con la caja, la tapa abre sin tocarlos,
+   tienen camino de montaje libre y el filamento entra recto.
+7. Piezas planas: ningún puente/voladizo más ancho que `maxBridge`.
 
 ## Flujo con el PC del usuario
 
