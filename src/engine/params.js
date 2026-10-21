@@ -27,6 +27,7 @@ export const DEFAULTS = {
   lidDepth: 15,         // profundidad interior de la tapa
   lidMin: false,        // tapa lo más plana posible (objetos a ras del borde)
   innerR: 3,            // radio de las esquinas interiores (inner_corner_radius)
+  cornerCut: 0,         // recorte de esquinas a 45° (octógono alargado), 0 = rectángulo
 
   // --- Pared y fondos ---
   wall: 2.7,            // espesor de pared (6 líneas de 0.45 mm)
@@ -78,7 +79,16 @@ export const DEFAULTS = {
   bedX: 220,
   bedY: 220,
   bedZ: 220,
-  printAids: 'auto',    // 'auto' | 'off': orejas anti‑warping y cuna de soporte
+  printAids: 'auto',    // 'auto' | 'off': orejas, bisel de contacto y aletas
+  aidsInPart: true,     // incluir las ayudas en el STL de la pieza
+  finSpacing: 0,        // separación entre aletas (0 = automática ≈ 40 mm)
+  finReach: 0,          // alcance de las aletas en % del ancho (0 = hasta el centro de masa)
+  toothPitch: 6,        // paso de los dientes de contacto
+  finGap: 0,            // holgura aleta‑pieza (0 = 1.5 capas)
+
+  // --- Contenido (SVG calcado de la pieza real) ---
+  objClearance: 1.0,    // holgura entre el contenido y la pared interior
+  objRotate: 0,         // giro del contenido en el interior
 
   // --- Calidad ---
   quality: 'preview',
@@ -121,6 +131,11 @@ export const SCHEMA = [
     { k: 'lidDepth', label: 'Profundidad tapa', type: 'range', min: 0, max: 120, step: 0.5, unit: 'mm' },
     { k: 'lidMin', label: 'Tapa mínima (objetos a ras)', type: 'toggle' },
     { k: 'innerR', label: 'Radio esquina interior', type: 'range', min: 0.5, max: 20, step: 0.5, unit: 'mm' },
+    { k: 'cornerCut', label: 'Esquinas recortadas (octógono)', type: 'range', min: 0, max: 80, step: 0.5, unit: 'mm' },
+  ]},
+  { group: 'Contenido a medida', content: true, items: [
+    { k: 'objClearance', label: 'Holgura del contenido', type: 'range', min: 0, max: 5, step: 0.1, unit: 'mm' },
+    { k: 'objRotate', label: 'Giro del contenido', type: 'range', min: -180, max: 180, step: 0.5, unit: '°' },
   ]},
   { group: 'Estructura', items: [
     { k: 'wall', label: 'Espesor de pared', type: 'range', min: 1.2, max: 5, step: 0.05, unit: 'mm' },
@@ -182,8 +197,15 @@ export const SCHEMA = [
     { k: 'bedX', label: 'Cama X', type: 'range', min: 100, max: 500, step: 1, unit: 'mm' },
     { k: 'bedY', label: 'Cama Y', type: 'range', min: 100, max: 500, step: 1, unit: 'mm' },
     { k: 'bedZ', label: 'Altura Z', type: 'range', min: 100, max: 500, step: 1, unit: 'mm' },
-    { k: 'printAids', label: 'Ayudas de adherencia', type: 'select', options: [
-      ['auto', 'Automáticas (orejas / cuna)'], ['off', 'Desactivadas']] },
+  ]},
+  { group: 'Soportes y adherencia', items: [
+    { k: 'printAids', label: 'Ayudas', type: 'select', options: [
+      ['auto', 'Automáticas (orejas, bisel, aletas)'], ['nofins', 'Bisel y orejas, sin aletas'], ['off', 'Desactivadas']] },
+    { k: 'aidsInPart', label: 'Incluir en el STL de la pieza', type: 'toggle' },
+    { k: 'finSpacing', label: 'Separación aletas (0 = auto)', type: 'range', min: 0, max: 80, step: 1, unit: 'mm' },
+    { k: 'finReach', label: 'Alcance aletas (0 = auto)', type: 'range', min: 0, max: 100, step: 5, unit: '%' },
+    { k: 'toothPitch', label: 'Paso de dientes', type: 'range', min: 3, max: 15, step: 0.5, unit: 'mm' },
+    { k: 'finGap', label: 'Holgura aleta (0 = auto)', type: 'range', min: 0, max: 1, step: 0.05, unit: 'mm' },
   ]},
 ];
 
@@ -241,6 +263,11 @@ export function derive(P) {
 
   D.t = r2(snapW(P.wall)); note('Pared', P.wall, D.t);
   D.ri = clamp(P.innerR, 0.5, Math.min(D.Li, D.Wi) / 2 - 0.5);
+  // Esquinas recortadas: pierna del chaflán sobre el rectángulo interior.
+  D.cham = r2(clamp(P.cornerCut || 0, 0, Math.min(D.Li, D.Wi) / 2 - D.ri - 1));
+  if (D.cham < 1) D.cham = 0;
+  D.innerOutline = D.cham > 0 ? octagonPts(D.Li, D.Wi, D.cham)
+    : [[-D.Li / 2, -D.Wi / 2], [D.Li / 2, -D.Wi / 2], [D.Li / 2, D.Wi / 2], [-D.Li / 2, D.Wi / 2]];
   D.ro = D.ri + D.t;
   D.Lo = D.Li + 2 * D.t;
   D.Wo = D.Wi + 2 * D.t;
@@ -348,6 +375,19 @@ export function derive(P) {
     D.gfMode = 'off'; D.gfFeet = false;
   }
   D.gfPlate = D.gfMode === 'baseplate';
+  // Celdas que caben enteras dentro del contorno (rectángulo u octógono).
+  D.gfCells = [];
+  if (D.gfMode !== 'off') {
+    const feet = D.gfMode === 'feet';
+    const outl = feet ? octagonPts(D.Lo, D.Wo, D.cham ? D.cham + D.t * (Math.SQRT2 - 1) : 0) : D.innerOutline;
+    const half = feet ? 20.75 : 21;
+    for (let i = 0; i < D.gfNx; i++) for (let j = 0; j < D.gfNy; j++) {
+      const cx = (i - (D.gfNx - 1) / 2) * 42, cy = (j - (D.gfNy - 1) / 2) * 42;
+      const ok = [[-1, -1], [1, -1], [1, 1], [-1, 1]].every(([a, b]) => insideConvex(outl, cx + a * half, cy + b * half, feet ? 0 : 0.25));
+      if (ok) D.gfCells.push([cx, cy]);
+    }
+    if (!D.gfCells.length) { warn.push('Ninguna celda Gridfinity cabe en este contorno.'); D.gfMode = 'off'; D.gfFeet = false; D.gfPlate = false; }
+  }
   D.floorTop = r2(D.floor + (D.gfPlate ? D.gbH : 0));   // suelo útil
 
   /* ---- Alturas ---- */
@@ -395,8 +435,9 @@ export function derive(P) {
   const minCheek = 2.4;
   const minLatch = 6 + 2 * (D.ag + minCheek);
   const needMin = Math.max(minHinge, minLatch);
-  const avail0 = D.Lo - 2 * (D.ro + 2);
-  D.ribs = !!P.cornerRibs;
+  const avail0 = D.Lo - 2 * (D.ro + 2) - 2 * D.cham;    // tramo recto del lado largo
+  D.ribs = !!P.cornerRibs && D.cham === 0;
+  if (P.cornerRibs && D.cham > 0) D.snapped.push('nervios de esquina sustituidos por el recorte octogonal');
   let cw = clamp(0.08 * Math.min(D.Lo, D.Wo) + 4, 5, 12);
   if (D.ribs) {
     cw = Math.min(cw, (avail0 - needMin) / 2);
@@ -454,17 +495,34 @@ export function derive(P) {
     baseDepth: r2(D.Db),
     lidDepth: r2(D.Dl),
     closedHeight: r2(D.Db + D.Dl),
+    cornerCut: r2(D.cham),
     floorChamfer: r2(D.fc),
     lidChamfer: r2(D.fcl),
   };
   if (D.gfPlate) {
     const free = D.Db + D.Dl;
-    D.inner.gridfinity = { nx: D.rot90 ? D.gfNy : D.gfNx, ny: D.rot90 ? D.gfNx : D.gfNy,
+    D.inner.gridfinity = { cells: D.gfCells.length, nx: D.rot90 ? D.gfNy : D.gfNx, ny: D.rot90 ? D.gfNx : D.gfNy,
       freeHeight: r2(free), units: Math.floor((free - 0.5) / 7) };
   }
 
   D.seg = P.quality === 'final' ? 96 : 40;
   return D;
+}
+
+/** Octógono alargado (rectángulo L×W con esquinas recortadas c a 45°), antihorario. */
+export function octagonPts(L, W, c) {
+  const x = L / 2, y = W / 2;
+  return [[-x + c, -y], [x - c, -y], [x, -y + c], [x, y - c], [x - c, y], [-x + c, y], [-x, y - c], [-x, -y + c]];
+}
+
+/** Punto dentro de un polígono convexo antihorario (con margen m hacia dentro). */
+export function insideConvex(pts, px, py, m = 0) {
+  for (let i = 0; i < pts.length; i++) {
+    const [x0, y0] = pts[i], [x1, y1] = pts[(i + 1) % pts.length];
+    const ex = x1 - x0, ey = y1 - y0, l = Math.hypot(ex, ey);
+    if ((ex * (py - y0) - ey * (px - x0)) / l < m) return false;
+  }
+  return true;
 }
 
 /** Reparte n elementos de longitud `len` dentro de `avail`, centrados. */

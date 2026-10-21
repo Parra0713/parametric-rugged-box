@@ -28,15 +28,6 @@ function foot(seg) {
 /** Matriz de pies nx × ny centrada bajo la caja. */
 export function gridfinityFeet(D) {
   const f = foot(D.seg);
-  const out = [];
-  for (let i = 0; i < D.gfNx; i++) {
-    for (let j = 0; j < D.gfNy; j++) {
-      out.push(f.translate([
-        (i - (D.gfNx - 1) / 2) * GF_PITCH,
-        (j - (D.gfNy - 1) / 2) * GF_PITCH,
-        0,
-      ]));
-    }
-  }
+  const out = D.gfCells.map(([x, y]) => f.translate([x, y, 0]));
   return unionAll(out);
 }

@@ -8,12 +8,16 @@ import { Viewer } from './viewer.js';
 import { parseSVG, placeSVG } from './svg.js';
 import { transformVerts, hull2D, fitAngle, tiltChoose, packPlates } from './bedfit.js';
 import { stlBinary, mergeMeshes, zipStore, download } from './export.js';
+import { parseContentSVG, placeContent, minAreaRect, maxCornerCut, contentFits } from './content.js';
+import { optimize } from './optimizer.js';
+import { rotatedExtent } from './bedfit.js';
 
 /* ------------------------------------------------------------------ */
 /*  Estado                                                            */
 /* ------------------------------------------------------------------ */
 const STORE = 'ruggedbox.params.v1';
 const STORE_SVG = 'ruggedbox.svg.v1';
+const STORE_OBJ = 'ruggedbox.content.v1';
 
 function loadParams() {
   let saved = {};
@@ -36,6 +40,10 @@ const state = {
   layout: null,
   lastApplied: 0,
 };
+try {
+  const s = localStorage.getItem(STORE_OBJ);
+  if (s) { const o = JSON.parse(s); state.objText = o.text; state.objName = o.name; state.objRaw = parseContentSVG(o.text); }
+} catch { /* contorno guardado inválido */ }
 try {
   const s = localStorage.getItem(STORE_SVG);
   if (s) { const o = JSON.parse(s); state.svgText = o.text; state.svgName = o.name; state.svgRaw = parseSVG(o.text); }
@@ -70,6 +78,7 @@ function buildParams() {
     const body = el('div', { class: 'group-body' });
     if (g.svg) body.append(svgControl());
     if (g.gridfinity) body.append(gridfinitySnap());
+    if (g.content) body.append(contentControl());
     for (const it of g.items) body.append(control(it));
     root.append(el('details', { class: 'group', ...(gi < 2 || g.svg ? { open: '' } : {}) },
       el('summary', {}, g.group), body));
@@ -104,6 +113,57 @@ function control(it) {
   cb.addEventListener('change', () => setParam(it.k, cb.checked));
   controls[it.k] = { set: (x) => { cb.checked = !!x; } };
   return el('label', { class: 'field tog' }, el('span', { class: 'lbl' }, it.label), cb);
+}
+
+/**
+ * Contenido a medida: SVG calcado de la pieza real (en mm). Permite ajustar el
+ * interior al contorno y saber cuánto se pueden recortar las esquinas.
+ */
+function contentControl() {
+  const file = el('input', { type: 'file', accept: '.svg,image/svg+xml', hidden: '' });
+  const info = el('div', { class: 'small' });
+  const pick = el('button', { class: 'sm' }, 'Cargar contorno (SVG)…');
+  const fit = el('button', { class: 'sm' }, 'Ajustar interior al contenido');
+  const clear = el('button', { class: 'ghost sm' }, 'Quitar');
+  const refresh = () => {
+    const r = state.objRaw;
+    fit.hidden = clear.hidden = !r;
+    info.textContent = r
+      ? `${state.objName}: ${r.w.toFixed(1)} × ${r.h.toFixed(1)} mm (${r.note}).`
+      : 'Sube el calco de tu pieza (SVG 1:1 en mm). Se usa para dimensionar el interior y para saber cuánto se pueden recortar las esquinas sin tocarla.';
+  };
+  pick.addEventListener('click', () => file.click());
+  file.addEventListener('change', async () => {
+    const f = file.files[0];
+    if (!f) return;
+    const text = await f.text();
+    try {
+      state.objRaw = parseContentSVG(text); state.objText = text; state.objName = f.name;
+      try { localStorage.setItem(STORE_OBJ, JSON.stringify({ name: f.name, text })); } catch { /* grande */ }
+      refresh(); fitInterior();
+    } catch (e) { alert('No se pudo leer el contorno: ' + e.message); }
+    file.value = '';
+  });
+  fit.addEventListener('click', fitInterior);
+  clear.addEventListener('click', () => {
+    state.objRaw = null; state.objText = ''; state.objName = '';
+    localStorage.removeItem(STORE_OBJ); refresh(); viewer.setContent(null); renderInfo();
+  });
+  refresh();
+  return el('div', { class: 'svgbox' }, el('div', { class: 'row' }, pick, clear, file), fit, info);
+}
+
+/** Interior = rectángulo de área mínima del contenido + holgura (lado largo en X). */
+function fitInterior() {
+  const r = state.objRaw;
+  if (!r) return;
+  const m = minAreaRect(r.hull);
+  const c = 2 * state.P.objClearance;
+  state.P.objRotate = Math.round(((m.deg + 540) % 360 - 180) * 10) / 10;
+  state.P.innerL = Math.ceil((m.w + c) * 2) / 2;
+  state.P.innerW = Math.ceil((m.h + c) * 2) / 2;
+  for (const k of ['objRotate', 'innerL', 'innerW']) controls[k]?.set(state.P[k]);
+  setParam('innerL', state.P.innerL);
 }
 
 /** Botón: ajusta el interior a un número entero de celdas Gridfinity (+0.5 mm). */
@@ -214,9 +274,28 @@ async function rebuild() {
   viewer.setData(msg.r, state.layout, bed());
   const tris = msg.r.parts.reduce((s, p) => s + p.tris * p.instances.length, 0);
   setStatus('ok', `${msg.r.ms} ms · ${tris.toLocaleString('es')} triángulos · clase ${msg.r.D.cls}`);
+  updateContent();
   renderInfo();
   const sp = $('#sectionPos');
   sp.min = -Math.ceil(msg.r.D.Lband / 2); sp.max = Math.ceil(msg.r.D.Lband / 2);
+}
+
+/** Aplica una opción del optimizador (solo cambia los parámetros implicados). */
+function applyOption(a) {
+  for (const k of ['cornerCut', 'cornerRibs', 'bandProud', 'wall']) {
+    if (state.P[k] !== a.P[k]) { state.P[k] = a.P[k]; controls[k]?.set(a.P[k]); }
+  }
+  setParam('wall', state.P.wall);
+}
+
+/** Coloca el contenido en el visor y calcula sus límites. */
+function updateContent() {
+  const placed = placeContent(state.objRaw, state.P);
+  state.content = placed;
+  viewer.setContent(placed ? placed.internal : null);
+  const D = state.result?.D;
+  state.cmax = placed && D ? maxCornerCut(placed.internal, D.Li, D.Wi, state.P.objClearance) : null;
+  state.opt = optimize(state.P, state.cmax);
 }
 
 function setStatus(kind, text) {
@@ -241,18 +320,25 @@ function computeLayout(res) {
     const fit = fitAngle(hull, B.x - 2 * EDGE, B.y - 2 * EDGE);
     const tilt = fit.ok ? null : tiltChoose(xyz, B);
     fits[p.key] = { ...fit, tilt, tooTall: zMax > B.z, height: zMax };
+    const solo = (p.aids && p.aids.length) || p.tilt;
     for (let k = 0; k < p.instances.length; k++) {
-      items.push({ partId: p.key, angle: fit.angle, fit, label: p.name });
+      items.push({ partId: p.key, angle: fit.angle, fit, label: p.name, solo, hull });
     }
     fits[p.key].aids = (p.aids || []).map((a) => a.name);
   }
-  const plates = packPlates(items, { x: B.x - 2 * EDGE, y: B.y - 2 * EDGE }).map((pl) => ({
+  // Piezas con ayudas (orejas, bisel, aletas): solas y CENTRADAS en su placa,
+  // que es la colocación con la que el motor recortó las ayudas a la cama.
+  const solo = items.filter((it) => it.solo).map((it) => {
+    const e = rotatedExtent(it.hull, it.angle);
+    return { items: [{ partId: it.partId, angle: it.angle, tx: B.x / 2 - (e.x0 + e.w / 2), ty: B.y / 2 - (e.y0 + e.h / 2) }] };
+  });
+  const plates = packPlates(items.filter((it) => !it.solo), { x: B.x - 2 * EDGE, y: B.y - 2 * EDGE }).map((pl) => ({
     items: pl.items.map((it) => ({
       partId: it.partId, angle: it.angle,
       tx: it.x - it.fit.x0 + EDGE, ty: it.y - it.fit.y0 + EDGE,
     })),
   }));
-  return { fits, plates };
+  return { fits, plates: [...solo, ...plates] };
 }
 
 /* ------------------------------------------------------------------ */
@@ -289,6 +375,39 @@ function renderInfo() {
       ...(I.gridfinity ? [['Gridfinity', `${I.gridfinity.nx}×${I.gridfinity.ny} celdas · bins hasta ${I.gridfinity.units}U`, true]] : []),
     ]),
     el('p', { class: 'small' }, `Inserto: L ≤ ${I.L - 0.4} mm, W ≤ ${I.W - 0.4} mm (0.2 mm de holgura por lado), radio ≥ ${I.inner_corner_radius} mm y chaflán inferior ≥ ${I.floorChamfer} mm.`)));
+
+  // Contenido a medida.
+  if (state.content) {
+    const pc = state.content;
+    const okIn = contentFits(pc, state.P);
+    const cut = state.P.cornerCut || 0;
+    info.append(el('section', { class: 'card' + (okIn ? '' : ' key') }, el('h3', {}, 'Contenido'),
+      kv([
+        ['Contorno', `${pc.w.toFixed(1)} × ${pc.h.toFixed(1)} mm`],
+        ['Cabe en el interior', okIn ? 'sí' : 'NO: usa "Ajustar interior"', okIn],
+        ['Recorte de esquina máx.', `${state.cmax} mm`],
+        ...(cut > (state.cmax ?? 0) ? [['Aviso', `el recorte (${cut} mm) toca el contenido`]] : []),
+      ])));
+  }
+
+  // Optimizador: ¿se puede imprimir plana?
+  const o = state.opt;
+  if (o && o.status !== 'fits') {
+    const box = el('section', { class: 'card key' }, el('h3', {}, 'Imprimir plana'));
+    if (o.status === 'option') {
+      box.append(el('p', { class: 'small' }, 'La caja no cabe plana tal cual. Cambios mínimos que la hacen caber (sin inclinar, sin soportes):'));
+      o.alts.forEach((a, i) => {
+        const btn = el('button', { class: i ? 'sm' : 'sm primary' }, 'Aplicar');
+        btn.addEventListener('click', () => applyOption(a));
+        box.append(el('div', { style: 'display:flex;gap:8px;align-items:flex-start;margin:6px 0' },
+          el('div', { style: 'flex:1' }, a.changes.join(' + '),
+            el('div', { class: 'small' }, `→ ${a.fit.mode === 'diagonal' ? `diagonal ${a.fit.angle}°` : a.fit.mode}`)), btn));
+      });
+    } else {
+      box.append(el('p', { class: 'small' }, 'No cabe plana ni con los ajustes permitidos: se imprime inclinada con bisel simétrico y aletas.'));
+    }
+    info.append(box);
+  }
 
   info.append(el('section', { class: 'card' }, el('h3', {}, 'Exterior'),
     kv([['Envolvente', `${D.outerL} × ${D.outerW} × ${D.outerH} mm`], ['Pared / banda', `${D.t} / ${D.bo} mm`]])));
@@ -339,7 +458,7 @@ function renderInfo() {
     info.append(el('section', { class: 'card key' }, el('h3', {}, 'Impresión inclinada'),
       kv(tilted.flatMap((p) => [
         [`${p.name}: ángulo`, `${p.tilt.alpha}° sobre ${p.tilt.axis}`, p.tilt.alpha === 45],
-        ['Bisel de contacto', `${p.tilt.cut} mm → franja ${p.tilt.contact} mm`],
+        ['Bisel de contacto', `${p.tilt.cut} mm → franja ${p.tilt.contact} mm${p.tilt.symmetric ? ' · simétrico (4 aristas)' : ''}`],
         ['Aletas', `${p.tilt.finCount} · ${(p.tilt.finVol / 1000).toFixed(1)} cm³ (${Math.round(100 * p.tilt.finVol / Math.max(1, p.tilt.wedgeVol))} % de una cuña)`],
       ])),
       el('p', { class: 'small' }, 'A 45° fondo y paredes no necesitan soporte; las aletas solo estabilizan hasta el centro de masa y tocan la pieza con dientes de 1 línea.')));
@@ -413,8 +532,14 @@ async function exportZip() {
       const m = printMesh(p, layout.fits[p.key].angle);
       files.push({ name: `piezas/${fileName(p)}_x${p.instances.length}.stl`, data: stlBinary(m.xyz, m.tri, p.id) });
       if (m.aids.length) {
-        const ag = mergeMeshes(m.aids);
-        files.push({ name: `piezas/${fileName(p)}_ayudas.stl`, data: stlBinary(ag.xyz, ag.tri, p.id + ' ayudas') });
+        if (state.P.aidsInPart) {
+          // Pieza + ayudas en un único STL, ya colocadas para imprimir.
+          const all = mergeMeshes([{ xyz: m.xyz, tri: m.tri }, ...m.aids]);
+          files[files.length - 1] = { name: `piezas/${fileName(p)}_x${p.instances.length}_con_soportes.stl`, data: stlBinary(all.xyz, all.tri, p.id) };
+        } else {
+          const ag = mergeMeshes(m.aids);
+          files.push({ name: `piezas/${fileName(p)}_ayudas.stl`, data: stlBinary(ag.xyz, ag.tri, p.id + ' ayudas') });
+        }
       }
     }
     const B = bed();
@@ -506,7 +631,8 @@ async function exportSingles() {
         el('span', {}, `${p.name} × ${p.instances.length}`),
         el('button', { class: 'sm', onclick: () => {
           const m = printMesh(p, layout.fits[p.key].angle);
-          download(stlBinary(m.xyz, m.tri, p.id), `${fileName(p)}.stl`, 'model/stl');
+          const all = state.P.aidsInPart && m.aids.length ? mergeMeshes([{ xyz: m.xyz, tri: m.tri }, ...m.aids]) : m;
+          download(stlBinary(all.xyz, all.tri, p.id), `${fileName(p)}.stl`, 'model/stl');
         } }, 'STL')));
     }
     dlg.append(el('div', { style: 'text-align:right;margin-top:10px' }, el('button', { class: 'ghost sm', onclick: () => dlg.close() }, 'Cerrar')));

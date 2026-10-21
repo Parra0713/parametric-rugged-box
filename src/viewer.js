@@ -211,6 +211,11 @@ export class Viewer {
       s.lineTo(L, W - r); s.absarc(L - r, W - r, r, 0, Math.PI / 2);
       s.lineTo(-L + r, W); s.absarc(-L + r, W - r, r, Math.PI / 2, Math.PI);
       s.lineTo(-L, -W + r); s.absarc(-L + r, -W + r, r, Math.PI, 1.5 * Math.PI);
+      if (D.cham > 0) {            // octógono alargado
+        s.curves = []; s.currentPoint.set(0, 0);
+        D.innerOutline.forEach(([x, y], i) => (i ? s.lineTo(x, y) : s.moveTo(x, y)));
+        s.closePath();
+      }
       const g = new THREE.ExtrudeGeometry(s, { depth: I.closedHeight, bevelEnabled: false, curveSegments: 8 });
       const mesh = new THREE.Mesh(g, new THREE.MeshBasicMaterial({
         color: 0x3ddc84, transparent: true, opacity: 0.22, depthWrite: false,
@@ -224,9 +229,27 @@ export class Viewer {
       edges.userData.own = true;
       this.root.add(edges);
     }
+    if (this.content && this.content.length) {
+      // Contorno del contenido (SVG calcado), extruido a la profundidad de la base.
+      const mat = new THREE.MeshBasicMaterial({ color: 0xffb347, transparent: true, opacity: 0.35, depthWrite: false, side: THREE.DoubleSide });
+      for (const poly of this.content) {
+        const sh = new THREE.Shape(poly.map(([x, y]) => new THREE.Vector2(x, y)));
+        const g = new THREE.ExtrudeGeometry(sh, { depth: Math.max(1, D.Db), bevelEnabled: false });
+        const m = new THREE.Mesh(g, mat);
+        m.position.z = assembly.z0 + D.floorTop + 0.05;
+        m.userData.own = true;
+        this.root.add(m);
+        const e = new THREE.LineSegments(new THREE.EdgesGeometry(g, 40), new THREE.LineBasicMaterial({ color: 0xffb347 }));
+        e.position.copy(m.position); e.userData.own = true;
+        this.root.add(e);
+      }
+    }
     this.grid.visible = true;
     this.requestRender();
   }
+
+  /** Contorno del contenido en el marco interno (lista de polígonos). */
+  setContent(polys) { this.content = polys; this.rebuild(); }
 
   /** Placas de impresión, una junto a otra en +X. */
   buildPrint(byId) {

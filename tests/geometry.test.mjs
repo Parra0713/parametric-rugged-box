@@ -36,6 +36,8 @@ const cases = [
   { name: 'Estrecha 20×172 (girada)', p: { innerL: 20, innerW: 172, baseDepth: 31, lidDepth: 3, wall: 1.2, floor: 1.2, top: 1.2, bandH: 4 } },
   { name: 'Apilable + tapa mínima + circuito', p: { stackable: true, lidMin: true, pattern: 'circuit' } },
   { name: 'Sci-fi radial grabado', p: { pattern: 'radial' } },
+  { name: 'Octógono 200×120 + Gridfinity interior', p: { innerL: 200, innerW: 120, cornerCut: 25, gridfinity: 'baseplate' } },
+  { name: 'Octógono + apilable + pies', p: { innerL: 160, innerW: 90, cornerCut: 15, stackable: true } },
   { name: 'Mini 30×25', p: { innerL: 30, innerW: 25, baseDepth: 15, lidDepth: 5 } },
   { name: 'Mini 35×35 tapa mínima', p: { innerL: 35, innerW: 35, baseDepth: 12, lidMin: true } },
   { name: 'M + logo SVG (relleno + trazo)', p: { pattern: 'hex' }, svg: {

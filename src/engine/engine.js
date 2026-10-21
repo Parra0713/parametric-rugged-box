@@ -22,7 +22,7 @@ import { latches } from './latch.js';
 import { printedPin, filamentCap, filamentLength } from './pins.js';
 import { gridfinityFeet } from './gridfinity.js';
 import { lidRelief } from './pattern.js';
-import { transformVerts, hull2D, fitAngle, tiltChoose } from '../bedfit.js';
+import { transformVerts, hull2D, fitAngle, tiltChoose, rotatedExtent } from '../bedfit.js';
 import { contactCut, supportFins, wedgeVolume, rotAxis, invRigid } from './tilt.js';
 
 /* ---------------- Matrices 4×4 (columna mayor) ---------------- */
@@ -120,7 +120,7 @@ function buildBase(D, H, L, report) {
   // bordes no deben chocar con él).
   let fc = D.fc;
   if (D.gfPlate) {
-    const m = Math.min((D.Li - D.gfNx * 42) / 2, (D.Wi - D.gfNy * 42) / 2) + 0.25;
+    const m = D.cham > 0 ? 0 : Math.min((D.Li - D.gfNx * 42) / 2, (D.Wi - D.gfNy * 42) / 2) + 0.25;
     fc = Math.max(0, Math.min(fc, m - 0.1));
   }
   const ft = D.floorTop;
@@ -197,11 +197,7 @@ function gridfinitySockets(D) {
     frustum(b, z + 2.5, c, z + D.gbH),
     prism(c, z + D.gbH - 0.01, z + D.gbH + 0.4),
   ]);
-  const cells = [];
-  for (let i = 0; i < D.gfNx; i++) for (let j = 0; j < D.gfNy; j++) {
-    cells.push(cell.translate([(i - (D.gfNx - 1) / 2) * 42, (j - (D.gfNy - 1) / 2) * 42, 0]));
-  }
-  return unionAll(cells);
+  return unionAll(D.gfCells.map(([x, y]) => cell.translate([x, y, 0])));
 }
 
 /* ================================================================ */
@@ -279,24 +275,45 @@ function earsFor(D, xyz) {
   const discs = best.filter((b) => b[0] > -Infinity).map(([, x, y]) =>
     CS().circle(8, 32).translate([x, y]));
   if (!discs.length) return null;
-  return prism(CS().union(discs), 0, 2 * D.lh);
+  return CS().union(discs);                       // 2D: se recorta a la cama antes de extruir
 }
 
 /**
- * Decide las ayudas para una pieza grande (base o tapa).
- * Modifica `pt.print` si hay que inclinarla y añade `pt.aids`.
+ * Recorta una ayuda (orejas) al área real de la cama, suponiendo la pieza
+ * centrada en la cama con el giro `angle` (así la coloca la interfaz).
+ */
+function clipToBed(cs2d, hull, angle, bedX, bedY) {
+  const e = rotatedExtent(hull, angle);
+  const cx = e.x0 + e.w / 2, cy = e.y0 + e.h / 2;
+  const rect = CS().square([bedX - 2, bedY - 2], true).translate([cx, cy]).rotate(-angle);
+  return cs2d.intersect(rect);
+}
+
+/**
+ * Decide las ayudas de impresión para una pieza grande (base o tapa):
+ *  - Cabe plana: si va en diagonal o casi llena la cama → orejas en las
+ *    esquinas, recortadas para no salirse de la cama.
+ *  - No cabe plana: inclinación (45° preferente, eje que deja el apoyo en los
+ *    extremos CORTOS, sin mecánica) + bisel de contacto SIMÉTRICO en ambos
+ *    extremos, integrado en la pieza + aletas de soporte configurables.
+ * Modifica `pt` (malla, `print`, `place`) y añade `pt.aids`.
  */
 function addAids(D, P, pt, solidNative, normals) {
+  pt.aids = [];
   if (P.printAids === 'off') return;
   const bed = { x: P.bedX - 4, y: P.bedY - 4, z: P.bedZ };
   const xyz = transformVerts(pt.mesh.vert, pt.mesh.numProp, pt.print);
-  const fit = fitAngle(hull2D(xyz), bed.x, bed.y);
-  pt.aids = [];
+  const hull = hull2D(xyz);
+  const fit = fitAngle(hull, bed.x, bed.y);
   if (fit.ok) {
+    pt.place = { angle: fit.angle };
     const big = Math.max(fit.w, fit.h) > 0.7 * Math.min(bed.x, bed.y);
     if (fit.mode === 'diagonal' || big) {
       const ears = earsFor(D, xyz);
-      if (ears) pt.aids.push({ name: 'Orejas anti‑warping', ...meshOf(ears) });
+      if (ears) {
+        const clipped = clipToBed(ears, hull, fit.angle, P.bedX, P.bedY);
+        if (!clipped.isEmpty()) pt.aids.push({ name: 'Orejas anti‑warping', ...meshOf(prism(clipped, 0, 2 * D.lh)) });
+      }
     }
     return;
   }
@@ -309,9 +326,10 @@ function addAids(D, P, pt, solidNative, normals) {
   for (let i = 0, j = 0; i < hm.vertProperties.length; i += hm.numProp, j += 3) {
     hv[j] = hm.vertProperties[i]; hv[j + 1] = hm.vertProperties[i + 1]; hv[j + 2] = hm.vertProperties[i + 2];
   }
-  const tilt = tiltChoose(hv, bed);
+  // Eje Y de impresión = apoyo en los extremos x (lados cortos, sin bisagras
+  // ni cierres): permite un bisel simétrico sin tocar la mecánica.
+  const tilt = tiltChoose(hv, bed, 'Y');
   if (!tilt.ok) return;
-  // Inclinación (45° preferente) + corte diagonal de contacto + aletas.
   const Rm = rotAxis(tilt.axis, tilt.alpha);
   const Q = solidNative().transform(pt.print);
   const R0 = Q.transform(Rm);
@@ -320,18 +338,39 @@ function addAids(D, P, pt, solidNative, normals) {
   const axisLen = tilt.axis === 'X' ? bq.max[0] - bq.min[0] : bq.max[1] - bq.min[1];
   const cut = contactCut(R0, zmin, axisLen, D.t, D.lh);
   const zc = zmin + cut.h;
-  const R = (cut.h > 0 ? R0.trimByPlane([0, 0, 1], zc) : R0).translate([0, 0, -zc]);
-  const newPrint = mul(mul(T(0, 0, -zc), Rm), pt.print);
+  let Q2 = Q;
+  let symmetric = false;
   if (cut.h > 0) {
-    // El bisel forma parte de la pieza: se devuelve al marco nativo para que
-    // también se vea en el ensamblaje y se exporte con ella.
-    const native = R.transform(invRigid(newPrint));
+    // Plano de corte en el marco de impresión sin inclinar: n·p ≥ zc con
+    // n = Rmᵀ·(0,0,1). Su espejo respecto al plano medio de la pieza da el
+    // bisel simétrico del extremo opuesto.
+    const n = [Rm[2], Rm[6], Rm[10]];
+    // Bisel integrado en las CUATRO aristas del contorno (x−, x+, y−, y+),
+    // todas a la misma distancia de su arista: pieza simétrica y coherente.
+    // s0 = posición del plano respecto a la arista de contacto de la pared.
+    const zb = bq.min[2];
+    const sa = Math.hypot(n[0], n[1]), ca = n[2];
+    const onX = Math.abs(n[0]) >= Math.abs(n[1]);
+    const Cc = onX ? [Math.sign(n[0]) * -D.Lo / 2, 0, zb] : [0, Math.sign(n[1]) * -D.Wo / 2, zb];
+    const s0 = zc - (n[0] * Cc[0] + n[1] * Cc[1] + n[2] * Cc[2]);
+    const sides = D.gfFeet ? [] : [
+      [[sa, 0, ca], [-D.Lo / 2, 0, zb]], [[-sa, 0, ca], [D.Lo / 2, 0, zb]],
+      [[0, sa, ca], [0, -D.Wo / 2, zb]], [[0, -sa, ca], [0, D.Wo / 2, zb]],
+    ];
+    for (const [ni, Ci] of sides) Q2 = Q2.trimByPlane(ni, ni[0] * Ci[0] + ni[1] * Ci[1] + ni[2] * Ci[2] + s0);
+    if (!sides.length) Q2 = Q.trimByPlane(n, zc);
+    symmetric = sides.length > 0;
+    // El bisel es parte del diseño: vuelve al marco nativo (ensamblaje y STL).
+    const native = Q2.transform(invRigid(pt.print));
     Object.assign(pt, { mesh: toMesh(native, normals), volume: Math.round(native.volume()), tris: native.numTri() });
   }
-  pt.print = newPrint;
-  const fins = supportFins(R, tilt.axis, D.lw, D.lh);
+  const R = Q2.transform(Rm).translate([0, 0, -zc]);
+  pt.print = mul(mul(T(0, 0, -zc), Rm), pt.print);
+  const fins = P.printAids === 'nofins' ? null : supportFins(R, tilt.axis, D.lw, D.lh, {
+    spacing: P.finSpacing, reach: P.finReach, pitch: P.toothPitch, gap: P.finGap,
+  });
   pt.tilt = {
-    ...tilt, cut: Math.round(cut.h * 100) / 100, contact: cut.width,
+    ...tilt, cut: Math.round(cut.h * 100) / 100, contact: cut.width, symmetric,
     finVol: fins?.volume ?? 0, finCount: fins?.count ?? 0, wedgeVol: wedgeVolume(R, D.lh),
   };
   if (fins) pt.aids.push({ name: `Aletas de soporte (${fins.count} × ${tilt.alpha}° sobre ${tilt.axis})`, ...meshOf(fins.solid) });

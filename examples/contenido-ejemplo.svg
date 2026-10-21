@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="262mm" height="74.2mm" viewBox="0 0 226 64">
+  <!-- Calco de ejemplo (llave/herramienta alargada): extremos estrechos.
+       Exportado 1:1 en mm, como lo produce una app de calco. -->
+  <path d="M8 32 C8 20 22 14 34 18 L90 24 L180 22 C196 8 218 10 222 30 C224 46 206 58 186 46 L92 42 L34 46 C22 50 8 44 8 32 Z"
+        fill="none" stroke="#000" stroke-width="0.3"/>
+</svg>

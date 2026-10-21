@@ -123,14 +123,17 @@ function shadowBelow(P) {
  * Aletas bajo la pieza inclinada R (ya apoyada en z = 0).
  * @param axis eje de inclinación ('X' o 'Y'): las aletas son perpendiculares
  */
-export function supportFins(R, axis, lw, lh) {
+export function supportFins(R, axis, lw, lh, opt = {}) {
   const bb = R.boundingBox();
   const ax = axis === 'X' ? 0 : 1;
   const a0 = bb.min[ax], a1 = bb.max[ax];
   const len = a1 - a0;
-  const n = Math.max(3, Math.ceil(len / 40) + 1);
+  const spacing = opt.spacing > 0 ? opt.spacing : 40;
+  const n = Math.max(3, Math.ceil(len / spacing) + 1);
   const thick = 2 * lw;                 // 2 líneas
-  const gap = Math.max(0.25, lh * 1.5); // holgura con la pieza
+  const gap = opt.gap > 0 ? opt.gap : Math.max(0.25, lh * 1.5); // holgura con la pieza
+  const pitch = opt.pitch > 0 ? opt.pitch : 6;
+  const reachF = opt.reach > 0 ? opt.reach / 100 : null;   // null = hasta el centro de masa
   // Transformación que lleva el plano de la aleta a "horizontal" para cortar:
   //  eje X → planos x = cte → (x,y,z)→(y,z,x) ; eje Y → (x,y,z)→(x,z,−y).
   const toSlice = axis === 'X'
@@ -155,9 +158,14 @@ export function supportFins(R, axis, lw, lh) {
     const w = pb0.max[0] - pb0.min[0], uc = (pb0.min[0] + pb0.max[0]) / 2;
     let vmin = Infinity, ulow = uc;
     for (const c of P.toPolygons()) for (const [u, v] of c) if (v < vmin) { vmin = v; ulow = u; }
+    // Límite: centro de masa + 15 % del ancho, o el % fijado por el usuario
+    // medido desde la arista de apoyo.
+    const lim = reachF != null
+      ? (ulow <= uc ? pb0.min[0] + reachF * w : pb0.max[0] - reachF * w)
+      : (ulow <= uc ? uc + 0.15 * w : uc - 0.15 * w);
     const reach = ulow <= uc
-      ? CS().square([uc + 0.15 * w - (pb0.min[0] - 5), pb0.max[1] + 10], false).translate([pb0.min[0] - 5, -1])
-      : CS().square([pb0.max[0] + 5 - (uc - 0.15 * w), pb0.max[1] + 10], false).translate([uc - 0.15 * w, -1]);
+      ? CS().square([lim - (pb0.min[0] - 5), pb0.max[1] + 10], false).translate([pb0.min[0] - 5, -1])
+      : CS().square([pb0.max[0] + 5 - lim, pb0.max[1] + 10], false).translate([lim, -1]);
     // Restos de menos de 1 mm de ancho no sirven como aleta.
     let fin = keep.intersect(reach).offset(-0.5, 'Square').offset(0.5, 'Square');
     if (fin.isEmpty()) continue;
@@ -177,7 +185,7 @@ export function supportFins(R, axis, lw, lh) {
     // Dientes de contacto: tiras de 1 línea cada 6 mm que cruzan la holgura.
     const pb = P.bounds();
     const bars = [];
-    for (let u = Math.ceil(pb.min[0] / 6) * 6; u <= pb.max[0]; u += 6) bars.push(CS().square([lw, pb.max[1] + 5], false).translate([u - lw / 2, 0]));
+    for (let u = Math.ceil(pb.min[0] / pitch) * pitch; u <= pb.max[0]; u += pitch) bars.push(CS().square([lw, pb.max[1] + 5], false).translate([u - lw / 2, 0]));
     if (bars.length) {
       // Franja de la holgura (con 0.05 mm de solape con la pieza) solo junto a
       // la envolvente inferior.

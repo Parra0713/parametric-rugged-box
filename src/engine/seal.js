@@ -15,11 +15,26 @@
  * que fija la compresión de la junta exactamente al valor calculado, sin
  * depender de la fuerza del cierre.
  */
-import { roundRect, prism, frustum } from './geo.js';
+import { roundRect, prism, frustum, CS } from './geo.js';
+import { octagonPts } from './params.js';
 
-/** Contorno a una distancia `d` (hacia fuera) del rectángulo interior. */
+/**
+ * Contorno a una distancia `d` (hacia fuera) de la forma interior.
+ * La forma interior es un rectángulo redondeado o, con esquinas recortadas
+ * (D.cham > 0), un octógono alargado con los vértices redondeados (radio ri).
+ * TODO el modelo (paredes, banda, ranura, junta, tapa, patrón, apilado) se
+ * construye con offsets de esta forma, así que el octógono se propaga solo.
+ */
+const shapeCache = new WeakMap();
 export function rrOffset(D, d) {
-  return roundRect(D.Li + 2 * d, D.Wi + 2 * d, D.ri + d, D.seg);
+  if (!(D.cham > 0)) return roundRect(D.Li + 2 * d, D.Wi + 2 * d, D.ri + d, D.seg);
+  let base = shapeCache.get(D);
+  if (!base) {
+    const oct = CS().ofPolygons([octagonPts(D.Li, D.Wi, D.cham)], 'NonZero');
+    base = oct.offset(-D.ri, 'Miter', 4).offset(D.ri, 'Round', 2, D.seg);
+    shapeCache.set(D, base);
+  }
+  return Math.abs(d) < 1e-9 ? base.translate([0, 0]) : base.offset(d, 'Round', 2, D.seg);
 }
 
 /** Anillo 2D entre dos offsets del interior. */

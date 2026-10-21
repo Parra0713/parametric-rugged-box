@@ -84,6 +84,11 @@ deslizador nunca se acumulan cálculos atrasados.
     capas en las esquinas (donde empieza el despegue por contracción).
   - Si solo cabe inclinada, se **prefieren 45°**: fondo y paredes quedan en el
     límite de voladizo imprimible sin soporte.
+  - **Bisel integrado y simétrico:** el corte de contacto se convierte en un
+    chaflán del diseño aplicado a las **cuatro** aristas inferiores (base) o
+    superiores (tapa) a la misma distancia: la pieza queda simétrica y el
+    bisel también se ve en el ensamblaje. Se elige el eje de inclinación
+    que deja el apoyo en los lados cortos (sin bisagras ni cierres).
   - **Corte diagonal de contacto:** la arista que tocaría la cama se bisela
     con un plano paralelo a ella, hasta la franja más ancha que no se acerque
     a la cavidad a menos de un espesor de pared (en una tapa de 250×170:
@@ -96,6 +101,22 @@ deslizador nunca se acumulan cálculos atrasados.
     caras a 45° se sostienen solas y el material de la aleta crece con el
     cuadrado de su altura. Resultado: ~3–5 % del material de una cuña maciza.
   - La junta TPU se divide en tramos si no cabe entera.
+* **Soportes en el STL y dentro de la cama:** por defecto las ayudas se
+  exportan en el mismo STL que la pieza (`*_con_soportes.stl`) y la pieza se
+  centra sola en su placa; las orejas se recortan al área imprimible.
+  Ajustes mínimos: modo (automático / sin aletas / desactivado), separación
+  y alcance de las aletas, paso de los dientes y holgura.
+* **Contenedor a medida desde el calco SVG:** sube el contorno de tu pieza
+  (SVG 1:1, respeta mm/cm/in/px). El programa ajusta el interior al
+  rectángulo de área mínima (+ holgura) y calcula cuánto se pueden recortar
+  las esquinas sin tocarla.
+* **Esquinas recortadas (octógono alargado):** toda la caja (paredes, banda,
+  junta, tapa, patrón, apilado, Gridfinity) se genera a partir de la forma
+  interior, así que el octógono se propaga a todas las piezas.
+* **Optimizador "imprimir plana":** si la caja no cabe plana, busca la
+  combinación de menor impacto entre recortar esquinas (gratis si el
+  contenido lo permite), banda más fina o pared con una línea menos (nunca
+  < 4 líneas ni < 1.6 mm), y la aplica con un clic.
 * **Robustez en cajas pequeñas:** la mecánica tiene longitudes mínimas
   (nudillo ≥ 4 mm, cierre ≥ 6 mm); los nervios de esquina ceden longitud o
   se omiten antes que recortar bisagras y cierres.
