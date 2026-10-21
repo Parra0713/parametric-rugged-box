@@ -304,7 +304,13 @@ function clipToBed(cs2d, hull, angle, bedX, bedY) {
  *    extremos, integrado en la pieza + aletas de soporte configurables.
  * Modifica `pt` (malla, `print`, `place`) y añade `pt.aids`.
  */
-function addAids(D, P, pt, solidNative, normals) {
+/**
+ * @param G geometría del contorno de la pieza para el bisel:
+ *   { hx, hy } semiejes de las caras exteriores (contacto con la cama al
+ *   inclinar), wall espesor de pared (el bisel deja ≥ 1 pared), mech true si
+ *   la pieza lleva bisagras/cierres que el bisel no debe tocar.
+ */
+function addAids(D, P, pt, solidNative, normals, G = { hx: D.Lo / 2, hy: D.Wo / 2, wall: D.t, mech: true }) {
   pt.aids = [];
   if (P.printAids === 'off') return;
   const bed = { x: P.bedX - 4, y: P.bedY - 4, z: P.bedZ };
@@ -342,7 +348,7 @@ function addAids(D, P, pt, solidNative, normals) {
   // queda HORIZONTAL al inclinar 45° (techo en el aire). Inclinada, las capas
   // ya no son paralelas al fondo, así que ese chaflán no aporta nada: se
   // elimina en ese extremo y el rincón queda a 90° (dos caras a 45°).
-  const fcI = pt.id === 'base' ? D.fc : D.fcl;
+  const fcI = pt.id === 'base' ? D.fc : pt.id === 'lid' ? D.fcl : 0;
   if (fcI > 0) {
     for (const sx of [-1, 1]) {
       const nz = Rm[2] * (-sx) / Math.SQRT2 + Rm[10] / Math.SQRT2;   // z de Rm·n, n = (−sx,0,1)/√2
@@ -358,7 +364,7 @@ function addAids(D, P, pt, solidNative, normals) {
   const zmin = R0.boundingBox().min[2];
   const bq = Q.boundingBox();
   const axisLen = tilt.axis === 'X' ? bq.max[0] - bq.min[0] : bq.max[1] - bq.min[1];
-  const cut = contactCut(R0, zmin, axisLen, D.t, D.lh);
+  const cut = contactCut(R0, zmin, axisLen, G.wall, D.lh);
   const zc = zmin + cut.h;
   let Q2 = Q;
   let symmetric = false;
@@ -373,16 +379,16 @@ function addAids(D, P, pt, solidNative, normals) {
     const zb = bq.min[2];
     const sa = Math.hypot(n[0], n[1]), ca = n[2];
     const onX = Math.abs(n[0]) >= Math.abs(n[1]);
-    const Cc = onX ? [Math.sign(n[0]) * -D.Lo / 2, 0, zb] : [0, Math.sign(n[1]) * -D.Wo / 2, zb];
+    const Cc = onX ? [Math.sign(n[0]) * -G.hx, 0, zb] : [0, Math.sign(n[1]) * -G.hy, zb];
     const s0 = zc - (n[0] * Cc[0] + n[1] * Cc[1] + n[2] * Cc[2]);
-    const sides = D.gfFeet ? [] : [
-      [[sa, 0, ca], [-D.Lo / 2, 0, zb]], [[-sa, 0, ca], [D.Lo / 2, 0, zb]],
-      [[0, sa, ca], [0, -D.Wo / 2, zb]], [[0, -sa, ca], [0, D.Wo / 2, zb]],
+    const sides = G.mech && D.gfFeet ? [] : [
+      [[sa, 0, ca], [-G.hx, 0, zb]], [[-sa, 0, ca], [G.hx, 0, zb]],
+      [[0, sa, ca], [0, -G.hy, zb]], [[0, -sa, ca], [0, G.hy, zb]],
     ];
     // Zonas mecánicas (bisagras y cierres, por fuera de la pared): el bisel
     // NUNCA las toca. Antes el bisel de las aristas largas recortaba nudillos,
     // cartabones y mejillas (piezas "incompletas o raras" en modo inclinado).
-    const keep = mechanicsKeepOut(D, pt.print, bq);
+    const keep = G.mech ? mechanicsKeepOut(D, pt.print, bq) : null;
     const big = 4 * Math.max(bq.max[0] - bq.min[0], bq.max[1] - bq.min[1], bq.max[2] - bq.min[2]) + 100;
     const cube = M().cube([big, big, big], true).translate([(bq.min[0] + bq.max[0]) / 2, (bq.min[1] + bq.max[1]) / 2, (bq.min[2] + bq.max[2]) / 2]);
     for (const [ni, Ci] of sides) {
@@ -549,20 +555,31 @@ export function build(P, svg, opt = {}) {
     // Insertos interiores.
     if (P.insertMode && P.insertMode !== 'off') {
       const t1 = performance.now();
-      const polys = P.insertMode === 'pockets' ? (P.contentPolys || null) : null;
-      if (P.insertMode === 'pockets' && !polys) D.warn.push('Inserto con alojamientos: carga el contorno SVG del contenido (se genera en blanco).');
+      const hasObjs = (P.contentObjects && P.contentObjects.length) || (P.contentPolys && P.contentPolys.length);
+      const polys = P.insertMode === 'pockets' && hasObjs ? (P.contentPolys || []) : null;
+      if (P.insertMode === 'pockets' && !hasObjs) D.warn.push('Inserto con huecos: añade los objetos (SVG) en la pestaña Contenido (se genera en blanco).');
       const ins = baseInsert(D, P, polys);
-      parts.push(part('insert', polys ? 'Inserto con alojamientos' : 'Inserto', ins.solid, {
+      const ip = part('insert', polys ? 'Inserto con alojamientos' : 'Inserto', ins.solid, {
         print: ins.print, instances: [T(0, 0, z0)], qty: 1, material: 'PLA (relleno 0 %, 2 paredes)',
-      }, normals));
+      }, normals);
+      // Misma lógica de cama que la caja: diagonal + orejas, o inclinado con
+      // bisel simétrico, aletas y soportes de voladizos.
+      const tol = P.insertTol ?? 0.3;
+      addAids(D, P, ip, () => ins.solid, normals, { hx: D.Li / 2 - tol, hy: D.Wi / 2 - tol, wall: 2 * D.lw + 0.6, mech: false });
+      parts.push(ip);
       D.insert = ins.info;
       log(D, `inserto base: altura ${ins.info.height} mm, ${ins.info.pockets} alojamientos, ${ins.info.notches.length} huecos para dedos (${Math.round(performance.now() - t1)} ms)`);
     }
     if (P.insertLid) {
       const li = lidInsert(D, P);
-      if (li) parts.push(part('insertLid', 'Inserto de tapa', li.solid, {
-        print: li.print, instances: [T(0, 0, z0)], qty: 1, material: 'PLA (relleno 0 %, 2 paredes)',
-      }, normals));
+      if (li) {
+        const lp2 = part('insertLid', 'Inserto de tapa', li.solid, {
+          print: li.print, instances: [T(0, 0, z0)], qty: 1, material: 'PLA (relleno 0 %, 2 paredes)',
+        }, normals);
+        const tol = P.insertTol ?? 0.3;
+        addAids(D, P, lp2, () => li.solid, normals, { hx: D.Li / 2 - tol, hy: D.Wi / 2 - tol, wall: 2 * D.lw + 0.6, mech: false });
+        parts.push(lp2);
+      }
       else D.warn.push('Tapa demasiado baja para un inserto (< 3 mm de profundidad).');
     }
 
@@ -647,7 +664,7 @@ const LID_ONLY = new Set(['pattern', 'relief', 'patternDepth', 'patternSize', 'p
   'top', 'lidDepth', 'lidMin', 'bedPreset', 'bedX', 'bedY', 'bedZ', 'printAids', 'aidsInPart',
   'finSpacing', 'finReach', 'toothPitch', 'finGap', 'overhangSupports', 'overhangAngle', 'supportPitch',
   'insertMode', 'insertLid', 'insertH', 'insertTol', 'pocketTol', 'insertDeck', 'fingerCount', 'fingerD',
-  'fingerPos', 'contentPolys', 'objClearance', 'objRotate']);
+  'fingerPos', 'contentPolys', 'contentObjects', 'objClearance', 'objRotate', 'objSpacing', 'objRotateAllow', 'contentFit']);
 function baseKey(P, normals) {
   const o = {};
   for (const k of Object.keys(P).sort()) if (!LID_ONLY.has(k)) o[k] = P[k];

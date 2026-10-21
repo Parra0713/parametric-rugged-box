@@ -110,21 +110,30 @@ export function baseInsert(D, P, contentPolys) {
   const info = { height: Math.round(H * 100) / 100, pockets: 0, notches: [] };
 
   // Alojamientos del contenido (+ huecos para los dedos).
+  // `contentObjects` = [{ polys, notches }] ya acomodados (packer.js); si solo
+  // llega `contentPolys` (un objeto), los huecos se calculan aquí.
   let pocket = null;
-  if (P.insertMode === 'pockets' && contentPolys && contentPolys.length) {
+  const objsIn = P.contentObjects && P.contentObjects.length ? P.contentObjects
+    : contentPolys && contentPolys.length ? [{ polys: contentPolys, notches: null }] : null;
+  if (P.insertMode === 'pockets' && objsIn) {
     const tolP = P.pocketTol ?? 0.6;
-    const objs = contentPolys.map((p) => CS().ofPolygons([p], 'EvenOdd'));
-    let obj = CS().union(objs);
-    let region = obj.offset(tolP, 'Round', 2, 24);
-    const allPts = contentPolys.flat();
-    const fn = fingerNotches(obj, allPts, P);
-    if (fn.cs) region = region.add(fn.cs);
+    const r = (P.fingerD || 20) / 2;
+    const regions = [];
+    const notchesAll = [];
+    for (const o of objsIn) {
+      const obj = CS().union(o.polys.map((p) => CS().ofPolygons([p], 'EvenOdd')));
+      let reg = obj.offset(tolP, 'Round', 2, 24);
+      let centers = o.notches;
+      if (!centers) centers = fingerNotches(obj, o.polys.flat(), P).centers;
+      for (const c of centers) { reg = reg.add(CS().circle(r, 40).translate(c)); notchesAll.push(c); }
+      regions.push(reg);
+    }
     // Nunca romper la pared exterior del inserto.
-    region = region.intersect(rr(-tol - wallT - 0.8));
+    const region = CS().union(regions).intersect(rr(-tol - wallT - 0.8));
     pocket = region;
-    info.pockets = objs.length;
-    info.notches = fn.centers.map(([x, y]) => [Math.round(x * 10) / 10, Math.round(y * 10) / 10]);
-    // Pared propia del alojamiento (cierra el hueco interior del inserto).
+    info.pockets = objsIn.length;
+    info.notches = notchesAll.map(([x, y]) => [Math.round(x * 10) / 10, Math.round(y * 10) / 10]);
+    // Pared propia de cada alojamiento (cierra el hueco interior del inserto).
     const ring = region.offset(wallT, 'Round', 2, 24).subtract(region).intersect(rr(-tol - 0.01));
     solid = solid.add(prism(ring, 0, H));
   }
@@ -149,6 +158,9 @@ export function baseInsert(D, P, contentPolys) {
     solid = solid.add(prism(ribs, fcE, H - deck + 0.01));
   }
 
+  // Paredes de huecos y nervios pegados al borde no pueden salirse de la
+  // envolvente achaflanada (pisarían el chaflán del suelo de la caja).
+  solid = solid.intersect(outer);
   if (pocket) {
     solid = solid.subtract(prism(pocket, -1, H + 1));
     // Chaflán de entrada de 0.6 mm (guía al meter el objeto).
