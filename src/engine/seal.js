@@ -36,7 +36,7 @@ export function ring(D, dIn, dOut) {
  *    sube h. Ese desplazamiento ocurre justo en el borde superior de la ranura.
  */
 export function grooveCut(D) {
-  const ch = D.grooves.length > 1 ? 0.4 : 0.6;
+  const ch = D.grooves.length > 1 ? 0.35 : 0.5;
   const zc = D.Hb - ch, zt = D.Hb + 0.01;
   return D.grooves.map((g) => {
     const a = g.off - g.w / 2, b = g.off + g.w / 2;

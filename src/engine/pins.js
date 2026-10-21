@@ -32,10 +32,10 @@ function xCyl(x0, len, r0, r1, seg) {
  * Pasador impreso que atraviesa un tramo de longitud `span`.
  * Origen: cara interna de la cabeza en x = 0, eje en y = 0; apoyado en z = 0.
  */
-export function printedPin(D, span) {
-  const rp = D.pinD / 2;
+export function printedPin(D, span, pinD = D.pinD) {
+  const rp = pinD / 2;
   const seg = D.seg;
-  const headT = Math.max(1.6, 0.45 * D.pinD);
+  const headT = Math.max(1.6, 0.45 * pinD);
   const barbH = 1.2;                               // longitud de la rampa
   const barb = D.clr + 0.4;                        // sobresale 0.4 mm del taladro
   const Lp = span + barbH + 0.3;                   // el hombro sale 0.3 mm
@@ -48,12 +48,12 @@ export function printedPin(D, span) {
     .translate([Lp - barbH / 2, 0, 0]));
   let pin = M().union([body, head, teeth]);
   // Ranura vertical que separa las dos patas.
-  const sw = Math.max(1.0, 0.3 * D.pinD);
-  const slotL = Math.min(2.5 * D.pinD, span * 0.5);
+  const sw = Math.max(0.9, 0.3 * pinD);
+  const slotL = Math.min(2.5 * pinD, span * 0.5);
   pin = pin.subtract(M().cube([slotL + 1, sw, 4 * rp], true)
     .translate([Lp - slotL / 2 + 0.5, 0, 0]));
   // Cara plana: se recorta el 12 % del diámetro y se apoya en z = 0.
-  const flat = -rp + 0.12 * D.pinD;
+  const flat = -rp + 0.12 * pinD;
   pin = pin.trimByPlane([0, 0, 1], flat).translate([0, 0, -flat]);
   return { solid: pin, length: Lp + headT };
 }
