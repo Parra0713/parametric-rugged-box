@@ -38,11 +38,13 @@ check(!f.fit.ok, 'detecta que no cabe plana');
 const t = tiltSolve(f.xyz, bed);
 check(t.ok, `sugerencia: ${t.ok ? `inclinar ${t.alpha}° sobre ${t.axis} y girar ${t.angle}° en Z (con soportes)` : 'ninguna'}`);
 
-console.log('▶ Misma tapa con ayudas automáticas (cuna)');
+console.log('▶ Misma tapa con ayudas automáticas (45° + corte de contacto + aletas)');
 {
   const r = build({ ...DEFAULTS, innerL: 250, innerW: 170, baseDepth: 30, lidDepth: 10 }, null, { normals: false });
   const lid = r.parts.find((q) => q.id === 'lid');
-  check(!!lid.tilt && lid.aids.some((a) => a.name.startsWith('Cuna')), `tapa inclinada ${lid.tilt?.alpha}° con ${lid.aids.map((a) => a.name).join(' + ')}`);
+  check(!!lid.tilt && lid.tilt.alpha === 45 && lid.aids.some((a) => a.name.startsWith('Aletas')), `tapa inclinada ${lid.tilt?.alpha}° con ${lid.aids.map((a) => a.name).join(' + ')}`);
+  check(lid.tilt.contact * 190 >= 500, `franja de contacto ${lid.tilt.contact} mm ≈ ${Math.round(lid.tilt.contact * 190)} mm² (corte ${lid.tilt.cut} mm)`);
+  check(lid.tilt.finVol < 0.15 * lid.tilt.wedgeVol, `aletas ${lid.tilt.finVol} mm³ vs cuña ${lid.tilt.wedgeVol} mm³ (${Math.round(100 * lid.tilt.finVol / lid.tilt.wedgeVol)} %)`);
   const xyz = transformVerts(lid.mesh.vert, lid.mesh.numProp, lid.print);
   let zmin = Infinity; for (let i = 2; i < xyz.length; i += 3) zmin = Math.min(zmin, xyz[i]);
   const ff = fitAngle(hull2D(xyz), bed.x - 4, bed.y - 4);

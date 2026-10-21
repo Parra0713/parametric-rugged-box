@@ -36,6 +36,8 @@ const cases = [
   { name: 'Estrecha 20×172 (girada)', p: { innerL: 20, innerW: 172, baseDepth: 31, lidDepth: 3, wall: 1.2, floor: 1.2, top: 1.2, bandH: 4 } },
   { name: 'Apilable + tapa mínima + circuito', p: { stackable: true, lidMin: true, pattern: 'circuit' } },
   { name: 'Sci-fi radial grabado', p: { pattern: 'radial' } },
+  { name: 'Mini 30×25', p: { innerL: 30, innerW: 25, baseDepth: 15, lidDepth: 5 } },
+  { name: 'Mini 35×35 tapa mínima', p: { innerL: 35, innerW: 35, baseDepth: 12, lidMin: true } },
   { name: 'M + logo SVG (relleno + trazo)', p: { pattern: 'hex' }, svg: {
     fills: [{ outer: [[-20, -10], [20, -10], [20, 10], [-20, 10]], holes: [[[-5, -5], [5, -5], [5, 5], [-5, 5]]] }],
     strokes: [{ points: [[-30, -20], [0, 15], [30, -20]], width: 2 }],
@@ -49,6 +51,7 @@ for (const c of cases) {
   const res = build(P, c.svg || null);
   check(res.ok, `build en ${res.ms} ms (${Math.round(performance.now() - t0)} ms total)`);
   for (const p of res.parts) check(p.status === 'NoError' && p.tris > 0, `${p.name}: ${p.tris} tri, ${p.volume} mm³`);
+  check(res.D.hinge.kl >= 4 && res.D.latchW >= 6, `mecánica mínima: nudillo ${res.D.hinge.kl} mm, cierre ${res.D.latchW} mm`);
   if (res.D.warn.length) console.log('    avisos:', res.D.warn.join(' | '));
 
   // Geometría cruda para colisiones (sin pies: no afectan).

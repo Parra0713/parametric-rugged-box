@@ -6,7 +6,7 @@ import { DEFAULTS, SCHEMA, BED_PRESETS, migrate } from './engine/params.js';
 import { EngineClient } from './engineClient.js';
 import { Viewer } from './viewer.js';
 import { parseSVG, placeSVG } from './svg.js';
-import { transformVerts, hull2D, fitAngle, tiltSolve, packPlates } from './bedfit.js';
+import { transformVerts, hull2D, fitAngle, tiltChoose, packPlates } from './bedfit.js';
 import { stlBinary, mergeMeshes, zipStore, download } from './export.js';
 
 /* ------------------------------------------------------------------ */
@@ -239,7 +239,7 @@ function computeLayout(res) {
     const hull = hull2D(xyz);
     // Margen de 2 mm por lado respecto al borde de la cama.
     const fit = fitAngle(hull, B.x - 2 * EDGE, B.y - 2 * EDGE);
-    const tilt = fit.ok ? null : tiltSolve(xyz, B);
+    const tilt = fit.ok ? null : tiltChoose(xyz, B);
     fits[p.key] = { ...fit, tilt, tooTall: zMax > B.z, height: zMax };
     for (let k = 0; k < p.instances.length; k++) {
       items.push({ partId: p.key, angle: fit.angle, fit, label: p.name });
@@ -327,13 +327,23 @@ function renderInfo() {
   const fitRows = parts.map((p) => {
     const f = state.layout.fits[p.key];
     let txt = f.ok ? (f.mode === 'diagonal' ? `diagonal ${f.angle}°` : f.mode) : 'no cabe plana';
-    if (p.tilt) txt = `inclinada ${p.tilt.alpha}° + cuna`;
+    if (p.tilt) txt = `inclinada ${p.tilt.alpha}° · bisel ${p.tilt.cut} mm · ${p.tilt.finCount} aletas`;
     if (!f.ok && f.tilt?.ok) txt = `inclinar ${f.tilt.alpha}° sobre ${f.tilt.axis} + giro ${f.tilt.angle}° (soportes)`;
     if (!f.ok && !f.tilt?.ok) txt = 'no cabe: reduce medidas';
     if (f.tooTall) txt += ' · excede Z';
     if (f.aids?.length) txt += ' + ' + f.aids.map((a) => a.split(' (')[0].toLowerCase()).join(', ');
     return [p.name, txt, f.mode === 'diagonal'];
   });
+  const tilted = parts.filter((p) => p.tilt);
+  if (tilted.length) {
+    info.append(el('section', { class: 'card key' }, el('h3', {}, 'Impresión inclinada'),
+      kv(tilted.flatMap((p) => [
+        [`${p.name}: ángulo`, `${p.tilt.alpha}° sobre ${p.tilt.axis}`, p.tilt.alpha === 45],
+        ['Bisel de contacto', `${p.tilt.cut} mm → franja ${p.tilt.contact} mm`],
+        ['Aletas', `${p.tilt.finCount} · ${(p.tilt.finVol / 1000).toFixed(1)} cm³ (${Math.round(100 * p.tilt.finVol / Math.max(1, p.tilt.wedgeVol))} % de una cuña)`],
+      ])),
+      el('p', { class: 'small' }, 'A 45° fondo y paredes no necesitan soporte; las aletas solo estabilizan hasta el centro de masa y tocan la pieza con dientes de 1 línea.')));
+  }
   info.append(el('section', { class: 'card' },
     el('h3', {}, `Cama ${B.x}×${B.y}×${B.z}`), kv(fitRows),
     el('p', { class: 'small' }, `${state.layout.plates.length} placa(s). Ver en modo “Placas”.`)));
@@ -376,7 +386,7 @@ function printMesh(p, angle) {
   }
   const cx = (x0 + x1) / 2, cy = (y0 + y1) / 2;
   for (let i = 0; i < xyz.length; i += 3) { xyz[i] -= cx; xyz[i + 1] -= cy; xyz[i + 2] -= z0; }
-  // Ayudas (orejas, cuna): misma rotación y desplazamiento que la pieza.
+  // Ayudas (orejas, aletas): misma rotación y desplazamiento que la pieza.
   const aids = (p.aids || []).map((ad) => {
     const v = transformVerts(ad.mesh.vert, ad.mesh.numProp, IDENT);
     for (let i = 0; i < v.length; i += 3) {
@@ -441,7 +451,7 @@ async function exportZip() {
 }
 
 function orientText(f, p) {
-  if (p.tilt) return `inclinada ${p.tilt.alpha}° sobre ${p.tilt.axis}, con cuna de soporte incluida`;
+  if (p.tilt) return `inclinada ${p.tilt.alpha}° sobre ${p.tilt.axis}; bisel de contacto de ${p.tilt.cut} mm (franja ${p.tilt.contact} mm); ${p.tilt.finCount} aletas de soporte (${(p.tilt.finVol / 1000).toFixed(1)} cm³, ${Math.round(100 * p.tilt.finVol / Math.max(1, p.tilt.wedgeVol))} % de una cuña maciza)`;
   if (!f.ok) return 'NO CABE en la cama';
   return f.mode + (f.mode === 'diagonal' ? ` ${f.angle}°` : '') + (f.aids?.length ? ' + ' + f.aids.join(', ') : '');
 }
@@ -461,7 +471,8 @@ function readme(r, layout) {
     '  - Línea de contracción (además del diseño): perímetro exterior primero (outer/inner),',
     '    flujo de relleno sólido 95 %, tiempo mínimo de capa 6–8 s, ventilador constante,',
     '    "asegurar grosor de pared vertical" activado y sin "solo una pared en superficies superiores".',
-    '  - Las ayudas (*_ayudas.stl: orejas de 2 capas / cuna con interfaz de 1 capa) se retiran con un cúter.',
+    '  - Ayudas (*_ayudas.stl): orejas de 2 capas en esquinas, o aletas de soporte con dientes de 1 línea; se rompen a mano.',
+    '    Las aletas van en planos perpendiculares al eje de inclinación: imprímelas en el mismo objeto que la pieza.',
     '  - Cierres: imprimir acostados (como vienen), 100 % de perímetros o 5+ paredes, PETG preferible (más elástico).',
     '  - Pasadores: acostados sobre la cara plana, 100 % de relleno.',
     '  - Junta: TPU 95A, 0.2 mm, velocidad baja, 100 % de relleno.',

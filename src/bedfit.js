@@ -150,3 +150,38 @@ export function packPlates(items, bed, gap = 6) {
 }
 
 const round = (v, d) => Math.round(v * 10 ** d) / 10 ** d;
+
+/**
+ * Elige la inclinación para piezas que no caben planas, PRIORIZANDO 45°:
+ * a 45° el fondo y las paredes de una caja quedan en el límite de voladizo
+ * imprimible sin soporte. Se prueban ángulos por cercanía a 45° y los dos
+ * ejes, empezando por el que acorta la dimensión más larga.
+ */
+export function tiltChoose(xyz, bed) {
+  let ex = [Infinity, -Infinity, Infinity, -Infinity];
+  for (let i = 0; i < xyz.length; i += 3) {
+    ex = [Math.min(ex[0], xyz[i]), Math.max(ex[1], xyz[i]), Math.min(ex[2], xyz[i + 1]), Math.max(ex[3], xyz[i + 1])];
+  }
+  const axes = ex[1] - ex[0] >= ex[3] - ex[2] ? ['Y', 'X'] : ['X', 'Y'];
+  const angles = [];
+  for (let a = 5; a <= 85; a += 5) angles.push(a);
+  angles.sort((p, q) => Math.abs(p - 45) - Math.abs(q - 45) || p - q);
+  for (const alpha of angles) {
+    const ca = Math.cos((alpha * Math.PI) / 180), sa = Math.sin((alpha * Math.PI) / 180);
+    for (const axis of axes) {
+      const rot = new Float32Array(xyz.length);
+      let z0 = Infinity, z1 = -Infinity;
+      for (let i = 0; i < xyz.length; i += 3) {
+        const x = xyz[i], y = xyz[i + 1], z = xyz[i + 2];
+        let x2 = x, y2 = y, z2;
+        if (axis === 'X') { y2 = ca * y - sa * z; z2 = sa * y + ca * z; } else { x2 = ca * x + sa * z; z2 = -sa * x + ca * z; }
+        rot[i] = x2; rot[i + 1] = y2; rot[i + 2] = z2;
+        if (z2 < z0) z0 = z2; if (z2 > z1) z1 = z2;
+      }
+      if (z1 - z0 > bed.z) continue;
+      const f = fitAngle(hull2D(rot), bed.x, bed.y);
+      if (f.ok) return { ok: true, alpha, axis, angle: f.angle };
+    }
+  }
+  return { ok: false };
+}

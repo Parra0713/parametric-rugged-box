@@ -386,23 +386,43 @@ export function derive(P) {
   D.Lband = D.Li + 2 * D.F;
   D.Wband = D.Wi + 2 * D.F;
 
-  /* ---- Nervios de esquina ---- */
+  /* ---- Presupuesto de longitud del lado largo ----
+   * Prioridad: la mecánica nunca desaparece. Primero se calculan los mínimos
+   * funcionales de bisagra y cierre; los nervios de esquina ceden longitud
+   * (se acortan o se omiten) antes de recortar la mecánica.            */
+  const minKl = r2(Math.max(4, 1.6 * D.pinD));          // nudillo más corto admisible
+  const minHinge = 3 * minKl + 2 * D.ag;
+  const minCheek = 2.4;
+  const minLatch = 6 + 2 * (D.ag + minCheek);
+  const needMin = Math.max(minHinge, minLatch);
+  const avail0 = D.Lo - 2 * (D.ro + 2);
   D.ribs = !!P.cornerRibs;
-  D.cw = r2(clamp(0.08 * Math.min(D.Lo, D.Wo) + 4, 5, 12));   // tramo recto del nervio
-
-  /* ---- Reparto en el lado largo (adaptado a la longitud disponible) ---- */
-  const endMargin = D.ro + (D.ribs ? D.cw : 0) + 2;
-  const avail = D.Lo - 2 * endMargin;
+  let cw = clamp(0.08 * Math.min(D.Lo, D.Wo) + 4, 5, 12);
+  if (D.ribs) {
+    cw = Math.min(cw, (avail0 - needMin) / 2);
+    if (cw < 2.5) { D.ribs = false; cw = 0; warn.push('Caja corta: se omiten los nervios de esquina para dejar sitio a la mecánica.'); }
+  } else cw = 0;
+  D.cw = r2(cw);
+  let avail = avail0 - 2 * cw;
+  if (avail < needMin) {
+    // La mecánica puede invadir el inicio del radio de esquina.
+    avail = Math.max(avail, D.Lo - 2 * (0.5 * D.ro + 1));
+    if (avail < needMin) {
+      warn.push(`Lado largo muy corto: la mecánica mínima necesita ~${Math.ceil(needMin + D.ro + 2)} mm de largo interior.`);
+      avail = needMin;
+    }
+  }
+  D.avail = r2(avail);
 
   // Bisagras
   let nH = P.hingeCount > 0 ? P.hingeCount : D.Lo > 300 ? 3 : Mx.hinges;
   let Lh = nH === 1 ? Math.min(0.6 * D.Lo, 70) : clamp(0.22 * D.Lo, 26, 60);
-  while (nH > 1 && nH * Lh + (nH - 1) * 8 > avail) nH--;
-  Lh = Math.min(Lh, (avail - 8 * (nH - 1)) / nH);
-  let nk = Lh >= 34 ? 5 : 3;
+  while (nH > 1 && nH * Math.max(Lh, minHinge) + (nH - 1) * 8 > avail) nH--;
+  Lh = clamp(Math.min(Lh, (avail - 8 * (nH - 1)) / nH), minHinge, 1e9);
+  if (nH === 1) Lh = Math.max(Lh, Math.min(avail, 0.5 * D.Lo));   // cajas pequeñas: usa el largo disponible
+  let nk = 5;
   let kl = (Lh - (nk - 1) * D.ag) / nk;
-  if (kl < 4 && nk > 3) { nk = 3; kl = (Lh - 2 * D.ag) / 3; }
-  if (kl < 3) warn.push('Bisagras muy cortas para este largo: considera la clase S o reducir el número.');
+  if (kl < Math.max(minKl, 6)) { nk = 3; kl = (Lh - 2 * D.ag) / 3; }
   D.hinge = { n: nH, len: r2(Lh), nk, kl: r2(kl), xs: spread(nH, avail, Lh) };
 
   // Cierres
@@ -411,9 +431,9 @@ export function derive(P) {
   let span = D.latchW + 2 * (D.ag + D.cheekW);
   while (nL > 1 && nL * span + (nL - 1) * 10 > avail) nL--;
   if (span > avail) {
+    D.cheekW = r2(Math.max(minCheek, Math.min(D.cheekW, (avail - 6) / 2 - D.ag)));
     D.latchW = r2(Math.max(6, avail - 2 * (D.ag + D.cheekW)));
     span = D.latchW + 2 * (D.ag + D.cheekW);
-    if (span > avail) warn.push('El lado largo es demasiado corto para un cierre completo.');
   }
   D.latch = { n: nL, span: r2(span), xs: spread(nL, avail, span) };
 

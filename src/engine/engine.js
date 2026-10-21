@@ -22,7 +22,8 @@ import { latches } from './latch.js';
 import { printedPin, filamentCap, filamentLength } from './pins.js';
 import { gridfinityFeet } from './gridfinity.js';
 import { lidRelief } from './pattern.js';
-import { transformVerts, hull2D, fitAngle, tiltSolve } from '../bedfit.js';
+import { transformVerts, hull2D, fitAngle, tiltChoose } from '../bedfit.js';
+import { contactCut, supportFins, wedgeVolume, rotAxis, invRigid } from './tilt.js';
 
 /* ---------------- Matrices 4×4 (columna mayor) ---------------- */
 const I4 = () => [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1];
@@ -282,43 +283,10 @@ function earsFor(D, xyz) {
 }
 
 /**
- * Cuna de soporte para piezas que solo caben inclinadas.
- * La cara de apoyo original de la pieza es plana, así que después de
- * inclinarla, todo el material queda por encima de ese plano: la cuna es la
- * cuña bajo dicho plano, con
- *  - una placa inferior maciza de 3 capas (máxima superficie sobre la cama),
- *  - nervios verticales cada 12 mm y un anillo perimetral (ligera y estable),
- *  - una separación de 1 capa con la pieza (interfaz desprendible).
- */
-function cradleFor(D, printSolid, tiltM) {
-  const gap = D.lh;
-  // Contorno exterior convexo de la cara de apoyo (ignora grabados y huecos).
-  const outline = printSolid.slice(0.05).hull().offset(-0.6, 'Round', 2, 16);
-  if (outline.isEmpty()) return null;
-  const wedge = prism(outline, -400, -gap).transform(tiltM).trimByPlane([0, 0, 1], 0);
-  const inner = prism(outline.offset(-1.2, 'Round', 2, 16), -401, -gap + 1).transform(tiltM);
-  const ring = wedge.subtract(inner);
-  const bb = wedge.boundingBox();
-  // Retícula 2D (rápida) extruida una sola vez y recortada por la cuña.
-  const strips = [];
-  const W2 = bb.max[1] - bb.min[1] + 2, L2 = bb.max[0] - bb.min[0] + 2;
-  for (let x = Math.ceil(bb.min[0] / 12) * 12; x <= bb.max[0]; x += 12)
-    strips.push(CS().square([1.2, W2], false).translate([x - 0.6, bb.min[1] - 1]));
-  for (let y = Math.ceil(bb.min[1] / 12) * 12; y <= bb.max[1]; y += 12)
-    strips.push(CS().square([L2, 1.2], false).translate([bb.min[0] - 1, y - 0.6]));
-  const lattice = strips.length ? prism(CS().union(strips), 0, bb.max[2] + 1).intersect(wedge) : null;
-  const plate = wedge.intersect(M().cube([2000, 2000, 3 * D.lh]).translate([-1000, -1000, 0]));
-  return unionAll([ring, lattice, plate]);
-}
-
-function rotX(a) { const c = Math.cos(a), s = Math.sin(a); return [1, 0, 0, 0, 0, c, s, 0, 0, -s, c, 0, 0, 0, 0, 1]; }
-function rotY(a) { const c = Math.cos(a), s = Math.sin(a); return [c, 0, -s, 0, 0, 1, 0, 0, s, 0, c, 0, 0, 0, 0, 1]; }
-
-/**
  * Decide las ayudas para una pieza grande (base o tapa).
  * Modifica `pt.print` si hay que inclinarla y añade `pt.aids`.
  */
-function addAids(D, P, pt, solidNative) {
+function addAids(D, P, pt, solidNative, normals) {
   if (P.printAids === 'off') return;
   const bed = { x: P.bedX - 4, y: P.bedY - 4, z: P.bedZ };
   const xyz = transformVerts(pt.mesh.vert, pt.mesh.numProp, pt.print);
@@ -341,19 +309,32 @@ function addAids(D, P, pt, solidNative) {
   for (let i = 0, j = 0; i < hm.vertProperties.length; i += hm.numProp, j += 3) {
     hv[j] = hm.vertProperties[i]; hv[j + 1] = hm.vertProperties[i + 1]; hv[j + 2] = hm.vertProperties[i + 2];
   }
-  const tilt = tiltSolve(hv, bed);
+  const tilt = tiltChoose(hv, bed);
   if (!tilt.ok) return;
-  const R = tilt.axis === 'X' ? rotX((tilt.alpha * Math.PI) / 180) : rotY((tilt.alpha * Math.PI) / 180);
-  const printed = solidNative().transform(pt.print);
-  const tilted = printed.transform(R);
-  const zmin = tilted.boundingBox().min[2];
-  const tiltM = mul(T(0, 0, -zmin), R);
-  pt.print = mul(tiltM, pt.print);
-  pt.tilt = tilt;
-  const cr = cradleFor(D, printed, tiltM);
-  if (cr) pt.aids.push({ name: `Cuna de soporte (${tilt.alpha}° sobre ${tilt.axis})`, ...meshOf(cr) });
-  const ears = earsFor(D, transformVerts(pt.mesh.vert, pt.mesh.numProp, pt.print));
-  if (ears) pt.aids.push({ name: 'Orejas anti‑warping', ...meshOf(ears) });
+  // Inclinación (45° preferente) + corte diagonal de contacto + aletas.
+  const Rm = rotAxis(tilt.axis, tilt.alpha);
+  const Q = solidNative().transform(pt.print);
+  const R0 = Q.transform(Rm);
+  const zmin = R0.boundingBox().min[2];
+  const bq = Q.boundingBox();
+  const axisLen = tilt.axis === 'X' ? bq.max[0] - bq.min[0] : bq.max[1] - bq.min[1];
+  const cut = contactCut(R0, zmin, axisLen, D.t, D.lh);
+  const zc = zmin + cut.h;
+  const R = (cut.h > 0 ? R0.trimByPlane([0, 0, 1], zc) : R0).translate([0, 0, -zc]);
+  const newPrint = mul(mul(T(0, 0, -zc), Rm), pt.print);
+  if (cut.h > 0) {
+    // El bisel forma parte de la pieza: se devuelve al marco nativo para que
+    // también se vea en el ensamblaje y se exporte con ella.
+    const native = R.transform(invRigid(newPrint));
+    Object.assign(pt, { mesh: toMesh(native, normals), volume: Math.round(native.volume()), tris: native.numTri() });
+  }
+  pt.print = newPrint;
+  const fins = supportFins(R, tilt.axis, D.lw, D.lh);
+  pt.tilt = {
+    ...tilt, cut: Math.round(cut.h * 100) / 100, contact: cut.width,
+    finVol: fins?.volume ?? 0, finCount: fins?.count ?? 0, wedgeVol: wedgeVolume(R, D.lh),
+  };
+  if (fins) pt.aids.push({ name: `Aletas de soporte (${fins.count} × ${tilt.alpha}° sobre ${tilt.axis})`, ...meshOf(fins.solid) });
 }
 
 function meshOf(man) {
@@ -397,7 +378,7 @@ export function build(P, svg, opt = {}) {
       }, normals);
       baseCache = { key, part: clonePart(bp), report: rep };
     }
-    addAids(D, P, bp, () => buildBase(D, H, L, []));
+    addAids(D, P, bp, () => buildBase(D, H, L, []), normals);
     parts.push(bp);
 
     const { lid, warn } = buildLid(D, P, H, L, svg, report);
@@ -406,7 +387,7 @@ export function build(P, svg, opt = {}) {
     const lp = part('lid', 'Tapa', lid, {
       print: lidFlip(D, extra), instances: [T(0, 0, z0)], qty: 1, material: 'PETG / PLA / ASA',
     }, normals);
-    addAids(D, P, lp, () => lid);
+    addAids(D, P, lp, () => lid, normals);
     parts.push(lp);
 
     // Cierre: perfil acostado (X → Z de impresión).

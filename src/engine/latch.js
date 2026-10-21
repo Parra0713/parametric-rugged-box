@@ -47,7 +47,7 @@ export function latchProfile(D) {
 /** Mejilla de la base (orejeta que sostiene el barril). */
 function baseCheekProfile(D) {
   const { sw, sh, zp, rl, Hb } = D;
-  const u0 = -(sw - 0.3);
+  const u0 = -(sw - 0.8);
   const zbo = zp - rl - 1.0;                       // borde inferior exterior
   const zbi = zbo - (sh - sw + 0.3);               // 45° hacia la pared
   const p = poly([[u0, Hb], [-sh + 0.6, Hb], [-sh, Hb - 0.6], [-sh, zbo], [u0, zbi]]);
@@ -57,7 +57,7 @@ function baseCheekProfile(D) {
 /** Mejilla de la tapa. */
 function lidCheekProfile(D) {
   const { sw, sh, zkt, hh, Hb, Hl } = D;
-  const u0 = -(sw - 0.3);
+  const u0 = -(sw - 0.8);
   const zct = zkt + hh - 1.2;
   const p = poly([[u0, Hb], [-sh, Hb], [-sh, zct], [u0, zct + (sh - sw + 0.3)]]);
   return p.intersect(rect(-sh - 1, u0 + 1, Hb - 1, Hb + Hl - 0.01));

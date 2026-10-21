@@ -8,6 +8,8 @@ hermética en TPU y pasadores, sin tornillería.
 
 ![Cierres empotrados](docs/captura-cierres.png)
 
+![Impresión inclinada con aletas](docs/impresion-inclinada.png)
+
 ---
 
 ## Fase 1 — Tecnología elegida y por qué
@@ -77,11 +79,26 @@ deslizador nunca se acumulan cálculos atrasados.
   la tapa es una barra-puente entre ellas. ~25 % más corto que la v1.
 * **Mecánica siempre en el lado largo** y reparto adaptado a la longitud
   disponible (número y ancho de cierres/bisagras).
-* **Impresión en diagonal o inclinada:** orejas anti‑warping de 2 capas en
-  las esquinas cuando la pieza va en diagonal o casi llena la cama; si solo
-  cabe inclinada, se genera una **cuna de soporte** (placa base maciza de 3
-  capas + retícula de nervios + interfaz desprendible de 1 capa). La junta TPU
-  se divide en tramos si no cabe entera.
+* **Impresión en diagonal o inclinada (diseño diferencial):**
+  - Si cabe girada en Z, se coloca en diagonal y se añaden **orejas** de 2
+    capas en las esquinas (donde empieza el despegue por contracción).
+  - Si solo cabe inclinada, se **prefieren 45°**: fondo y paredes quedan en el
+    límite de voladizo imprimible sin soporte.
+  - **Corte diagonal de contacto:** la arista que tocaría la cama se bisela
+    con un plano paralelo a ella, hasta la franja más ancha que no se acerque
+    a la cavidad a menos de un espesor de pared (en una tapa de 250×170:
+    ~5 mm × 190 mm ≈ 930 mm² de apoyo en vez de una línea).
+  - **Aletas de soporte** (inspiradas en las *support fins* de Slant3D /
+    M. Trahan y el soporte perimetral con puentes de KNIN): láminas de 2
+    líneas perpendiculares al eje de inclinación, con celosía a 45°, pie de
+    2 capas, holgura con la pieza y **dientes de 1 línea cada 6 mm** como
+    único contacto. Solo llegan un poco más allá del centro de masa: las
+    caras a 45° se sostienen solas y el material de la aleta crece con el
+    cuadrado de su altura. Resultado: ~3–5 % del material de una cuña maciza.
+  - La junta TPU se divide en tramos si no cabe entera.
+* **Robustez en cajas pequeñas:** la mecánica tiene longitudes mínimas
+  (nudillo ≥ 4 mm, cierre ≥ 6 mm); los nervios de esquina ceden longitud o
+  se omiten antes que recortar bisagras y cierres.
 
 ![Sección](docs/seccion.png)
 
@@ -186,3 +203,6 @@ Licencia MIT.
 * [Layer line at transition between floor and wall — Bambu Lab Forum](https://forum.bambulab.com/t/layer-line-at-transition-between-floor-and-wall/40994)
 * [Problem with layer after solid bottom — Prusa Forum](https://forum.prusa3d.com/forum/original-prusa-i3-mk3s-mk3-how-do-i-print-this-printing-help/problem-with-layer-after-solid-bottom)
 * Especificación Gridfinity (Zack Freedman, CC‑BY): perfiles de pie y placa base.
+* [Forget Trees, Add Fins To Your 3D Prints Instead — Hackaday](https://hackaday.com/2026/09/23/forget-trees-add-fins-to-your-3d-prints-instead/)
+* [support-fins (M. Trahan) — GitHub](https://github.com/gittrahan/support-fins/wiki)
+* [Stop Using Standard Supports — KNIN Custom (YouTube)](https://www.youtube.com/watch?v=TADeDyIBoBU)

@@ -43,7 +43,7 @@ function baseLeafProfile(D) {
   // El cartabón llega hasta la cara de la PARED (no solo de la banda): su cara
   // inferior es una recta continua a 45° desde el nudillo hasta la pared, sin
   // entalladuras que concentren tensiones.
-  const u0 = D.yb - D.bo - 0.3;
+  const u0 = D.yb - D.bo - 0.8;
   const vLow = Math.max(0.4, D.za - (D.ya - u0) - D.rk * Math.SQRT2);
   const web = CS().hull([
     circle(D.ya, D.za, D.rk, D.seg),
@@ -69,7 +69,7 @@ function baseLeafProfile(D) {
  * y se elimina (salvo el propio nudillo, que gira sobre sí mismo).
  */
 function lidLeafProfile(D) {
-  const u0 = D.yb - D.bo - 0.3;                // hasta la cara de la pared
+  const u0 = D.yb - D.bo - 0.8;                // hasta la cara de la pared
   const vHigh = Math.min(D.Hb + D.Hl - 0.4, D.za + (D.ya - u0) + D.rk * Math.SQRT2);
   const web = CS().hull([
     circle(D.ya, D.za, D.rk, D.seg),
