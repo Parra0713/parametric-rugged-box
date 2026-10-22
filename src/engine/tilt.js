@@ -310,7 +310,9 @@ export function overhangSupports(R, regions, lw, lh, opt = {}) {
     strips.push(CS().square([t, b.max[1] - b.min[1] + 2], false).translate([x - t / 2, b.min[1] - 1]));
   for (let y = Math.floor(b.min[1] / pitch) * pitch; y <= b.max[1]; y += pitch)
     strips.push(CS().square([b.max[0] - b.min[0] + 2, t], false).translate([b.min[0] - 1, y - t / 2]));
-  const grid = prism(CS().union(strips), -1, b.max[2] + 1);
+  // La rejilla se recorta a la planta real de los soportes: con la rejilla de
+  // toda la caja (cientos de tiras) la intersección 3D tardaba segundos.
+  const grid = prism(CS().union(strips).intersect(S.project().offset(0.5, 'Square')), -1, b.max[2] + 1);
   const topSkin = S.subtract(S.translate([0, 0, -2 * lh]));          // 2 capas superiores
   const foot = S.intersect(M().cube([b.max[0] - b.min[0] + 2, b.max[1] - b.min[1] + 2, 2 * lh]).translate([b.min[0] - 1, b.min[1] - 1, 0]));
   const solid = M().union([S.intersect(grid), topSkin, foot]);

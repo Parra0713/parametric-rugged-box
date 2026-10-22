@@ -47,10 +47,46 @@ function wrap(target, names) {
 /** Inicializa el módulo y activa el registro automático. */
 export function installGC(wasm) {
   W = wasm;
+  // OJO: `Module.Manifold` y `Module.CrossSection` son funciones envoltorio
+  // de manifold-3d; los objetos reales heredan de OTRO prototipo (el de la
+  // clase de embind). Envolver solo `W.X.prototype` dejaba sin registrar todas
+  // las operaciones encadenadas (translate, subtract, offset…): ~30 MB de WASM
+  // perdidos por reconstrucción, cada vez más lento y, al final, "memory
+  // access out of bounds" en el hilo de geometría.
+  const mProto = Object.getPrototypeOf(W.Manifold.cube([1, 1, 1]));
+  const cProto = Object.getPrototypeOf(W.CrossSection.square([1, 1]));
   wrap(W.Manifold, MANIFOLD_STATIC);
-  wrap(W.Manifold.prototype, MANIFOLD_MEMBER);
   wrap(W.CrossSection, CS_STATIC);
-  wrap(W.CrossSection.prototype, CS_MEMBER);
+  for (const p of new Set([W.Manifold.prototype, mProto])) wrap(p, MANIFOLD_MEMBER);
+  for (const p of new Set([W.CrossSection.prototype, cProto])) {
+    fixExtrude(p);
+    wrap(p, CS_MEMBER);
+  }
+  cleanup();
+}
+
+/**
+ * `CrossSection.extrude/revolve` de manifold-3d convierten la sección en un
+ * vector de polígonos que nunca liberan (~45 KB por llamada). Se reemplazan
+ * por una versión equivalente que lo libera.
+ */
+function fixExtrude(p) {
+  if (typeof p._ToPolygons !== 'function' || p.extrude?.__fixed) return;
+  const v2 = (s) => (Array.isArray(s) ? { x: s[0], y: s[1] } : typeof s === 'number' ? { x: s, y: s } : s);
+  const extrude = function (height, nDivisions = 0, twistDegrees = 0, scaleTop = [1, 1], center = false) {
+    const polys = this._ToPolygons();
+    let man;
+    try { man = W._Extrude(polys, height, nDivisions, twistDegrees, v2(scaleTop)); } finally { polys.delete(); }
+    if (!center) return man;
+    track(man);
+    return man.translate([0, 0, -height / 2]);
+  };
+  const revolve = function (circularSegments = 0, revolveDegrees = 360) {
+    const polys = this._ToPolygons();
+    try { return W._Revolve(polys, circularSegments, revolveDegrees); } finally { polys.delete(); }
+  };
+  if (typeof W._Extrude === 'function') { extrude.__fixed = true; p.extrude = extrude; }
+  if (typeof W._Revolve === 'function') p.revolve = revolve;
 }
 
 /** Libera todos los objetos WASM creados desde la última llamada. */

@@ -67,7 +67,22 @@ export async function init(ModuleFactory, wasmUrl) {
  * @param man  sólido en orientación de impresión (z ≥ 0)
  * @returns [{ z, drop }] alturas críticas en el marco de impresión
  */
+const critMemo = new Map();          // firma del sólido → alturas críticas
 export function criticalLayers(man, lh, zMax) {
+  // Hasta 400 cortes por pieza: es lo más caro de la base y la tapa después
+  // de los booleanos. El núcleo no cambia con casi ningún parámetro de la
+  // tapa (patrón, logo, ayudas…), así que se memoriza por la firma del sólido.
+  const bb = man.boundingBox();
+  const key = [lh, zMax, man.numTri(), Math.round(man.volume() * 1000), ...bb.min, ...bb.max].map((v) => Math.round(v * 1e4)).join(',');
+  const hit = critMemo.get(key);
+  if (hit) return hit.map((c) => ({ ...c }));
+  const res = criticalLayersRaw(man, lh, zMax);
+  critMemo.set(key, res);
+  if (critMemo.size > 16) critMemo.delete(critMemo.keys().next().value);
+  return res.map((c) => ({ ...c }));
+}
+
+function criticalLayersRaw(man, lh, zMax) {
   const n = Math.min(400, Math.floor(zMax / lh));
   const A = [];
   for (let k = 0; k < n; k++) A.push(man.slice((k + 0.5) * lh).area());
@@ -143,7 +158,7 @@ function buildBase(D, H, L, report) {
   if (D.gfPlate) core = core.subtract(gridfinitySockets(D));
 
   // Frente 3: análisis por capas → ranuras de sombra donde cae el tiempo de capa.
-  const crit = criticalLayers(core, D.lh, Hb);
+  const crit = D.draft ? [] : criticalLayers(core, D.lh, Hb);
   const zLo = D.stack ? D.hf + 1 : 1.0;
   const zHi = zc - 1.2;
   const grooves = [];
@@ -241,7 +256,7 @@ function buildLid(D, P, H, L, svg, report) {
 
   // Análisis en orientación de impresión (boca abajo).
   const flip = lidFlip(D, 0);
-  const crit = criticalLayers(core.transform(flip), D.lh, Hl);
+  const crit = D.draft ? [] : criticalLayers(core.transform(flip), D.lh, Hl);
   const grooves = [];
   for (const c of crit) {
     const zw = Math.round((zT - c.z) * 100) / 100;           // altura en mundo
@@ -318,7 +333,54 @@ function clipToBed(cs2d, hull, angle, bedX, bedY) {
  *   inclinar), wall espesor de pared (el bisel deja ≥ 1 pared), mech true si
  *   la pieza lleva bisagras/cierres que el bisel no debe tocar.
  */
+/* ---------------- Caché de ayudas de impresión ---------------- */
+// Inclinar, biselar, aletas y soportes de voladizos cuesta segundos en cajas
+// grandes. El resultado solo depende de la malla de la pieza y de unos pocos
+// parámetros, así que se memoriza por la huella de la malla: cambiar el
+// patrón de la tapa ya no recalcula los soportes de la base, y volver a un
+// valor anterior es instantáneo.
+const aidsMemo = new Map();
+const AID_KEYS = ['printAids', 'bedX', 'bedY', 'bedZ', 'finSpacing', 'finReach', 'toothPitch', 'finGap',
+  'overhangSupports', 'overhangAngle', 'supportPitch'];
+
+/** Huella FNV‑1a de una malla (posiciones/normales y triángulos). */
+export function meshHash(mesh) {
+  let h = 0x811c9dc5;
+  const mix = (a) => { for (let i = 0; i < a.length; i++) { h ^= a[i]; h = Math.imul(h, 0x01000193); } };
+  mix(new Uint32Array(mesh.vert.buffer, mesh.vert.byteOffset, mesh.vert.length));
+  mix(mesh.tri);
+  return (h >>> 0).toString(36) + ':' + mesh.vert.length + ':' + mesh.tri.length;
+}
+
+const cloneMesh = (m) => ({ ...m, vert: m.vert.slice(), tri: m.tri.slice() });
+
 function addAids(D, P, pt, solidNative, normals, G = { hx: D.Lo / 2, hy: D.Wo / 2, wall: D.t, mech: true }) {
+  if (D.draft) { pt.aids = []; pt.draft = true; return; }   // vista rápida: sin ayudas
+  const key = JSON.stringify([pt.id, meshHash(pt.mesh), normals, pt.print, G, AID_KEYS.map((k) => P[k]),
+    D.fc, D.fcl, D.Li, D.Wi, D.Hb, D.Hl, D.topT, D.z0, D.lw, D.lh, D.t, D.gfFeet, D.Lo, D.Wo,
+    D.hinge.xs, D.hinge.len, D.latch.xs, D.latch.span]);
+  const hit = aidsMemo.get(key);
+  if (hit) {
+    aidsMemo.delete(key); aidsMemo.set(key, hit);              // LRU
+    Object.assign(pt, {
+      mesh: cloneMesh(hit.mesh), volume: hit.volume, tris: hit.tris, print: hit.print.slice(),
+      place: hit.place && { ...hit.place }, tilt: hit.tilt && JSON.parse(JSON.stringify(hit.tilt)),
+      aids: hit.aids.map((a) => ({ ...a, mesh: cloneMesh(a.mesh) })),
+    });
+    for (const l of hit.log) log(D, l);
+    return;
+  }
+  const n0 = (D.log ||= []).length;
+  addAidsRaw(D, P, pt, solidNative, normals, G);
+  aidsMemo.set(key, {
+    mesh: cloneMesh(pt.mesh), volume: pt.volume, tris: pt.tris, print: pt.print.slice(),
+    place: pt.place && { ...pt.place }, tilt: pt.tilt && JSON.parse(JSON.stringify(pt.tilt)),
+    aids: pt.aids.map((a) => ({ ...a, mesh: cloneMesh(a.mesh) })), log: D.log.slice(n0),
+  });
+  if (aidsMemo.size > 6) aidsMemo.delete(aidsMemo.keys().next().value);
+}
+
+function addAidsRaw(D, P, pt, solidNative, normals, G) {
   pt.aids = [];
   if (P.printAids === 'off') return;
   const bed = { x: P.bedX - 4, y: P.bedY - 4, z: P.bedZ };
@@ -491,49 +553,56 @@ export function build(P, svg, opt = {}) {
     const H = hinges(D);
     const L = latches(D);
     const z0 = D.z0;
+    // Grupos para repartir el trabajo entre dos hilos: A = base, junta e
+    // inserto de la base; B = tapa, cierres, pasadores e inserto de la tapa.
+    const want = (g) => !opt.only || opt.only === g;
 
     // Base (reutilizada si solo cambian parámetros de la tapa).
-    const key = baseKey(P, normals);
-    let bp;
-    if (baseCache && baseCache.key === key) {
-      bp = clonePart(baseCache.part);
-      report.push(...baseCache.report);
-    } else {
-      const rep = [];
-      const base = buildBase(D, H, L, rep);
-      report.push(...rep);
-      bp = part('base', 'Base', base, {
-        print: T(0, 0, z0), instances: [T(0, 0, z0)], qty: 1, material: 'PETG / PLA / ASA',
-      }, normals);
-      baseCache = { key, part: clonePart(bp), report: rep };
+    if (want('A')) {
+      const key = baseKey(P, normals);
+      let bp;
+      if (baseCache && baseCache.key === key) {
+        bp = clonePart(baseCache.part);
+        report.push(...baseCache.report);
+      } else {
+        const rep = [];
+        const base = buildBase(D, H, L, rep);
+        report.push(...rep);
+        bp = part('base', 'Base', base, {
+          print: T(0, 0, z0), instances: [T(0, 0, z0)], qty: 1, material: 'PETG / PLA / ASA',
+        }, normals);
+        baseCache = { key, part: clonePart(bp), report: rep };
+      }
+      stage('base');
+      addAids(D, P, bp, () => buildBase(D, H, L, []), normals);
+      parts.push(bp);
+      stage('ayudas base');
     }
-    stage('base');
-    addAids(D, P, bp, () => buildBase(D, H, L, []), normals);
-    parts.push(bp);
-    stage('ayudas base');
 
-    const { lid, warn } = buildLid(D, P, H, L, svg, report);
-    D.warn.push(...warn);
-    const extra = D.stack ? D.hs : D.relief === 'emboss' && (D.pattern !== 'smooth' || svg) ? D.pd : 0;
-    const lp = part('lid', 'Tapa', lid, {
-      print: lidFlip(D, extra), instances: [T(0, 0, z0)], qty: 1, material: 'PETG / PLA / ASA',
-    }, normals);
-    stage('tapa');
-    addAids(D, P, lp, () => lid, normals);
-    parts.push(lp);
-    stage('ayudas tapa');
+    if (want('B')) {
+      const { lid, warn } = buildLid(D, P, H, L, svg, report);
+      D.warn.push(...warn);
+      const extra = D.stack ? D.hs : D.relief === 'emboss' && (D.pattern !== 'smooth' || svg) ? D.pd : 0;
+      const lp = part('lid', 'Tapa', lid, {
+        print: lidFlip(D, extra), instances: [T(0, 0, z0)], qty: 1, material: 'PETG / PLA / ASA',
+      }, normals);
+      stage('tapa');
+      addAids(D, P, lp, () => lid, normals);
+      parts.push(lp);
+      stage('ayudas tapa');
 
-    // Cierre: perfil acostado (X → Z de impresión).
-    const lay = [0, 0, 1, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, D.latchW / 2, 1];
-    parts.push(part('latch', 'Cierre', L.latch, {
-      print: lay, instances: D.latch.xs.map((x) => T(x, 0, z0)),
-      qty: D.latch.n, material: 'PETG (flexible) / PLA',
-    }, normals));
+      // Cierre: perfil acostado (X → Z de impresión).
+      const lay = [0, 0, 1, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, D.latchW / 2, 1];
+      parts.push(part('latch', 'Cierre', L.latch, {
+        print: lay, instances: D.latch.xs.map((x) => T(x, 0, z0)),
+        qty: D.latch.n, material: 'PETG (flexible) / PLA',
+      }, normals));
+    }
 
     // Junta: si el anillo no cabe en la cama se divide en tramos rectos
     // (cortes en los lados largos, donde la ranura es recta). El TPU se
     // asienta a presión en la ranura y los tramos quedan a tope.
-    const g = gasket(D);
+    const g = want('A') ? gasket(D) : null;
     if (g) {
       const bx = P.bedX - 8, by = P.bedY - 8;
       const gL = D.Lband, gW = D.Wband;
@@ -561,7 +630,7 @@ export function build(P, svg, opt = {}) {
     }
 
     // Insertos interiores.
-    if (P.insertMode && P.insertMode !== 'off') {
+    if (want('A') && P.insertMode && P.insertMode !== 'off') {
       const t1 = performance.now();
       const hasObjs = (P.contentObjects && P.contentObjects.length) || (P.contentPolys && P.contentPolys.length);
       const polys = P.insertMode === 'pockets' && hasObjs ? (P.contentPolys || []) : null;
@@ -578,7 +647,7 @@ export function build(P, svg, opt = {}) {
       D.insert = ins.info;
       log(D, `inserto base: altura ${ins.info.height} mm, ${ins.info.pockets} alojamientos, ${ins.info.notches.length} huecos para dedos (${Math.round(performance.now() - t1)} ms)`);
     }
-    if (P.insertLid) {
+    if (want('B') && P.insertLid) {
       const li = lidInsert(D, P);
       if (li) {
         const lp2 = part('insertLid', 'Inserto de tapa', li.solid, {
@@ -594,41 +663,43 @@ export function build(P, svg, opt = {}) {
     // Pasadores: impresos o filamento + tapones, por separado para bisagra y cierre.
     const caps = [];
     D.filament = {};
-    const axisZ = (d) => d / 2 - 0.12 * d;
-    // Pasador con la cabeza en el lado `side` (−1: −X; +1: +X, girado 180° en Z).
-    // Holgura axial de 0.2 mm entre la cabeza y la cara del nudillo/mejilla.
-    const pinAt = (xc, span, side, y, z) => (side > 0 ? mul(T(xc + span / 2 + 0.2, y, z), ROTZ180) : T(xc - span / 2 - 0.2, y, z));
-    if (D.pinMode === 'printed') {
-      const hp = printedPin(D, D.hinge.len + 0.2, D.pinD);
-      parts.push(part('hingePin', 'Pasador bisagra', hp.solid, {
-        print: I4(),
-        instances: D.hinge.xs.map((xc, i) => pinAt(xc, D.hinge.len, D.hinge.headSide[i], D.ya, D.za + z0 - axisZ(D.pinD))),
-        qty: D.hinge.n, material: 'PETG / PLA (acostado)', length: hp.length,
-      }, normals));
-    } else {
-      for (const xc of D.hinge.xs) caps.push({ a: xc - D.hinge.len / 2, b: xc + D.hinge.len / 2, y: D.ya, z: D.za });
-      D.filament.hinge = filamentLength(D.hinge.len); D.filament.hingeQty = D.hinge.n;
-    }
-    if (D.latchPinMode === 'printed') {
-      const lpn = printedPin(D, D.latch.span + 0.2, D.latchPinD);
-      parts.push(part('latchPin', 'Pasador cierre', lpn.solid, {
-        print: I4(),
-        instances: D.latch.xs.map((xc, i) => pinAt(xc, D.latch.span, D.latch.headSide[i], D.yp, D.zp + z0 - axisZ(D.latchPinD))),
-        qty: D.latch.n, material: 'PETG / PLA (acostado)', length: lpn.length,
-      }, normals));
-    } else {
-      for (const xc of D.latch.xs) caps.push({ a: xc - D.latch.span / 2, b: xc + D.latch.span / 2, y: D.yp, z: D.zp });
-      D.filament.latch = filamentLength(D.latch.span); D.filament.latchQty = D.latch.n;
-    }
-    if (caps.length) {
-      const inst = [];
-      for (const e of caps) {
-        inst.push(mul(T(e.a - 2.6, e.y, e.z + z0), ZX));
-        inst.push(mul(T(e.b + 2.6, e.y, e.z + z0), mul(ROTZ180, ZX)));
+    if (want('B')) {
+      const axisZ = (d) => d / 2 - 0.12 * d;
+      // Pasador con la cabeza en el lado `side` (−1: −X; +1: +X, girado 180° en Z).
+      // Holgura axial de 0.2 mm entre la cabeza y la cara del nudillo/mejilla.
+      const pinAt = (xc, span, side, y, z) => (side > 0 ? mul(T(xc + span / 2 + 0.2, y, z), ROTZ180) : T(xc - span / 2 - 0.2, y, z));
+      if (D.pinMode === 'printed') {
+        const hp = printedPin(D, D.hinge.len + 0.2, D.pinD);
+        parts.push(part('hingePin', 'Pasador bisagra', hp.solid, {
+          print: I4(),
+          instances: D.hinge.xs.map((xc, i) => pinAt(xc, D.hinge.len, D.hinge.headSide[i], D.ya, D.za + z0 - axisZ(D.pinD))),
+          qty: D.hinge.n, material: 'PETG / PLA (acostado)', length: hp.length,
+        }, normals));
+      } else {
+        for (const xc of D.hinge.xs) caps.push({ a: xc - D.hinge.len / 2, b: xc + D.hinge.len / 2, y: D.ya, z: D.za });
+        D.filament.hinge = filamentLength(D.hinge.len); D.filament.hingeQty = D.hinge.n;
       }
-      parts.push(part('cap', 'Tapón de pasador', filamentCap(D), {
-        print: I4(), instances: inst, qty: inst.length, material: 'PLA / PETG',
-      }, normals));
+      if (D.latchPinMode === 'printed') {
+        const lpn = printedPin(D, D.latch.span + 0.2, D.latchPinD);
+        parts.push(part('latchPin', 'Pasador cierre', lpn.solid, {
+          print: I4(),
+          instances: D.latch.xs.map((xc, i) => pinAt(xc, D.latch.span, D.latch.headSide[i], D.yp, D.zp + z0 - axisZ(D.latchPinD))),
+          qty: D.latch.n, material: 'PETG / PLA (acostado)', length: lpn.length,
+        }, normals));
+      } else {
+        for (const xc of D.latch.xs) caps.push({ a: xc - D.latch.span / 2, b: xc + D.latch.span / 2, y: D.yp, z: D.zp });
+        D.filament.latch = filamentLength(D.latch.span); D.filament.latchQty = D.latch.n;
+      }
+      if (caps.length) {
+        const inst = [];
+        for (const e of caps) {
+          inst.push(mul(T(e.a - 2.6, e.y, e.z + z0), ZX));
+          inst.push(mul(T(e.b + 2.6, e.y, e.z + z0), mul(ROTZ180, ZX)));
+        }
+        parts.push(part('cap', 'Tapón de pasador', filamentCap(D), {
+          print: I4(), instances: inst, qty: inst.length, material: 'PLA / PETG',
+        }, normals));
+      }
     }
 
     stage('resto de piezas');
@@ -650,6 +721,7 @@ export function build(P, svg, opt = {}) {
       parts,
       assembly: { hinge: { y: D.ya, z: D.za + z0 }, latch: { y: D.yp, z: D.zp + z0 }, z0, rot90: D.rot90 },
       ms: Math.round(performance.now() - t0),
+      only: opt.only || null,
     };
   } finally {
     cleanup();
@@ -686,4 +758,4 @@ function clonePart(p) {
 }
 
 /** Para pruebas: acceso a la geometría cruda sin liberar memoria. */
-export const _internal = { derive, hinges, latches, buildBase, buildLid, knuckleSpans, M, cleanup, criticalLayers };
+export const _internal = { derive, hinges, latches, buildBase, buildLid, knuckleSpans, M, cleanup, criticalLayers, LID_ONLY };

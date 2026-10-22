@@ -10,6 +10,7 @@ español**. Unidades: milímetros y grados.
 npm run dev          # servidor Vite con recarga (http://localhost:5173)
 npm run build        # dist/rugged-box.html: UN archivo autocontenido (doble clic)
 npm test             # geometría + cama + montaje real (~2 min)
+npm run test:perf    # memoria WASM, reparto A/B, vista rápida y cachés (~1 min)
 npm run test:assembly   # mecánica completa, pasadores montables, puentes ≤ 10 mm, apilado (~45 s)
 npm run test:quick   # barrido rápido de tamaños (7 casos, ~15 s)
 npm run test:sweep   # barrido completo de 20 a 380 mm (~25 casos, ~30 s–2 min)
@@ -37,6 +38,7 @@ registro interno del motor) y `logs/sweep-latest.json` (resumen). **Ejecuta
 | `src/content.js` | SVG calcado del contenido (unidades reales, recorte máx. de esquina). |
 | `src/packer.js` | Acomodo automático de varios objetos (gravedad sobre rejilla de 1 mm, giros 90/180/270°, huecos para dedos compartibles, prefiere cajas que quepan planas). Pura JS. |
 | `src/main.js`, `viewer.js`, `worker.js` | UI, vista three.js (render bajo demanda), hilo de geometría. |
+| `src/engineClient.js`, `src/engine/merge.js` | Tres hilos: A + B (vista rápida `draft`, cada uno media caja: `build(P, svg, { only })`) y R (modelo completo `preview` y exportación `final`). `mergeResults` une A y B. |
 
 ## Convenciones y trampas conocidas
 
@@ -65,7 +67,22 @@ registro interno del motor) y `logs/sweep-latest.json` (resumen). **Ejecuta
 - Las ayudas de impresión (`addAids`) se aplican a base, tapa e insertos; el
   parámetro `G` describe el contorno y si hay mecánica que proteger.
 - Memoria WASM: todo objeto creado se libera en `cleanup()` al final de
-  `build`; no guardes `Manifold`/`CrossSection` entre llamadas.
+  `build`; no guardes `Manifold`/`CrossSection` entre llamadas. `installGC`
+  envuelve el prototipo REAL de las instancias (no `W.Manifold.prototype`,
+  que es otro objeto): si no, nada encadenado se libera (~30 MB por
+  reconstrucción, el hilo acaba en "memory access out of bounds").
+  `CrossSection.extrude/revolve` se reemplazan porque manifold‑3d no libera
+  su vector de polígonos. `tests/perf.test.mjs` vigila la memoria.
+- Calidades: `draft` (vista rápida: `D.seg` 20, sin `criticalLayers` ni
+  `addAids`), `preview` (40) y `final` (96). Lo que se omita en `draft` debe
+  ser un detalle que llega con el modelo completo, nunca mecánica.
+- Grupos de `build(…, { only })`: A = base, junta, inserto de la base;
+  B = tapa, cierre, pasadores, tapones, inserto de la tapa. Una pieza nueva
+  va en uno de los dos (si no, la vista rápida no la muestra) y la prueba de
+  reparto de `perf.test.mjs` comprueba que A + B = completo.
+- Cachés en engine.js: `baseCache` (LID_ONLY), `aidsMemo` (huella de la malla
+  + parámetros de ayudas, `AID_KEYS`) y `critMemo` (firma del sólido). Si
+  `addAids` empieza a leer un parámetro o una cota nueva, añádela a la clave.
 - `frustum(a, z0, b, z1)` es una ENVOLVENTE CONVEXA: solo para secciones
   convexas (offsets de `rrOffset`). Para chaflanes de formas cualquiera
   (alojamientos de insertos) usa `steppedChamfer`. El frustum se comía la
@@ -112,6 +129,9 @@ registro interno del motor) y `logs/sweep-latest.json` (resumen). **Ejecuta
    (`thicknessChecks`: cortes XY, YZ por la mecánica y XZ por la banda).
 10. Piezas sueltas: agujero del cierre con holgura + `holeComp` y chaflán en
    las dos caras; tapón tipo pinza (`printFitChecks`).
+11. Rendimiento (`perf.test.mjs`): la memoria WASM no crece al reconstruir,
+   A + B = build completo, la vista rápida da piezas válidas y las cachés
+   (base, ayudas) devuelven lo mismo que recalcular.
 
 ## Flujo con el PC del usuario
 

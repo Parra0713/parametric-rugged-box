@@ -121,7 +121,7 @@ export class Viewer {
   }
 
   /** Recibe un resultado del motor y la disposición de impresión. */
-  setData(res, layout, bed) {
+  setData(res, layout, bed, content) {
     for (const g of Object.values(this.geoms)) g.dispose();
     this.geoms = {};
     for (const p of res.parts) this.geoms[p.key] = this.geometry(p.mesh);
@@ -129,6 +129,7 @@ export class Viewer {
     this.data = res;
     this.layout = layout;
     this.bed = bed;
+    if (content !== undefined) this.content = content;
     this.rebuild();
     if (first) this.fit();
   }

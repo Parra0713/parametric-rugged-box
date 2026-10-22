@@ -722,7 +722,11 @@ export function derive(P) {
       freeHeight: r2(free), units: Math.floor((free - 0.5) / 7) };
   }
 
-  D.seg = P.quality === 'final' ? 96 : 40;
+  // Calidad: 'draft' mientras se edita (vista rápida: menos segmentos, sin
+  // ranuras de sombra ni ayudas de impresión), 'preview' al soltar (modelo
+  // completo) y 'final' para exportar.
+  D.draft = P.quality === 'draft';
+  D.seg = P.quality === 'final' ? 96 : D.draft ? 20 : 40;
   return D;
 }
 

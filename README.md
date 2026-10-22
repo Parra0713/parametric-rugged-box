@@ -16,7 +16,7 @@ hermética en TPU y pasadores, sin tornillería.
 
 | Requisito | OpenSCAD | CadQuery | JSCAD | **three.js + manifold‑3d (WASM)** |
 |---|---|---|---|---|
-| Vista en tiempo real | ✗ (render CGAL en segundos/minutos) | ✗ (Python + OCCT, sin UI propia) | ~ (CSG lento en JS puro) | **✔ 100–300 ms por reconstrucción** |
+| Vista en tiempo real | ✗ (render CGAL en segundos/minutos) | ✗ (Python + OCCT, sin UI propia) | ~ (CSG lento en JS puro) | **✔ ~90 ms vista rápida, modelo completo al soltar** |
 | Importar SVG directo | ~ (`import()`, sin control de trazos) | ~ (vía librerías extra) | ~ | **✔ SVGLoader: rellenos, agujeros y trazos** |
 | Memoria / CPU | Alto en booleanas | Alto (OCCT ~200 MB) | Medio | **Bajo: núcleo C++ en WASM de 540 KB, memoria liberada en cada ciclo** |
 | Mallas siempre válidas | ~ | ✔ (B‑rep) | ✗ (errores frecuentes) | **✔ manifold garantiza mallas cerradas** |
@@ -28,6 +28,19 @@ hermética en TPU y pasadores, sin tornillería.
 three.js con **render bajo demanda** (0 % de GPU con la vista quieta) y el
 cliente aplica la política **"último pedido gana"**: al arrastrar un
 deslizador nunca se acumulan cálculos atrasados.
+
+**Dos pasadas por cada cambio** (v6.5):
+
+1. **Vista rápida** (~90 ms en una caja normal): dos hilos construyen a la
+   vez la mitad de las piezas cada uno (base | tapa), con la mitad de
+   segmentos en las curvas y sin ranuras de sombra ni ayudas de impresión.
+2. **Modelo completo** cuando dejas de tocar los controles ~0,3 s, en un
+   tercer hilo, para que el cálculo largo de las cajas grandes inclinadas
+   (aletas y soportes, segundos) nunca frene la vista rápida.
+
+Además: la base, las ayudas de impresión y el análisis de capas se guardan
+en caché (cambiar el patrón de la tapa no recalcula los soportes de la base)
+y la memoria WASM se libera de verdad en cada ciclo.
 
 ### Soluciones mecánicas (resumen de la investigación)
 
@@ -274,8 +287,9 @@ npm run build    # regenera dist/rugged-box.html
 index.html              interfaz
 src/main.js             parámetros, panel de medidas, exportación
 src/viewer.js           vista 3D (three.js, render bajo demanda)
-src/engineClient.js     comunicación con el worker ("último pedido gana")
+src/engineClient.js     tres hilos de geometría: vista rápida (A + B) y modelo completo (R)
 src/worker.js           hilo de geometría
+src/engine/merge.js     une las mitades A y B de la vista rápida
 src/engine/params.js    parámetros, esquema de UI y derivación de cotas
 src/engine/geo.js       primitivas y gestión de memoria WASM
 src/engine/seal.js      ranura, lengüeta y junta

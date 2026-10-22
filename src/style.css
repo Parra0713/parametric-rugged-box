@@ -124,6 +124,8 @@ input[type=checkbox] { accent-color: var(--accent); }
 .mini, .chk { display: inline-flex; align-items: center; gap: 6px; color: var(--muted); font-size: 12px; }
 .mini input { width: 110px; }
 .mini-range { width: 110px; }
+.info.stale > * { opacity: 0.55; transition: opacity 0.15s; }
+.busy[data-kind="draft"] { color: var(--muted); }
 .busy {
   position: absolute; top: 12px; right: 12px; font: 11px var(--mono); padding: 4px 8px;
   border-radius: 6px; background: var(--panel); border: 1px solid var(--line); color: var(--warn);

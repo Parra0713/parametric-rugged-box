@@ -1,60 +1,115 @@
 /**
- * engineClient.js — Cliente del motor con política "último pedido gana".
+ * engineClient.js — Tres hilos de geometría con política "último pedido gana".
  *
- * Mientras el usuario arrastra un deslizador se generan decenas de pedidos;
- * solo se calcula uno a la vez y, al terminar, se salta directamente al más
- * reciente. Nunca se acumula trabajo atrasado (latencia acotada a una
- * reconstrucción) y la CPU no se satura.
+ *   A, B  → vista rápida mientras se edita (calidad 'draft'): cada hilo
+ *           construye la mitad de las piezas (A: base, junta, inserto;
+ *           B: tapa, cierres, pasadores) y se unen con `mergeResults`.
+ *   R     → modelo completo ('preview') cuando el usuario se detiene, y la
+ *           exportación ('final'). Va en su propio hilo para que el cálculo
+ *           largo (ayudas de impresión de cajas grandes) nunca retrase la
+ *           vista rápida.
+ *
+ * En cada hilo solo se calcula un pedido a la vez y, al terminar, se salta al
+ * más reciente: nunca se acumula trabajo atrasado. Los pedidos de
+ * exportación tienen su propia cola y no los reemplaza la vista previa.
+ *
+ * Si un hilo falla (error de WASM, memoria), se descarta, se crea otro y el
+ * pedido en curso se repite una vez: un fallo puntual ya no deja la vista
+ * congelada sin aplicar los cambios.
  *
  * El Worker se incrusta en el propio HTML (?worker&inline, formato clásico),
  * por lo que funciona también abriendo el archivo con doble clic (file://).
  */
 import EngineWorker from './worker.js?worker&inline';
+import { mergeResults } from './engine/merge.js';
 
-export class EngineClient {
-  constructor() {
-    this.seq = 0;
-    this.busy = false;
-    this.pending = null;
-    this.waiters = new Map();
+let seq = 0;
+
+class Lane {
+  constructor(name) {
+    this.name = name;
+    this.busy = null;                      // pedido en curso
+    this.slots = { final: null, normal: null };
+    this.spawn();
+  }
+
+  spawn() {
+    this.worker?.terminate();
     this.worker = new EngineWorker();
     this.worker.onmessage = (e) => this._done(e.data);
     this.worker.onerror = (e) => {
-      const id = this.current?.id;
-      this._done({ id, ok: false, error: 'El hilo de geometría falló: ' + (e.message || 'error desconocido') });
+      e.preventDefault?.();
+      this._done({ id: this.busy?.id, ok: false, fatal: true, error: 'El hilo de geometría falló: ' + (e.message || 'error desconocido') });
     };
   }
 
-  /**
-   * Pide una reconstrucción. La promesa se resuelve con el resultado, o con
-   * { superseded: true } si un pedido más nuevo la reemplazó antes de empezar.
-   */
-  request(P, svg, normals = true) {
-    const id = ++this.seq;
+  /** kind: 'normal' (reemplazable) | 'final' (exportación, no se reemplaza). */
+  run(kind, job) {
     return new Promise((resolve) => {
-      this.waiters.set(id, resolve);
-      if (this.pending) {
-        this.waiters.get(this.pending.id)?.({ superseded: true });
-        this.waiters.delete(this.pending.id);
-      }
-      this.pending = { id, P, svg, normals };
+      const old = this.slots[kind];
+      if (old && kind === 'normal') old.resolve({ superseded: true });
+      if (old && kind === 'final') { this.slots[kind] = null; old.resolve({ superseded: true }); }
+      this.slots[kind] = { ...job, id: ++seq, resolve, tries: 0, kind };
       this._pump();
     });
   }
 
   _pump() {
-    if (this.busy || !this.pending) return;
-    this.current = this.pending;
-    this.pending = null;
-    this.busy = true;
-    this.worker.postMessage(this.current);
+    if (this.busy) return;
+    const job = this.slots.final || this.slots.normal;
+    if (!job) return;
+    if (job === this.slots.final) this.slots.final = null; else this.slots.normal = null;
+    this.busy = job;
+    const { resolve, tries, kind, ...msg } = job;
+    this.worker.postMessage(msg);
   }
 
   _done(msg) {
-    this.busy = false;
-    const w = this.waiters.get(msg.id);
-    this.waiters.delete(msg.id);
-    w?.(msg);
+    const job = this.busy;
+    if (!job || msg.id !== job.id) return;
+    this.busy = null;
+    if (!msg.ok && msg.fatal) {
+      this.spawn();
+      // Reintenta una vez si no hay ya un pedido más nuevo esperando.
+      const newer = this.slots.normal || this.slots.final;
+      if (job.tries < 1 && !newer) {
+        this.slots[job.kind] = { ...job, tries: job.tries + 1 };
+        this._pump();
+        return;
+      }
+    }
+    job.resolve(msg);
     this._pump();
+  }
+}
+
+export class EngineClient {
+  constructor() {
+    this.A = new Lane('A');
+    this.B = new Lane('B');
+    this.R = new Lane('R');
+  }
+
+  /** Vista rápida repartida en dos hilos. */
+  async draft(P, svg) {
+    const q = { ...P, quality: 'draft' };
+    const [a, b] = await Promise.all([
+      this.A.run('normal', { P: q, svg, normals: true, only: 'A' }),
+      this.B.run('normal', { P: q, svg, normals: true, only: 'B' }),
+    ]);
+    if (a.superseded || b.superseded) return { superseded: true };
+    if (!a.ok) return a;
+    if (!b.ok) return b;
+    return { ok: true, r: mergeResults(a.r, b.r) };
+  }
+
+  /** Modelo completo para la vista (calidad 'preview'). */
+  refine(P, svg) {
+    return this.R.run('normal', { P: { ...P, quality: 'preview' }, svg, normals: true });
+  }
+
+  /** Modelo final para exportar (no lo reemplaza la vista previa). */
+  final(P, svg) {
+    return this.R.run('final', { P: { ...P, quality: 'final' }, svg, normals: false });
   }
 }

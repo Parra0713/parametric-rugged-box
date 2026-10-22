@@ -47,7 +47,7 @@ const state = {
   svgRaw: null, svgName: '', svgText: '',
   objects: [],              // [{ name, text, raw, qty }]
   packed: null,             // resultado del acomodo
-  result: null, layout: null, lastApplied: 0,
+  result: null, layout: null,
 };
 
 // Objetos guardados (y migración del contorno único de la v4).
@@ -137,6 +137,15 @@ function control(it) {
       setParam(it.k, x);
     };
     range.addEventListener('input', () => sync(range.value, range));
+    // El campo numérico se aplica mientras se escribe (antes solo al salir
+    // del campo, y parecía que el cambio no se aplicaba). Valores a medio
+    // escribir o fuera de rango se ignoran hasta confirmar con Intro/salir.
+    num.addEventListener('input', () => {
+      const x = Number(num.value);
+      if (num.value === '' || !Number.isFinite(x) || x < it.min || x > it.max * 4) return;
+      range.value = x;
+      if (state.P[it.k] !== x) setParam(it.k, x);
+    });
     num.addEventListener('change', () => sync(num.value, num));
     controls[it.k] = { set: (x) => { range.value = x; num.value = x; } };
     return el('div', { class: 'field' },
@@ -340,9 +349,22 @@ function setParam(k, v) {
     const pi = $('#packInfo');
     if (pi) pi.textContent = packText();
   }
-  safeSet(STORE, JSON.stringify(state.P));
-  history.replaceState(null, '', '#' + encodeURIComponent(JSON.stringify(diffFromDefaults())));
   schedule();
+  persistSoon();
+}
+
+/*
+ * Guardar en localStorage y en la URL en cada evento del deslizador (60/s)
+ * es caro y los navegadores limitan history.replaceState (Safari lanza una
+ * excepción tras 100 llamadas en 30 s, Chrome las ignora): se agrupa.
+ */
+let persistTimer = 0;
+function persistSoon() {
+  clearTimeout(persistTimer);
+  persistTimer = setTimeout(() => {
+    safeSet(STORE, JSON.stringify(state.P));
+    try { history.replaceState(null, '', '#' + encodeURIComponent(JSON.stringify(diffFromDefaults()))); } catch { /* límite del navegador */ }
+  }, 400);
 }
 
 function diffFromDefaults() {
@@ -354,32 +376,95 @@ function diffFromDefaults() {
 /* ------------------------------------------------------------------ */
 /*  Reconstrucción                                                    */
 /* ------------------------------------------------------------------ */
-let timer = 0;
+/*
+ * Dos pasadas por cada cambio:
+ *   1. Vista rápida ('draft', dos hilos en paralelo): sale en el siguiente
+ *      fotograma, con menos segmentos y sin ayudas de impresión.
+ *   2. Modelo completo ('preview', tercer hilo) cuando el usuario lleva un
+ *      momento sin tocar nada. Sustituye a la vista rápida sin parpadeo.
+ * `rev` numera los cambios: nunca se muestra un resultado más viejo que el
+ * que ya está en pantalla (ni una vista rápida encima del modelo completo de
+ * la misma revisión).
+ */
+let rev = 0;
+let shown = { rev: -1, full: false };
+let draftRaf = 0, fullTimer = 0;
+const FULL_DELAY = 280; // ms sin cambios antes de calcular el modelo completo
+
 function schedule() {
-  clearTimeout(timer);
-  timer = setTimeout(rebuild, 40);
+  rev++;
+  cancelAnimationFrame(draftRaf);
+  draftRaf = requestAnimationFrame(rebuildDraft);
+  clearTimeout(fullTimer);
+  fullTimer = setTimeout(rebuildFull, FULL_DELAY);
+  updateBusy();
 }
 
-async function rebuild() {
-  const busy = $('#busy');
-  const t = setTimeout(() => { busy.hidden = false; }, 150);
-  const svg = placeSVG(state.svgRaw, state.P);
-  const msg = await engine.request({ ...state.P, quality: 'preview', ...contentPayload() }, svg, true);
-  clearTimeout(t);
+function payload() {
+  return { P: { ...state.P, ...contentPayload() }, svg: placeSVG(state.svgRaw, state.P) };
+}
+
+async function rebuildDraft() {
+  // En la vista de placas la vista rápida no sirve (sin inclinación ni
+  // ayudas): se espera al modelo completo.
+  if (viewer.mode === 'print' && state.result) return;
+  const my = rev;
+  const { P, svg } = payload();
+  const msg = await engine.draft(P, svg);
   if (msg.superseded) return;
-  busy.hidden = true;
-  if (!msg.ok) { setStatus('err', 'Error: ' + msg.error.split('\n')[0]); console.error(msg.error); return; }
-  if (msg.id < state.lastApplied) return;
-  state.lastApplied = msg.id;
+  apply(msg, my, false);
+}
+
+
+async function rebuildFull() {
+  const my = rev;
+  const { P, svg } = payload();
+  const msg = await engine.refine(P, svg);
+  if (msg.superseded) return;
+  apply(msg, my, true);
+}
+
+function apply(msg, r, full) {
+  if (r < shown.rev || (r === shown.rev && shown.full && !full)) { updateBusy(); return; }
+  if (!msg.ok) {
+    // Un error de la vista rápida se ignora si el modelo completo va a llegar.
+    if (!full && r === rev) { updateBusy(); return; }
+    setStatus('err', 'Error: ' + msg.error.split('\n')[0]); console.error(msg.error);
+    shown = { rev: r, full };
+    updateBusy();
+    return;
+  }
+  shown = { rev: r, full };
+  const t0 = performance.now();
   state.result = msg.r;
   state.layout = computeLayout(msg.r);
-  viewer.setData(msg.r, state.layout, bed());
+  viewer.setData(msg.r, state.layout, bed(), contentPolys());
   const tris = msg.r.parts.reduce((s, p) => s + p.tris * p.instances.length, 0);
-  setStatus('ok', `${msg.r.ms} ms · ${tris.toLocaleString('es')} triángulos`);
-  updateContent();
-  renderInfo();
+  if (full) {
+    updateContent();
+    renderInfo();
+  } else {
+    renderInfoLight();
+  }
   const sp = $('#sectionPos');
   sp.min = -Math.ceil(msg.r.D.Lband / 2); sp.max = Math.ceil(msg.r.D.Lband / 2);
+  const ui = Math.round(performance.now() - t0);
+  setStatus('ok', `${full ? 'Modelo completo' : 'Vista rápida'} · ${msg.r.ms} ms motor + ${ui} ms vista · ${tris.toLocaleString('es')} triángulos`);
+  updateBusy();
+}
+
+/** Indicador: "Calculando…" si lo visible está desfasado; "Refinando…" si es la vista rápida. */
+function updateBusy() {
+  const busy = $('#busy');
+  if (shown.rev < rev) { busy.textContent = 'Calculando…'; busy.hidden = false; busy.dataset.kind = 'calc'; }
+  else if (!shown.full) { busy.textContent = 'Vista rápida · refinando…'; busy.hidden = false; busy.dataset.kind = 'draft'; }
+  else busy.hidden = true;
+}
+
+/** Contorno del contenido para el visor (marco interno). */
+function contentPolys() {
+  const pay = contentPayload().contentObjects;
+  return pay ? pay.flatMap((q) => q.polys) : null;
 }
 
 /** Aplica una opción del optimizador (solo cambia los parámetros implicados). */
@@ -392,8 +477,6 @@ function applyOption(a) {
 
 /** Contenido en el visor + recorte de esquina máximo + optimizador de cama. */
 function updateContent() {
-  const pay = contentPayload().contentObjects;
-  viewer.setContent(pay ? pay.flatMap((q) => q.polys) : null);
   const D = state.result?.D;
   const fp = state.packed?.footprint;
   const rot = state.P.innerW > state.P.innerL;
@@ -470,8 +553,14 @@ function orientShort(p) {
   return f.mode === 'diagonal' ? `diagonal ${Math.round(f.angle)}°` : f.mode;
 }
 
+/** Vista rápida: el panel de medidas se marca como pendiente hasta el modelo completo. */
+function renderInfoLight() {
+  $('#info').classList.add('stale');
+}
+
 function renderInfo() {
   const { D, parts } = state.result;
+  $('#info').classList.remove('stale');
   const I = D.inner;
   const info = $('#info');
   info.innerHTML = '';
@@ -598,11 +687,10 @@ function renderInfo() {
 /*  Exportación                                                       */
 /* ------------------------------------------------------------------ */
 async function finalBuild() {
-  const svg = placeSVG(state.svgRaw, state.P);
-  let msg;
-  do { msg = await engine.request({ ...state.P, quality: 'final', ...contentPayload() }, svg, false); } while (msg.superseded);
+  const { P, svg } = payload();
+  const msg = await engine.final(P, svg);
+  if (msg.superseded) throw new Error('Exportación reemplazada por otra');
   if (!msg.ok) throw new Error(msg.error);
-  schedule(); // vuelve a la vista previa
   return msg.r;
 }
 
@@ -791,7 +879,7 @@ $('#btnReset').addEventListener('click', () => {
 
 buildParams();
 if (state.objects.length) runPack(true);
-rebuild();
+schedule();
 
 // Acceso para depuración y pruebas automatizadas.
 window.__rugged = { state, viewer, setParam, contentChanged, buildParams };

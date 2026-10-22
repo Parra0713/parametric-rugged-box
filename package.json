@@ -1,15 +1,16 @@
 {
   "name": "rugged-box",
-  "version": "6.4.0",
+  "version": "6.5.0",
   "description": "Generador paramétrico de cajas Rugged Box imprimibles en 3D (FDM)",
   "scripts": {
     "dev": "vite",
     "build": "vite build && node scripts/rename-dist.mjs",
     "preview": "vite preview",
-    "test": "node tests/geometry.test.mjs && node tests/bedfit.test.mjs && node tests/assembly.test.mjs",
+    "test": "node tests/geometry.test.mjs && node tests/bedfit.test.mjs && node tests/assembly.test.mjs && node tests/perf.test.mjs",
     "test:quick": "node tests/sweep.test.mjs --quick",
     "test:sweep": "node tests/sweep.test.mjs",
-    "test:assembly": "node tests/assembly.test.mjs"
+    "test:assembly": "node tests/assembly.test.mjs",
+    "test:perf": "node tests/perf.test.mjs"
   },
   "author": "Parra0713",
   "license": "MIT",
