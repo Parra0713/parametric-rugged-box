@@ -281,6 +281,65 @@ npm run build    # regenera dist/rugged-box.html
 
 ---
 
+## Calibración de holguras (v6.6)
+
+Las holguras dependen de la **impresora, el material y la orientación** con
+la que se imprime cada unión (una cota en XY no sale igual que en Z, ni un
+agujero horizontal igual que uno vertical o inclinado). En **Impresión →
+Calibración de holguras** se genera un test cuyas probetas reproducen cada
+unión **en la misma orientación en que se imprime en la caja**, y el
+resultado queda en un **perfil** (p. ej. "Mi impresora · PLA") que se aplica solo a
+todas las cajas.
+
+| Probeta | Unión de la caja | Orientación al imprimir | Ajusta |
+|---|---|---|---|
+| **A** | filamento 1.75 en nudillos y orejetas (XS, S) | agujero horizontal en gota | filamento en bisagra |
+| **P3 / P5** | pasador impreso Ø3 y Ø5 (+ pasador de prueba real) | agujero horizontal; pasador acostado | pasador impreso Ø3 / Ø5 (entre ambos se interpola) |
+| **F** | bisagras y orejetas de una caja que no cabe plana | agujero inclinado 45° | extra si va inclinada |
+| **B** | barril del cierre y tapones pinza | agujero vertical | agujeros verticales |
+| **C** | lengüeta (tapa boca abajo) en la ranura (base) | paredes verticales, cota en XY | lengüeta (+ nudillos, inserto, objeto) |
+| **d** | marco de apilado de la tapa y pie de la base | primera capa, pata de elefante | apilado |
+| **E** | gancho del cierre sobre el retén (útil + cierre real) | útil boca abajo como la tapa: el retén es un puente | precarga del cierre |
+
+* **Universal** (por defecto, ≈ 25 g, ≈ 1 h 15 min): las 8 probetas con
+  medidas de referencia que cubren de la caja XS a la L. Se imprime una vez
+  por impresora y material y vale para cualquier caja que crees después.
+* **Solo esta caja** (≈ 10–28 g): solo las uniones que usa la caja abierta,
+  con sus cotas exactas. Si la caja no cabe plana incluye F; si es apilable,
+  d.
+* El filamento 1.75 hace de **calibre** (±0.02 mm, redondo): con él se separa
+  el efecto de la orientación (A horizontal, B vertical, F inclinado) del
+  error del propio pasador impreso.
+* Todo plano, sin soportes, con números en relieve; el útil E y los marcos
+  d ya van orientados como la tapa. **Paso fino** (0.025 mm) para afinar un
+  perfil ya calibrado.
+
+Se marca el mejor número de cada probeta ("todas duras" / "todas flojas" si
+ninguna sirve: se aplica el extremo y se pide repetir) y **Aplicar
+resultados**. Los diámetros medidos se conservan aunque otra probeta cambie
+la holgura base (B y F se recalculan). El motor sabe antes de modelar si la
+caja se imprimirá inclinada (misma huella que el optimizador de cama) y solo
+entonces suma el extra de F a bisagras y orejetas; el cierre, que siempre se
+imprime de lado, no lo lleva. Cada valor indica si es *medido*, *deducido*,
+*manual* o *por defecto*; se puede editar a mano, tener varios perfiles y
+restablecerlos. Las holguras no viajan en el enlace compartido.
+
+No se calibran (y por qué): la compresión de la junta de TPU (es un valor de
+diseño, 20–30 %, que se comprueba cerrando la caja) y Gridfinity (sus
+holguras las fija el estándar para encajar con cajitas de otros).
+
+Valores de partida y rangos (investigación): ajuste giratorio 0.2–0.3 mm por
+lado; deslizante 0.15–0.25 (PLA), 0.2–0.3 (PETG), 0.25–0.35 (ASA); las series
+de prueba habituales van de 0.1 a 0.5 en pasos de 0.05; los agujeros
+verticales salen más pequeños (sin valor universal: hay que medirlo); juntas
+de elastómero al 20–30 % de compresión. Fuentes:
+[Sovol](https://www.sovol3d.com/blogs/news/fdm-3d-printing-tolerances-clearances-how-to-design-parts-that-fit),
+[Snapmaker](https://www.snapmaker.com/blog/3d-printed-hinges/),
+[GoodPrints3D](https://www.goodprints3d.com/blogs/3d/why-do-3d-printed-holes-come-out-too-small-and-how-do-you-fix-them),
+[QIDI](https://qidi3d.com/es/blogs/print-lab/3d-printed-snap-fit-joints-clearance-guide),
+[Obico/OrcaSlicer](https://www.obico.io/es-ES/blog/tolerance-test-in-orcaslicer-a-comprehensive-guide/),
+[Kraiburg TPE](https://www.kraiburg-tpe.com/en/gasket-design-what-really-matters-smart-solutions-tpe).
+
 ## Estructura
 
 ```
@@ -290,6 +349,8 @@ src/viewer.js           vista 3D (three.js, render bajo demanda)
 src/engineClient.js     tres hilos de geometría: vista rápida (A + B) y modelo completo (R)
 src/worker.js           hilo de geometría
 src/engine/merge.js     une las mitades A y B de la vista rápida
+src/engine/calib.js     test de holguras: plan adaptativo, probetas y aplicación de resultados
+src/calibProfile.js     perfiles de calibración persistentes (localStorage)
 src/engine/params.js    parámetros, esquema de UI y derivación de cotas
 src/engine/geo.js       primitivas y gestión de memoria WASM
 src/engine/seal.js      ranura, lengüeta y junta

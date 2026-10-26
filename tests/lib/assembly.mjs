@@ -215,8 +215,8 @@ export function printFitChecks(r, D) {
     const w = D.latchW;
     const at = (x) => holeDiam(m.slice(x), -D.zp, -D.sp);
     const mid = at(0), e0 = at(-w / 2 + 0.05), e1 = at(w / 2 - 0.05);
-    // Holgura diametral de giro: filamento 0.25 mm (1.75 → 2.0); pasador impreso 2·clr.
-    const need = pinD + (D.latchPinMode === 'filament' ? 0.25 : 2 * D.clr) + D.holeComp - 0.03;
+    // Holgura diametral de giro: filamento 2·filClr (1.75 → 2.0 por defecto); pasador impreso 2·clr.
+    const need = pinD + (D.latchPinMode === 'filament' ? 2 * (D.filClr - D.tiltAdd) : 2 * (D.clrL - D.tiltAdd)) + D.holeComp - 0.03;
     out.push({ ok: mid >= need, msg: `cierre: agujero del barril Ø${mid.toFixed(2)} (pasador ${pinD} + holgura + compensación ≥ ${need.toFixed(2)})` });
     out.push({ ok: e0 >= mid + 0.5 && e1 >= mid + 0.5, msg: `cierre: chaflán de entrada en las dos caras (Ø${e0.toFixed(2)} / Ø${e1.toFixed(2)})` });
   }

@@ -10,6 +10,7 @@ español**. Unidades: milímetros y grados.
 npm run dev          # servidor Vite con recarga (http://localhost:5173)
 npm run build        # dist/rugged-box.html: UN archivo autocontenido (doble clic)
 npm test             # geometría + cama + montaje real (~2 min)
+npm run test:calib   # test de holguras: plan adaptativo, probetas imprimibles, resultados y perfiles
 npm run test:perf    # memoria WASM, reparto A/B, vista rápida y cachés (~1 min)
 npm run test:assembly   # mecánica completa, pasadores montables, puentes ≤ 10 mm, apilado (~45 s)
 npm run test:quick   # barrido rápido de tamaños (7 casos, ~15 s)
@@ -38,6 +39,7 @@ registro interno del motor) y `logs/sweep-latest.json` (resumen). **Ejecuta
 | `src/content.js` | SVG calcado del contenido (unidades reales, recorte máx. de esquina). |
 | `src/packer.js` | Acomodo automático de varios objetos (gravedad sobre rejilla de 1 mm, giros 90/180/270°, huecos para dedos compartibles, prefiere cajas que quepan planas). Pura JS. |
 | `src/main.js`, `viewer.js`, `worker.js` | UI, vista three.js (render bajo demanda), hilo de geometría. |
+| `src/engine/calib.js`, `src/calibProfile.js` | Test de holguras: `calibPlan` (puro), `buildCalibration` (probetas, hilo R), `applyResults` (puro); perfiles persistentes. |
 | `src/engineClient.js`, `src/engine/merge.js` | Tres hilos: A + B (vista rápida `draft`, cada uno media caja: `build(P, svg, { only })`) y R (modelo completo `preview` y exportación `final`). `mergeResults` une A y B. |
 
 ## Convenciones y trampas conocidas
@@ -83,6 +85,21 @@ registro interno del motor) y `logs/sweep-latest.json` (resumen). **Ejecuta
 - Cachés en engine.js: `baseCache` (LID_ONLY), `aidsMemo` (huella de la malla
   + parámetros de ayudas, `AID_KEYS`) y `critMemo` (firma del sólido). Si
   `addAids` empieza a leer un parámetro o una cota nueva, añádela a la clave.
+- **Holguras = perfil de la impresora** (`CAL_KEYS` en calib.js: filClr,
+  clearance (Ø3), clearanceL (Ø5, se interpola por diámetro), tiltAdd,
+  holeComp, sealClr, axialGap, stackClr, latchPre, insertTol, pocketTol).
+  Cada probeta reproduce su unión EN LA ORIENTACIÓN DE IMPRESIÓN de la caja
+  (tabla al principio de calib.js). `build` predice con `fitsFlat` si la
+  caja irá inclinada y re-deriva con `P._tilted` → `D.tilted`/`D.tiltAdd`
+  solo en agujeros de bisagra y orejetas (el barril del cierre, pieza suelta
+  de lado, no). Las pruebas que comparan con `derive` deben usar el mismo
+  `_tilted` que el motor (ver sweep).
+  Sus valores vienen del perfil activo, no de los parámetros guardados de la
+  caja ni del enlace. Una holgura nueva: añádela a `CAL_KEYS`/`CAL_LIMITS`,
+  al grupo "Calibración de holguras" del SCHEMA (`cal: true`) y, si se puede
+  medir, a `calibPlan`/`applyResults`. Usa `D.filClr` (filamento), `D.clr`
+  (pasador impreso), `D.sealClr` (lengüeta), `D.sclr` (apilado): no
+  reutilices una para otra cosa.
 - `frustum(a, z0, b, z1)` es una ENVOLVENTE CONVEXA: solo para secciones
   convexas (offsets de `rrOffset`). Para chaflanes de formas cualquiera
   (alojamientos de insertos) usa `steppedChamfer`. El frustum se comía la
@@ -132,6 +149,12 @@ registro interno del motor) y `logs/sweep-latest.json` (resumen). **Ejecuta
 11. Rendimiento (`perf.test.mjs`): la memoria WASM no crece al reconstruir,
    A + B = build completo, la vista rápida da piezas válidas y las cachés
    (base, ayudas) devuelven lo mismo que recalcular.
+12. Test de holguras (`calib.test.mjs`): universal = siempre 8 probetas;
+   "esta caja" se adapta y su valor central es la cota real; probetas
+   válidas, en la orientación de su unión, sin voladizos > 50°, < 30 g; los
+   resultados (B/F conservan el diámetro medido, P desplaza Ø3/Ø5) se
+   aplican y persisten. El barrido incluye perfiles extremos, también en
+   cajas inclinadas.
 
 ## Flujo con el PC del usuario
 

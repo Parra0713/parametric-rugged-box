@@ -93,6 +93,16 @@ for (const [L, W, bd, ld] of [[20, 20, 5, 15], [25, 18, 8, 3], [35, 30, 12, 5]])
 cases.push({ name: 'XS 20×40 girada + octógono', p: { innerL: 20, innerW: 40, baseDepth: 10, lidDepth: 4, cornerCut: 4 } });
 cases.push({ name: 'XS forzada en 60×40', p: { innerL: 60, innerW: 40, baseDepth: 15, lidDepth: 5, sizeClass: 'XS' } });
 cases.push({ name: '60×40 apilable + filamento', p: { innerL: 60, innerW: 40, baseDepth: 21, lidDepth: 9, stackable: true } });
+// Perfiles de calibración en los extremos que puede dar el test de holguras:
+// toda la mecánica debe seguir montando y abriendo con ellos.
+const LOOSE = { filClr: 0.25, clearance: 0.4, clearanceL: 0.45, tiltAdd: 0.2, holeComp: 0.35, sealClr: 0.45, axialGap: 0.6, stackClr: 0.5, latchPre: 0.05, insertTol: 0.5, pocketTol: 0.8 };
+const TIGHT = { filClr: 0.05, clearance: 0.1, clearanceL: 0.1, tiltAdd: -0.05, holeComp: 0, sealClr: 0.1, axialGap: 0.25, stackClr: 0.15, latchPre: 0.3, insertTol: 0.15, pocketTol: 0.45 };
+cases.push({ name: 'perfil holgado M apilable + laberinto', p: { stackable: true, sealMode: 'labyrinth', ...LOOSE } });
+cases.push({ name: 'perfil holgado S filamento', p: { innerL: 60, innerW: 40, baseDepth: 21, lidDepth: 9, ...LOOSE } });
+cases.push({ name: 'perfil justo M impresos + inserto', p: { pinMode: 'printed', insertMode: 'blank', ...TIGHT } });
+cases.push({ name: 'perfil justo XS', p: { innerL: 25, innerW: 25, baseDepth: 12, lidDepth: 5, ...TIGHT } });
+cases.push({ name: 'perfil holgado L inclinada', p: { innerL: 210, innerW: 160, baseDepth: 40, lidDepth: 15, ...LOOSE } });
+cases.push({ name: 'perfil justo L inclinada', p: { innerL: 230, innerW: 150, baseDepth: 40, lidDepth: 15, ...TIGHT } });
 if (args.quick) cases = cases.filter((c) => /^(20×20|60×40|120×80|250×170|380×260) estándar|apilable|alojamiento|varios|impresos \(|^XS 20×20×5/.test(c.name)).slice(0, 12);
 if (args.filter) cases = cases.filter((c) => c.name.includes(args.filter));
 if (args.chunk) {
@@ -127,7 +137,8 @@ for (const c of cases) {
   for (const p of r.parts) check(p.status === 'NoError' && p.components <= (p.id === 'gasket' ? 2 : 1), `${p.name}: ${p.status}, ${p.components} sólido(s)`);
   check(r.D.hinge.kl >= 4 && r.D.latchW >= 6, `mecánica mínima: nudillo ${r.D.hinge.kl}, cierre ${r.D.latchW}`);
 
-  const D = derive(P);
+  // Mismas cotas que usó el motor (si predijo impresión inclinada, con tiltAdd).
+  const D = derive(r.D.tilted ? { ...P, _tilted: true } : P);
   const H = hinges(D), L = latches(D);
   const base = buildBase(D, H, L, []);
   const lid = buildLid(D, P, H, L, null, []).lid;

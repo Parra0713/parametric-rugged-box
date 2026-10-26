@@ -108,6 +108,11 @@ export class EngineClient {
     return this.R.run('normal', { P: { ...P, quality: 'preview' }, svg, normals: true });
   }
 
+  /** Probetas del test de holguras (cola de exportación: no las reemplaza la vista previa). */
+  calibration(P, plan) {
+    return this.R.run('final', { P, calib: plan });
+  }
+
   /** Modelo final para exportar (no lo reemplaza la vista previa). */
   final(P, svg) {
     return this.R.run('final', { P: { ...P, quality: 'final' }, svg, normals: false });

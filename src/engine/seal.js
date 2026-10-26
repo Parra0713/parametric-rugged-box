@@ -59,7 +59,7 @@ export function grooveCut(D) {
     // con a = distancia al eje de la bisagra. En cajas pequeñas (eje cerca) el
     // chaflán se agranda lo necesario (antes rozaba en laberinto + clase S).
     const dist = Math.max(1, D.ya - (D.Wi / 2 + b));
-    const chOut = Math.min(1.2, Math.max(chIn, (D.tl * D.tl) / (2 * dist) - D.clr + 0.15));
+    const chOut = Math.min(1.2, Math.max(chIn, (D.tl * D.tl) / (2 * dist) - D.sealClr + 0.15));
     const slot = prism(ring(D, a, b), D.Hb - D.gd, D.Hb + 1);
     const z0 = D.Hb - Math.max(chOut, chIn) - 0.01;
     const outerCone = frustum(rrOffset(D, b), D.Hb - chOut, rrOffset(D, b + chOut), zt)
@@ -79,7 +79,7 @@ export function grooveCut(D) {
 export function tongues(D) {
   const out = [];
   for (const g of D.grooves) {
-    const tw = g.w - 2 * D.clr;
+    const tw = g.w - 2 * D.sealClr;
     const steps = [[0.5, 0], [0.3, 0.2], [0.2, 0.4]];
     let z = D.Hb + 0.01;
     for (const [frac, shrink] of steps) {

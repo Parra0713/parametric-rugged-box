@@ -13,6 +13,8 @@ import { parseContentSVG, maxCornerCut } from './content.js';
 import { pack } from './packer.js';
 import { optimize, fitsFlat } from './optimizer.js';
 import { derive } from './engine/params.js';
+import { CAL_KEYS, calibPlan, applyResults } from './engine/calib.js';
+import { loadProfiles, saveProfiles, activeProfile, addProfile, removeProfile, setManual, setFromTest, resetProfile } from './calibProfile.js';
 
 /* ------------------------------------------------------------------ */
 /*  Estado                                                            */
@@ -44,6 +46,9 @@ const saveUi = () => safeSet(STORE_UI, JSON.stringify(ui));
 
 const state = {
   P: loadParams(),
+  calib: null,              // perfiles de calibración de holguras
+  calibView: false,         // el visor muestra el test de holguras
+  calibResult: null, calibMsg: null,
   svgRaw: null, svgName: '', svgText: '',
   objects: [],              // [{ name, text, raw, qty }]
   packed: null,             // resultado del acomodo
@@ -63,6 +68,15 @@ try {
   const s = safeGet(STORE_SVG);
   if (s) { const o = JSON.parse(s); state.svgText = o.text; state.svgName = o.name; state.svgRaw = parseSVG(o.text); }
 } catch { /* SVG guardado inválido: se ignora */ }
+
+// Perfil de calibración: sus valores mandan sobre los de la caja (son de la
+// impresora). Al primer arranque se crea con lo que hubiera guardado.
+state.calib = loadProfiles(state.P);
+function applyProfile() {
+  const v = activeProfile(state.calib).values;
+  for (const k of CAL_KEYS) state.P[k] = v[k];
+}
+applyProfile();
 
 const saveObjects = () => safeSet(STORE_OBJS, JSON.stringify(state.objects.map(({ name, text, qty }) => ({ name, text, qty }))));
 
@@ -110,6 +124,7 @@ function buildParams() {
     if (g.content) body.append(contentControl());
     if (g.svg) body.append(svgControl());
     if (g.gridfinity) body.append(gridfinitySnap());
+    if (g.calib) body.append(calibControl());
     const items = g.items.filter((it) => ui.expert || !it.adv);
     for (const it of items) body.append(control(it));
     const hidden = g.items.length - items.length;
@@ -149,7 +164,7 @@ function control(it) {
     num.addEventListener('change', () => sync(num.value, num));
     controls[it.k] = { set: (x) => { range.value = x; num.value = x; } };
     return el('div', { class: 'field' },
-      el('div', { class: 'lbl' }, el('span', {}, it.label), el('span', { class: 'unit' }, it.unit)), range, num, hint);
+      el('div', { class: 'lbl' }, el('span', {}, it.label, it.cal ? calTag(it.k) : null), el('span', { class: 'unit' }, it.unit)), range, num, hint);
   }
   if (it.type === 'select') {
     const sel = el('select', { 'aria-label': it.label }, it.options.map(([val, txt]) => el('option', { value: val, ...(String(val) === String(v) ? { selected: '' } : {}) }, txt)));
@@ -336,6 +351,7 @@ const PACK_KEYS = new Set(['bedPreset', 'bedX', 'bedY', 'objSpacing', 'pocketTol
 
 function setParam(k, v) {
   state.P[k] = v;
+  if (CAL_KEYS.includes(k)) { setManual(state.calib, k, v); refreshCalTags(); }
   if (k === 'bedPreset' && v !== 'custom') {
     const b = BED_PRESETS[v];
     Object.assign(state.P, { bedX: b.x, bedY: b.y, bedZ: b.z });
@@ -362,14 +378,16 @@ let persistTimer = 0;
 function persistSoon() {
   clearTimeout(persistTimer);
   persistTimer = setTimeout(() => {
-    safeSet(STORE, JSON.stringify(state.P));
+    const own = { ...state.P };
+    for (const k of CAL_KEYS) delete own[k];                // van en el perfil, no en la caja
+    safeSet(STORE, JSON.stringify(own));
     try { history.replaceState(null, '', '#' + encodeURIComponent(JSON.stringify(diffFromDefaults()))); } catch { /* límite del navegador */ }
   }, 400);
 }
 
 function diffFromDefaults() {
   const o = {};
-  for (const [k, v] of Object.entries(state.P)) if (DEFAULTS[k] !== v) o[k] = v;
+  for (const [k, v] of Object.entries(state.P)) if (DEFAULTS[k] !== v && !CAL_KEYS.includes(k)) o[k] = v;
   return o;
 }
 
@@ -438,7 +456,7 @@ function apply(msg, r, full) {
   const t0 = performance.now();
   state.result = msg.r;
   state.layout = computeLayout(msg.r);
-  viewer.setData(msg.r, state.layout, bed(), contentPolys());
+  if (!state.calibView) viewer.setData(msg.r, state.layout, bed(), contentPolys());
   const tris = msg.r.parts.reduce((s, p) => s + p.tris * p.instances.length, 0);
   if (full) {
     updateContent();
@@ -575,7 +593,10 @@ function renderInfo() {
     el('div', { class: 'chips' },
       el('span', { class: 'chip ' + printChip[0] }, printChip[1]),
       el('span', { class: 'chip' }, `${state.layout.plates.length} placa${state.layout.plates.length > 1 ? 's' : ''}`),
-      D.warn.length ? el('span', { class: 'chip warn' }, `${D.warn.length} aviso${D.warn.length > 1 ? 's' : ''}`) : null),
+      D.warn.length ? el('span', { class: 'chip warn' }, `${D.warn.length} aviso${D.warn.length > 1 ? 's' : ''}`) : null,
+      unmeasured().length
+        ? el('button', { class: 'chip warn chipbtn', title: 'Abrir la calibración de holguras', onclick: () => { ui.tab = 'impresion'; saveUi(); buildParams(); } }, 'Holguras sin medir')
+        : el('span', { class: 'chip ok', title: activeProfile(state.calib).name }, 'Holguras medidas')),
     kv([
       ['Interior', `${I.L} × ${I.W} mm`, true],
       ['Profundidad', `${I.baseDepth} + ${I.lidDepth} mm`],
@@ -681,6 +702,201 @@ function renderInfo() {
   }, null, 2), `rugged-box-registro_${Date.now()}.json`, 'application/json'));
   info.append(fold('log', `Registro (${(D.log || []).length})`,
     el('pre', { class: 'log' }, (D.log || []).join('\n')), el('div', { style: 'text-align:right' }, logBtn)));
+}
+
+/* ------------------------------------------------------------------ */
+/*  Calibración de holguras (perfil persistente + test adaptativo)    */
+/* ------------------------------------------------------------------ */
+const SRC_TXT = { test: 'medido', derived: 'deducido', manual: 'manual' };
+const CAL_NAMES = {
+  filClr: 'filamento en bisagra', clearance: 'pasador impreso Ø3', clearanceL: 'pasador impreso Ø5', tiltAdd: 'agujeros si va inclinada',
+  latchPre: 'precarga del cierre', holeComp: 'agujeros verticales', sealClr: 'lengüeta',
+  axialGap: 'entre nudillos', stackClr: 'apilado', insertTol: 'inserto en la caja', pocketTol: 'objeto en su hueco',
+};
+const fmt = (v) => `${Number(v).toFixed(3).replace(/0+$/, '').replace(/\.$/, '')} mm`;
+
+function calTag(k) {
+  const src = activeProfile(state.calib).src[k];
+  return el('span', { class: 'caltag ' + (src || 'def'), 'data-calk': k, title: 'Valor del perfil de calibración' }, SRC_TXT[src] || 'por defecto');
+}
+function refreshCalTags() {
+  const p = activeProfile(state.calib);
+  for (const t of document.querySelectorAll('[data-calk]')) {
+    const src = p.src[t.dataset.calk];
+    t.className = 'caltag ' + (src || 'def');
+    t.textContent = SRC_TXT[src] || 'por defecto';
+  }
+}
+
+/** Holguras que usa la caja ACTUAL y que el perfil aún no ha medido. */
+function unmeasured() {
+  const p = activeProfile(state.calib);
+  const keys = new Set(calibPlan(state.P, { mode: 'box' }).tests.map((t) => t.key));
+  keys.add('axialGap');
+  // El pasador impreso de esta caja depende de Ø3 y/o Ø5 (interpolado).
+  if (keys.has('clearance')) { const D = derive(state.P); const d = Math.max(D.pinD, D.latchPinD); if (d > 3.01) keys.add('clearanceL'); if (Math.min(D.pinD, D.latchPinD) >= 5) keys.delete('clearance'); }
+  return [...keys].filter((k) => p.src[k] !== 'test' && p.src[k] !== 'derived');
+}
+
+function calibControl() {
+  const st = state.calib, p = activeProfile(st);
+  const box = el('div', { class: 'calib' });
+
+  // --- Perfil (impresora + material) ---
+  const sel = el('select', { 'aria-label': 'Perfil de calibración' },
+    Object.entries(st.profiles).map(([id, q]) => el('option', { value: id, ...(id === st.active ? { selected: '' } : {}) }, q.name)));
+  sel.addEventListener('change', () => { st.active = sel.value; saveProfiles(st); applyProfile(); state.calibMsg = null; buildParams(); schedule(); });
+  const bNew = el('button', { class: 'ghost sm', title: 'Nuevo perfil (copia del actual)', onclick: () => {
+    const name = prompt('Nombre del perfil (impresora · material):', `${p.name} (copia)`);
+    if (!name) return;
+    addProfile(st, name.trim(), p); applyProfile(); buildParams(); schedule();
+  } }, 'Nuevo');
+  const bRen = el('button', { class: 'ghost sm', onclick: () => {
+    const name = prompt('Nuevo nombre del perfil:', p.name);
+    if (!name) return;
+    p.name = name.trim(); saveProfiles(st); buildParams();
+  } }, 'Renombrar');
+  const bDel = Object.keys(st.profiles).length > 1 ? el('button', { class: 'ghost sm', onclick: () => {
+    if (!confirm(`¿Borrar el perfil "${p.name}"?`)) return;
+    removeProfile(st, st.active); applyProfile(); buildParams(); schedule();
+  } }, 'Borrar') : null;
+  box.append(el('div', { class: 'row calrow' }, sel, bNew, bRen, bDel));
+
+  const missing = unmeasured();
+  box.append(el('div', { class: 'small' },
+    p.calibrated ? `Calibrado con test el ${new Date(p.calibrated).toLocaleDateString('es')}. ` : 'Sin calibrar: valores típicos de PLA/PETG con boquilla de 0.4. ',
+    missing.length ? el('span', { class: 'warnTxt' }, `Esta caja usa holguras sin medir: ${missing.map((k) => CAL_NAMES[k]).join(', ')}.`) : 'Esta caja solo usa holguras medidas.'));
+
+  // --- Resultado de la última aplicación ---
+  if (state.calibMsg) {
+    const m = state.calibMsg;
+    box.append(el('div', { class: 'card key calmsg' },
+      el('strong', {}, m.changes.length ? 'Holguras actualizadas' : 'Sin cambios: los valores actuales ya eran los mejores'),
+      m.changes.length ? el('ul', {}, m.changes.map((c) => el('li', {}, `${CAL_NAMES[c.k]}: ${fmt(c.from)} → ${fmt(c.to)} (${c.why})`))) : null,
+      m.retest ? el('div', { class: 'warnTxt' }, 'Alguna probeta quedó fuera del rango: genera otro test (se centrará en los nuevos valores).') : null,
+      el('button', { class: 'ghost sm', onclick: () => { state.calibMsg = null; buildParams(); } }, 'Cerrar')));
+  }
+
+  // --- Test ---
+  if (!p.plan) {
+    const fine = el('input', { type: 'checkbox', ...(p.calibrated ? { checked: '' } : {}) });
+    const modeU = el('input', { type: 'radio', name: 'calmode', value: 'universal', checked: '' });
+    const modeB = el('input', { type: 'radio', name: 'calmode', value: 'box' });
+    const go = el('button', { class: 'sm primary', onclick: () => {
+      const plan = calibPlan(state.P, { fine: fine.checked, mode: modeB.checked ? 'box' : 'universal' });
+      plan.P = { ...state.P };
+      p.plan = plan; p.choices = {}; saveProfiles(st);
+      state.calibMsg = null;
+      buildParams();
+      showCalib();
+    } }, 'Generar test de holguras');
+    box.append(
+      el('p', { class: 'small' }, 'Imprime probetas que reproducen cada unión de la caja en la MISMA orientación en que se imprime (agujeros horizontales, verticales e inclinados, paredes en XY, primera capa, puente del retén), con holguras numeradas. Marcas la que mejor funcionó y el perfil se ajusta solo.'),
+      el('label', { class: 'chk' }, modeU, ' Universal: vale para todas las cajas, de XS a L (≈ 25 g, ≈ 1 h 15 min)'),
+      el('label', { class: 'chk' }, modeB, ' Solo las uniones de esta caja (≈ 10–25 g)'),
+      el('label', { class: 'chk' }, fine, ' Paso fino (0.025 mm) para afinar un perfil ya calibrado'),
+      el('div', { class: 'row' }, go));
+  } else {
+    const plan = p.plan;
+    const info = state.calibResult?.info;
+    box.append(el('div', { class: 'small' },
+      `Test del ${new Date(plan.created).toLocaleDateString('es')} · ${plan.summary} · paso ${plan.step} mm`,
+      info ? ` · ≈ ${info.grams} g, ≈ ${info.minutes} min, ${info.size[0]}×${info.size[1]} mm` : ''));
+    box.append(el('div', { class: 'row' },
+      el('button', { class: 'sm', onclick: showCalib }, state.calibView ? 'Actualizar vista' : 'Ver en 3D'),
+      el('button', { class: 'sm', onclick: downloadCalib }, 'Descargar test'),
+      el('button', { class: 'ghost sm', onclick: () => { if (confirm('¿Descartar este test?')) { p.plan = null; p.choices = {}; saveProfiles(st); hideCalib(); buildParams(); } } }, 'Descartar')));
+    box.append(el('div', { class: 'small' }, 'Impreso el test, marca en cada probeta el número que mejor funcionó:'));
+    for (const t of plan.tests) {
+      const name = 'cal_' + t.id;
+      const opt = (val, txt, title) => el('label', { class: 'calopt', title },
+        el('input', { type: 'radio', name, value: String(val), ...(String(p.choices[t.id]) === String(val) ? { checked: '' } : {}),
+          onchange: () => { p.choices[t.id] = val; saveProfiles(st); } }), txt);
+      box.append(el('div', { class: 'caltest' },
+        el('div', { class: 'lbl' }, el('strong', {}, `${t.id} · ${t.label}`)),
+        el('div', { class: 'hint' }, t.how),
+        el('div', { class: 'calopts' },
+          t.variants.map((v) => opt(v.n, String(v.n), v.d ? `Ø${v.d} mm (holgura ${v.value})` : v.w ? `ranura ${v.w} mm (holgura ${v.value} por lado)` : `${t.key === 'latchPre' ? 'precarga' : 'holgura'} ${v.value} mm`)),
+          opt('tight', t.key === 'latchPre' ? 'ninguno cierra' : 'todas duras', t.key === 'latchPre' ? 'Ni el de menos precarga cierra bien' : 'Hasta la más holgada quedó dura'),
+          opt('loose', t.key === 'latchPre' ? 'todos flojos' : 'todas flojas', t.key === 'latchPre' ? 'Hasta el de más precarga queda con juego' : 'Hasta la más justa quedó floja'))));
+    }
+    box.append(el('div', { class: 'row' }, el('button', { class: 'sm primary', onclick: () => {
+      const res = applyResults(plan, p.choices, p.values);
+      if (!Object.values(p.choices).some((c) => c != null && c !== '')) { alert('Marca al menos una probeta.'); return; }
+      const choices = { ...p.choices };
+      setFromTest(st, res, plan, choices);
+      applyProfile();
+      state.calibMsg = res;
+      hideCalib();
+      buildParams();
+      schedule();
+    } }, 'Aplicar resultados')));
+  }
+  box.append(el('div', { class: 'row' }, el('button', { class: 'linkbtn', onclick: () => {
+    if (!confirm('¿Volver a los valores por defecto en este perfil? Se pierde la calibración.')) return;
+    resetProfile(st); applyProfile(); state.calibMsg = null; buildParams(); schedule();
+  } }, 'Restablecer valores por defecto')));
+  return box;
+}
+
+/** Construye las probetas y las muestra en el visor (con barra para volver). */
+async function showCalib() {
+  const p = activeProfile(state.calib);
+  if (!p.plan) return;
+  setStatus('ok', 'Generando el test de holguras…');
+  const msg = await engine.calibration(p.plan.P || state.P, p.plan);
+  if (!msg.ok) { setStatus('err', 'Error en el test: ' + String(msg.error).split('\n')[0]); console.error(msg.error); return; }
+  state.calibResult = msg.r;
+  state.calibView = true;
+  viewer.setData(msg.r, computeLayout(msg.r), bed(), null);
+  viewer.fit();
+  const bar = $('#calbar');
+  bar.hidden = false;
+  $('#calbarText').textContent = `Test de holguras · ≈ ${msg.r.info.grams} g · ≈ ${msg.r.info.minutes} min · ${msg.r.parts.length} piezas`;
+  setStatus('ok', 'Test de holguras listo');
+  if (ui.tab === 'impresion') buildParams();
+}
+
+function hideCalib() {
+  if (!state.calibView) return;
+  state.calibView = false;
+  $('#calbar').hidden = true;
+  if (state.result) { viewer.setData(state.result, state.layout, bed(), contentPolys()); viewer.fit(); }
+}
+
+/** ZIP con el STL del test (todas las probetas colocadas) y el LEEME con la tabla. */
+async function downloadCalib() {
+  const p = activeProfile(state.calib);
+  if (!p.plan) return;
+  const msg = await engine.calibration(p.plan.P || state.P, p.plan);
+  if (!msg.ok) { alert('No se pudo generar el test: ' + msg.error); return; }
+  const r = msg.r, B = bed();
+  const meshes = r.parts.map((q) => {
+    const xyz = transformVerts(q.mesh.vert, q.mesh.numProp, q.instances[0]);
+    for (let i = 0; i < xyz.length; i += 3) { xyz[i] -= r.info.size[0] / 2; xyz[i + 1] -= r.info.size[1] / 2; }
+    return { xyz, tri: q.mesh.tri };
+  });
+  const all = mergeMeshes(meshes);
+  const lines = [
+    'TEST DE HOLGURAS — Rugged Box', '',
+    `Perfil: ${p.name}`, `Generado: ${new Date(p.plan.created).toLocaleString('es')}`, `Configuración: ${p.plan.summary}`,
+    `Material ≈ ${r.info.grams} g · tiempo ≈ ${r.info.minutes} min · placa ${r.info.size[0]}×${r.info.size[1]} mm (cama ${B.x}×${B.y})`, '',
+    'Imprímelo con el MISMO material, boquilla, altura de capa y ajustes con los que imprimirás la caja',
+    '(2 perímetros, relleno 15 %). Sin soportes, sin balsa ni borde: cada pieza ya está orientada',
+    'como su unión en la caja (el útil E va boca abajo, como la tapa). Deja que se enfríe antes de probar.', '',
+    'Necesitas unos 30 cm de filamento 1.75 recto como calibre y pasador.', '',
+  ];
+  for (const t of p.plan.tests) {
+    lines.push(`${t.id} · ${t.label}`, `   ${t.how}`);
+    for (const v of t.variants) lines.push(`   ${v.n}: ${v.d ? `agujero Ø${v.d} mm · ` : v.w ? `ranura ${v.w} mm · ` : ''}${t.key === 'latchPre' ? 'precarga' : 'holgura'} ${v.value} mm${v.cap ? `, tapón Ø${v.cap}` : ''}`);
+    lines.push('');
+  }
+  lines.push('Después, en Impresión → Calibración de holguras, marca el mejor número de cada probeta y pulsa "Aplicar resultados".');
+  const files = [
+    { name: 'test-holguras.stl', data: stlBinary(all.xyz, all.tri, 'test de holguras') },
+    { name: 'LEEME.txt', data: lines.join('\r\n') },
+  ];
+  download(zipStore(files), `test-holguras_${p.name.replace(/[^\w.-]+/g, '_')}.zip`);
 }
 
 /* ------------------------------------------------------------------ */
@@ -866,11 +1082,14 @@ const section = () => viewer.setSection($('#section').checked, Number($('#sectio
 $('#section').addEventListener('change', section);
 $('#sectionPos').addEventListener('input', section);
 $('#btnFit').addEventListener('click', () => viewer.fit());
+$('#calBack').addEventListener('click', hideCalib);
+$('#calDl').addEventListener('click', downloadCalib);
 $('#btnZip').addEventListener('click', exportZip);
 $('#btnStl').addEventListener('click', exportSingles);
 $('#btnReset').addEventListener('click', () => {
   if (!confirm('¿Restablecer todos los parámetros?')) return;
   state.P = { ...DEFAULTS };
+  applyProfile();                     // la calibración de la impresora se conserva
   safeDel(STORE);
   history.replaceState(null, '', location.pathname);
   buildParams();

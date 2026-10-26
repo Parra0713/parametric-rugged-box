@@ -24,6 +24,7 @@ import { gridfinityFeet } from './gridfinity.js';
 import { lidRelief } from './pattern.js';
 import { baseInsert, lidInsert } from './insert.js';
 import { transformVerts, hull2D, fitAngle, tiltChoose, rotatedExtent } from '../bedfit.js';
+import { fitsFlat } from '../optimizer.js';
 import { contactCut, supportFins, wedgeVolume, rotAxis, invRigid, overhangRegions, overhangSupports } from './tilt.js';
 
 /* ---------------- Matrices 4×4 (columna mayor) ---------------- */
@@ -540,13 +541,21 @@ function meshOf(man) {
 export function build(P, svg, opt = {}) {
   if (!ready) throw new Error('Motor no inicializado');
   const t0 = performance.now();
-  const D = derive(P);
+  let D = derive(P);
+  // ¿Se imprimirá inclinada? (misma huella que usa el optimizador de cama).
+  // Entonces bisagras y orejetas quedan con el agujero a ~45° y llevan la
+  // holgura extra calibrada para esa orientación (tiltAdd).
+  if (P.printAids !== 'off' && !P._tilted && !fitsFlat(D, { x: P.bedX, y: P.bedY }).ok) {
+    P = { ...P, _tilted: true };
+    D = derive(P);
+  }
   const parts = [];
   const normals = opt.normals !== false;
   const report = [];
   D.log = [];
   let tS = performance.now();
   const stage = (name) => { const t = performance.now(); log(D, `${name}: ${Math.round(t - tS)} ms`); tS = t; };
+  if (D.tilted) log(D, `impresión inclinada prevista: agujeros de bisagra y cierre ${D.tiltAdd >= 0 ? '+' : ''}${D.tiltAdd} mm por lado`);
   log(D, `clase ${D.cls} · interior ${D.Li}×${D.Wi} · base ${D.Db} + tapa ${D.Dl} mm · pared ${D.t} · banda ${D.bo}${D.cham ? ` · octógono ${D.cham}` : ''}${D.stack ? ' · apilable' : ''}${D.rot90 ? ' · girada 90°' : ''}`);
   log(D, `bisagras ${D.hinge.n}×${D.hinge.nk} (nudillo ${D.hinge.kl} mm) en x=${D.hinge.xs.join(', ')} · cierres ${D.latch.n}×${D.latchW} mm en x=${D.latch.xs.join(', ')}`);
   try {

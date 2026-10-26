@@ -40,8 +40,14 @@ export const DEFAULTS = {
   // --- Mecánica ---
   sizeClass: 'auto',    // 'auto' | 'XS' | 'S' | 'M' | 'L'
   pinMode: 'auto',      // 'auto' | 'filament' | 'printed'
-  clearance: 0.25,      // holgura radial de ajuste
+  clearance: 0.25,      // holgura radial pasador impreso ↔ agujero horizontal (bisagra, orejetas), Ø ≤ 3
+  clearanceL: 0.25,     // ídem para pasador grande Ø ≥ 5 (entre Ø3 y Ø5 se interpola)
+  tiltAdd: 0,           // holgura extra por lado de los agujeros si la pieza se imprime inclinada
+  latchPre: 0.15,       // precarga del gancho del cierre sobre el retén
+  filClr: 0.125,        // holgura radial filamento 1.75 ↔ agujero horizontal (agujero 2.0)
   axialGap: 0.4,        // holgura axial entre nudillos/orejetas
+  sealClr: 0.25,        // holgura por lado lengüeta ↔ ranura
+  stackClr: 0.3,        // holgura de apilado (pie ↔ marco)
   hingeCount: 0,        // 0 = automático
   latchCount: 0,        // 0 = automático
 
@@ -202,10 +208,10 @@ export const SCHEMA = [
     { k: 'fingerCount', label: 'Huecos para los dedos', type: 'select', options: [
       ['auto', 'Automático (2)'], ['0', 'Ninguno'], ['1', 'Uno'], ['2', 'Dos']] },
     { k: 'fingerD', label: 'Tamaño del hueco para dedo', type: 'range', min: 10, max: 40, step: 1, unit: 'mm' },
-    { k: 'pocketTol', label: 'Holgura del objeto', type: 'range', min: 0, max: 3, step: 0.1, unit: 'mm', hint: 'Juego entre el objeto y su hueco' },
+    { k: 'pocketTol', label: 'Holgura del objeto', type: 'range', min: 0, max: 3, step: 0.05, unit: 'mm', cal: true, hint: 'Juego entre el objeto y su hueco' },
     { k: 'insertLid', label: 'Inserto en blanco para la tapa', type: 'toggle' },
     { k: 'insertH', label: 'Altura (0 = auto)', type: 'range', min: 0, max: 200, step: 0.5, unit: 'mm', adv: true },
-    { k: 'insertTol', label: 'Holgura con la caja', type: 'range', min: 0, max: 1.5, step: 0.05, unit: 'mm', adv: true },
+    { k: 'insertTol', label: 'Holgura con la caja', type: 'range', min: 0, max: 1.5, step: 0.025, unit: 'mm', cal: true, adv: true },
     { k: 'insertDeck', label: 'Espesor de la cubierta', type: 'range', min: 0.8, max: 4, step: 0.2, unit: 'mm', adv: true },
     { k: 'fingerPos', label: 'Posición de los huecos', type: 'range', min: -100, max: 100, step: 5, unit: '%', adv: true },
   ]},
@@ -240,13 +246,15 @@ export const SCHEMA = [
       ['auto', 'Automático'], ['filament', 'Trozo de filamento 1.75 mm'], ['printed', 'Impresos (a presión)']] },
     { k: 'hingeCount', label: 'Bisagras (0 = auto)', type: 'range', min: 0, max: 4, step: 1, unit: '', adv: true },
     { k: 'latchCount', label: 'Cierres (0 = auto)', type: 'range', min: 0, max: 4, step: 1, unit: '', adv: true },
-    { k: 'clearance', label: 'Holgura de pasadores', type: 'range', min: 0.1, max: 0.5, step: 0.05, unit: 'mm', hint: 'Súbela si los pasadores entran duros' },
-    { k: 'axialGap', label: 'Holgura entre nudillos', type: 'range', min: 0.2, max: 0.8, step: 0.05, unit: 'mm', adv: true },
+    { k: 'clearance', label: 'Holgura de pasadores impresos', type: 'range', min: 0.05, max: 0.5, step: 0.025, unit: 'mm', cal: true, hint: 'Viene del perfil de calibración (pestaña Impresión)' },
+    { k: 'filClr', label: 'Holgura del filamento', type: 'range', min: 0, max: 0.4, step: 0.025, unit: 'mm', cal: true, adv: true },
+    { k: 'axialGap', label: 'Holgura entre nudillos', type: 'range', min: 0.2, max: 0.8, step: 0.05, unit: 'mm', cal: true, adv: true },
   ]},
   { tab: 'mecanica', group: 'Sellado', items: [
     { k: 'sealMode', label: 'Cierre tapa‑base', type: 'select', options: [
       ['tpu', 'Junta de TPU (hermético)'], ['labyrinth', 'Laberinto doble'], ['simple', 'Lengüeta simple']] },
     { k: 'gasketCompression', label: 'Compresión de la junta', type: 'range', min: 0.15, max: 0.35, step: 0.01, unit: '', adv: true },
+    { k: 'sealClr', label: 'Holgura de la lengüeta', type: 'range', min: 0.05, max: 0.6, step: 0.025, unit: 'mm', cal: true, adv: true },
   ]},
 
   /* ---------------- Impresión ---------------- */
@@ -256,10 +264,30 @@ export const SCHEMA = [
     { k: 'bedX', label: 'Cama X', type: 'range', min: 100, max: 500, step: 1, unit: 'mm', adv: true },
     { k: 'bedY', label: 'Cama Y', type: 'range', min: 100, max: 500, step: 1, unit: 'mm', adv: true },
     { k: 'bedZ', label: 'Altura Z', type: 'range', min: 100, max: 500, step: 1, unit: 'mm', adv: true },
-    { k: 'holeComp', label: 'Compensación de agujeros', type: 'range', min: 0, max: 0.6, step: 0.05, unit: 'mm',
-      hint: 'Agranda los agujeros del cierre y los tapones. Súbela si el filamento entra justo; bájala si queda flojo' },
     { k: 'lineWidth', label: 'Ancho de línea', type: 'range', min: 0.3, max: 0.8, step: 0.01, unit: 'mm', adv: true },
     { k: 'layerH', label: 'Altura de capa', type: 'range', min: 0.08, max: 0.32, step: 0.02, unit: 'mm', adv: true },
+  ]},
+  // Perfil de calibración: estos valores son de la IMPRESORA y el material,
+  // no del diseño. Se guardan aparte (perfil persistente) y se aplican a
+  // todas las cajas; el test de holguras los mide (ver src/engine/calib.js).
+  { tab: 'impresion', group: 'Calibración de holguras', calib: true, items: [
+    { k: 'filClr', label: 'Filamento en bisagra', type: 'range', min: 0, max: 0.4, step: 0.025, unit: 'mm', cal: true,
+      hint: 'Holgura por lado del filamento 1.75 en los agujeros de la caja' },
+    { k: 'clearance', label: 'Pasador impreso (Ø3)', type: 'range', min: 0.05, max: 0.5, step: 0.025, unit: 'mm', cal: true,
+      hint: 'Holgura por lado del pasador impreso en bisagras y orejetas' },
+    { k: 'clearanceL', label: 'Pasador impreso grande (Ø5)', type: 'range', min: 0.05, max: 0.5, step: 0.025, unit: 'mm', cal: true,
+      hint: 'Cajas grandes; entre Ø3 y Ø5 se interpola' },
+    { k: 'tiltAdd', label: 'Extra si se imprime inclinada', type: 'range', min: -0.2, max: 0.4, step: 0.025, unit: 'mm', cal: true,
+      hint: 'Se suma a los agujeros de bisagra y cierre cuando la caja no cabe plana' },
+    { k: 'latchPre', label: 'Precarga del cierre', type: 'range', min: 0, max: 0.5, step: 0.025, unit: 'mm', cal: true,
+      hint: 'Cuánto aprieta el gancho sobre el retén' },
+    { k: 'holeComp', label: 'Agujeros verticales (cierre, tapones)', type: 'range', min: 0, max: 0.6, step: 0.025, unit: 'mm', cal: true,
+      hint: 'Cuánto se agrandan para compensar que salen más pequeños' },
+    { k: 'sealClr', label: 'Lengüeta en la ranura', type: 'range', min: 0.05, max: 0.6, step: 0.025, unit: 'mm', cal: true },
+    { k: 'axialGap', label: 'Entre nudillos', type: 'range', min: 0.2, max: 0.8, step: 0.025, unit: 'mm', cal: true, adv: true },
+    { k: 'stackClr', label: 'Apilado', type: 'range', min: 0.1, max: 0.8, step: 0.025, unit: 'mm', cal: true, adv: true },
+    { k: 'insertTol', label: 'Inserto en la caja', type: 'range', min: 0, max: 1.5, step: 0.025, unit: 'mm', cal: true, adv: true },
+    { k: 'pocketTol', label: 'Objeto en su hueco', type: 'range', min: 0, max: 3, step: 0.05, unit: 'mm', cal: true, adv: true },
   ]},
   { tab: 'impresion', group: 'Soportes y adherencia', items: [
     { k: 'printAids', label: 'Ayudas de impresión', type: 'select', options: [
@@ -359,8 +387,25 @@ export function derive(P) {
   D.ag = P.axialGap;
 
   // Bisagra
-  if (D.pinMode === 'filament') { D.pinD = 1.75; D.holeD = 2.0; }
-  else { D.pinD = Mx.pinD; D.holeD = r2(Mx.pinD + 2 * D.clr); }
+  // Holguras de la impresora (perfil de calibración, ver calib.js).
+  D.filClr = clamp(P.filClr ?? 0.125, 0, 0.4);
+  D.sealClr = clamp(P.sealClr ?? 0.25, 0.05, 0.6);
+  // Holgura del pasador impreso según su diámetro: medida en Ø3 (clearance)
+  // y Ø5 (clearanceL), interpolada entre ambos.
+  const clrAt = (d) => {
+    const a = P.clearance ?? 0.25, b = P.clearanceL ?? a;
+    return r2(a + (b - a) * clamp((d - 3) / 2, 0, 1));
+  };
+  // Pieza impresa INCLINADA (no cabe plana; lo decide engine.js con
+  // fitsFlat): los agujeros de bisagras y orejetas quedan a ~45°, ni
+  // horizontales ni verticales, y llevan su holgura extra medida (tiltAdd).
+  D.tilted = !!P._tilted;
+  D.tiltAdd = D.tilted ? r2(clamp(P.tiltAdd ?? 0, -0.2, 0.4)) : 0;
+  const filClr0 = D.filClr;                       // sin inclinar (piezas sueltas)
+  D.filClr = r2(clamp(D.filClr + D.tiltAdd, 0, 0.6));
+  if (D.pinMode === 'filament') { D.pinD = 1.75; D.holeD = r2(1.75 + 2 * D.filClr); }
+  else { D.pinD = Mx.pinD; D.clr = r2(Math.max(0.02, clrAt(Mx.pinD) + D.tiltAdd)); D.holeD = r2(Mx.pinD + 2 * D.clr); }
+  D.clrH = D.pinMode === 'filament' ? D.filClr : D.clr;
   // Piezas sueltas (cierre y tapones): sus agujeros se imprimen VERTICALES,
   // y un agujero vertical sale 0.1–0.3 mm más pequeño (perímetros que
   // tiran hacia dentro + pata de elefante en la primera capa). holeComp se
@@ -375,12 +420,20 @@ export function derive(P) {
 
   // Cierre (pasador propio)
   D.latchPinMode = P.pinMode === 'filament' ? 'filament' : P.pinMode === 'printed' ? 'printed' : Mx.latchPin;
-  if (D.latchPinMode === 'filament') { D.latchPinD = 1.75; D.latchHoleD = 2.0; }
-  else { D.latchPinD = Mx.latchPinD; D.latchHoleD = r2(Mx.latchPinD + 2 * D.clr); }
+  if (D.latchPinMode === 'filament') { D.latchPinD = 1.75; D.latchHoleD = r2(1.75 + 2 * D.filClr); }
+  else {
+    D.latchPinD = Mx.latchPinD;
+    D.clrL = r2(Math.max(0.02, clrAt(Mx.latchPinD) + D.tiltAdd));
+    D.latchHoleD = r2(Mx.latchPinD + 2 * D.clrL);
+  }
+  D.clrL ??= D.filClr;
+  // El cierre es una pieza suelta que se imprime SIEMPRE de lado: su barril
+  // no lleva la holgura de inclinación de las orejetas de la caja.
+  const latchHole0 = D.latchPinMode === 'filament' ? 1.75 + 2 * filClr0 : D.latchPinD + 2 * (D.clrL - D.tiltAdd);
   D.rl = r2(D.latchHoleD / 2 + Math.max(Mx.rlWall ?? 1.6, D.latchPinD * 0.45));
   // Agujero del barril del CIERRE (pieza suelta, agujero vertical al imprimir):
   // ajuste de giro (pasador + 2·holgura) + compensación.
-  D.latchBoreD = r2(D.latchHoleD + D.holeComp);
+  D.latchBoreD = r2(latchHole0 + D.holeComp);
 
   /* ---- Banda ---- */
   D.bo = r2(P.bandProud > 0 ? P.bandProud : Mx.bo);
@@ -406,7 +459,7 @@ export function derive(P) {
     // Antes, con banda estrecha, quedaban paredes de 0.1–0.7 mm y lengüetas
     // de 0.7 mm (se transparentan y se parten).
     const wmin = Math.max(0.9, 2 * lw);
-    const gwMin = r2(wmin + 0.4 + 2 * D.clr);
+    const gwMin = r2(wmin + 0.4 + 2 * D.sealClr);
     D.gd = r2(D.tl + 0.5);
     if (3 * wmin + 2 * gwMin <= D.F + 1e-6) {
       const gw2 = r2(clamp((D.F - 3 * wmin) / 2, gwMin, 3.0));
@@ -423,7 +476,7 @@ export function derive(P) {
     D.gd = r2(D.tl + 0.5);
     D.grooves = [{ off: D.F / 2, w: D.gw }];
   }
-  D.tw = r2(D.gw - 2 * D.clr);
+  D.tw = r2(D.gw - 2 * D.sealClr);
   D.bandH = r2(snapH(Math.max(P.bandH, D.gd + 1.5)));
 
   /* ---- Cierre empotrado (sección en s = distancia hacia fuera) ----
@@ -434,7 +487,7 @@ export function derive(P) {
   D.lt = Mx.plate;
   D.kth = Mx.kth;
   D.kc = 0.6;
-  D.pre = 0.15;
+  D.pre = r2(clamp(P.latchPre ?? 0.15, 0, 0.5));   // precarga gancho ↔ retén (calibrable)
   D.cheekW = Mx.cheek;
   D.sw = D.Wi / 2 + D.t;
   D.sb = D.sw + D.bo;
@@ -482,7 +535,7 @@ export function derive(P) {
   D.pd = P.patternDepth;
   D.stack = !!P.stackable;
   D.hs = 2.0;                        // altura del marco de apilado
-  D.sclr = 0.3;                      // holgura de apilado
+  D.sclr = r2(clamp(P.stackClr ?? 0.3, 0.1, 0.8));   // holgura de apilado (calibrable)
   D.db = 1.6;                        // bisel de 45° del borde superior de la tapa (bajo zTop)
   D.fwT = 1.6;                       // ancho de la cara superior del marco
   D.chB = 0.4;                       // chaflán exterior inferior de la base (apilable)

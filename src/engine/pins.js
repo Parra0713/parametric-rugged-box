@@ -33,12 +33,12 @@ function xCyl(x0, len, r0, r1, seg) {
  * Pasador impreso que atraviesa un tramo de longitud `span`.
  * Origen: cara interna de la cabeza en x = 0, eje en y = 0; apoyado en z = 0.
  */
-export function printedPin(D, span, pinD = D.pinD) {
+export function printedPin(D, span, pinD = D.pinD, clr = pinD === D.pinD ? D.clr : (D.clrL ?? D.clr)) {
   const rp = pinD / 2;
   const seg = D.seg;
   const headT = Math.max(1.6, 0.45 * pinD);
   const barbH = 1.2;                               // longitud de la rampa
-  const barb = D.clr + 0.4;                        // sobresale 0.4 mm del taladro
+  const barb = clr + 0.4;                          // sobresale 0.4 mm del taladro
   const Lp = span + barbH + 0.3;                   // el hombro sale 0.3 mm
   const body = xCyl(0, Lp, rp, rp, seg);
   const head = xCyl(-headT, headT, pinHeadR(pinD), pinHeadR(pinD), seg);

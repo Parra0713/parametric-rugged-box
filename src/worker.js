@@ -4,6 +4,7 @@
  * Las mallas se devuelven como ArrayBuffer transferibles (sin copia).
  *
  * Mensaje: { id, P, svg, normals, only }  (only: 'A' | 'B' | undefined)
+ *          o { id, P, calib: plan } para el test de holguras (calib.js)
  * Respuesta: { id, ok, r } o { id, ok: false, error, fatal }. `fatal` indica
  * que el módulo WASM quedó en mal estado (desbordamiento de memoria, abort):
  * el cliente descarta este hilo y crea otro.
@@ -11,14 +12,16 @@
 import Module from 'manifold-3d';
 import wasmUrl from 'manifold-3d/manifold.wasm?url';
 import { init, build } from './engine/engine.js';
+import { buildCalibration } from './engine/calib.js';
 
 const ready = init(Module, wasmUrl);
 
 self.onmessage = async (e) => {
-  const { id, P, svg, normals, only } = e.data;
+  const { id, P, svg, normals, only, calib } = e.data;
   try {
     await ready;
-    const r = build(P, svg, { normals, only });
+    // Test de holguras: mismas piezas/mallas que una caja, otro generador.
+    const r = calib ? buildCalibration(P, calib) : build(P, svg, { normals, only });
     const transfer = [];
     for (const p of r.parts) {
       transfer.push(p.mesh.vert.buffer, p.mesh.tri.buffer);

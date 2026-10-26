@@ -93,7 +93,7 @@ export class Viewer {
   material(id) {
     if (!this.materials[id]) {
       this.materials[id] = new THREE.MeshStandardMaterial({
-        color: COLORS[id] ?? 0x999999,
+        color: COLORS[id] ?? (id.startsWith('cal') ? 0xd9601a : 0x999999),
         roughness: id === 'gasket' ? 0.85 : 0.55,
         metalness: id.includes('Pin') || id === 'cap' ? 0.25 : 0.05,
         side: THREE.DoubleSide,
