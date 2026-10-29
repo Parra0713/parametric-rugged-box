@@ -15,7 +15,7 @@ import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 
 const COLORS = {
-  insert: 0x7fb3d5, insertLid: 0xa9cce3,
+  insert: 0x7fb3d5, insertLid: 0xa9cce3, orgPanel: 0x9fd3c7,
   base: 0x343a3f, lid: 0xd9601a, latch: 0xe8b10c, gasket: 0x1fa596,
   hingePin: 0xc8cbce, latchPin: 0xc8cbce, cap: 0xc8cbce,
 };
@@ -174,8 +174,11 @@ export class Viewer {
 
     const ex = this.mode === 'exploded';
     // Secuencia de apertura: 0–0.3 cierres (0→80°), 0.3–1 tapa (0→110°).
+    // Con organizador: la tapa hasta 0.75 y de 0.75 a 1 las tapas interiores.
+    const hasOrg = parts.some((p) => p.id === 'orgPanel');
     const tLatch = Math.min(1, this.open / 0.3);
-    const tLid = Math.max(0, (this.open - 0.3) / 0.7);
+    const tLid = Math.min(1, Math.max(0, (this.open - 0.3) / (hasOrg ? 0.45 : 0.7)));
+    const orgAng = (ex ? 0 : Math.max(0, (this.open - 0.75) / 0.25) * 95) * Math.PI / 180;
     const latchAng = (ex ? 0 : tLatch * 80) * Math.PI / 180;
     const lidAng = (ex ? 0 : tLid * 110) * Math.PI / 180;
     const about = (y, z, ang) => new THREE.Matrix4().makeTranslation(0, y, z)
@@ -194,6 +197,12 @@ export class Viewer {
           m = exOff(0, -30, 0).multiply(m);
         } else if (p.id === 'insert') {
           m = exOff(0, 0, D.Hl + D.Db + 70).multiply(m);
+        } else if (p.id === 'orgPanel') {
+          // Tapas interiores: giran sobre su eje (al final de la apertura) y
+          // van con la tapa.
+          if (p.axis && orgAng > 0) m = about(p.axis.y + inst[13], p.axis.z, -orgAng).multiply(m);
+          m = about(assembly.hinge.y, assembly.hinge.z, -lidAng).multiply(m);
+          m = exOff(0, 0, D.Hl + 35 - 18).multiply(m);
         } else if (p.id === 'insertLid') {
           m = about(assembly.hinge.y, assembly.hinge.z, -lidAng).multiply(m);
           m = exOff(0, 0, D.Hl + 35 + 25).multiply(m);

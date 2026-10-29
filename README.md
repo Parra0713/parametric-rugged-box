@@ -281,6 +281,35 @@ npm run build    # regenera dist/rugged-box.html
 
 ---
 
+## Organizador en la tapa (v6.8)
+
+**Contenido → Organizador en la tapa**: cuadrícula de compartimentos
+integrada en la tapa (terminales, tornillos, fusibles…) con **tapas
+interiores** para que, con la caja cerrada (tapa boca abajo), nada se caiga
+ni se mezcle. La base sigue alojando lo que quieras (p. ej. la herramienta,
+con el inserto a medida del calco SVG).
+
+* **Columnas × filas**, **tamaño mínimo de celda** y **altura de celda**: si
+  no caben, la caja y la tapa crecen solas (se avisa en el registro). Con 0
+  la cuadrícula reparte el interior disponible.
+* **Tapa interior**: una para todos los compartimentos, una por fila, una
+  por compartimento o ninguna.
+* **Sin piezas sueltas**: cada tapa interior lleva un eje Ø3 impreso en su
+  borde (acostado, como los pasadores) que entra de lado en grapas en "C"
+  del carril de la tapa. Cierre de clic: un faldón entra en cada celda con
+  la holgura deslizante calibrada (probeta C) y un resalte con la precarga
+  calibrada (probeta E). El faldón también impide que las piezas pasen de
+  una celda a otra.
+* **Fondo inclinado** en cada celda para recoger piezas pequeñas.
+* Sin soportes: la tapa se imprime boca abajo (celdas y grapas hacia
+  arriba, agujero de las grapas en gota) y las tapas interiores con la cara
+  exterior en la cama. Las tapas interiores idénticas se exportan una vez
+  con su número de copias.
+* Se adapta a todo: octógono (las esquinas fuera del giro se rellenan),
+  apilable, girada, XS a L e impresión inclinada. `tests/organizer.test.mjs`
+  comprueba que todo cierra, que cada tapa interior abre 0–95° sin chocar y
+  que nada necesita soportes.
+
 ## Calibración de holguras (v6.6)
 
 Las holguras dependen de la **impresora, el material y la orientación** con
@@ -349,6 +378,8 @@ src/viewer.js           vista 3D (three.js, render bajo demanda)
 src/engineClient.js     tres hilos de geometría: vista rápida (A + B) y modelo completo (R)
 src/worker.js           hilo de geometría
 src/engine/merge.js     une las mitades A y B de la vista rápida
+src/engine/orgLayout.js organizador en la tapa: distribución (pura)
+src/engine/organizer.js organizador en la tapa: celdas, grapas y tapas interiores
 src/engine/calib.js     test de holguras: plan adaptativo, probetas y aplicación de resultados
 src/calibProfile.js     perfiles de calibración persistentes (localStorage)
 src/engine/params.js    parámetros, esquema de UI y derivación de cotas

@@ -43,6 +43,7 @@ const splitCases = [
   ['pasadores impresos', { pinMode: 'printed', latchPinMode: 'printed' }],
   ['junta en tramos (cama pequeña)', { innerL: 200, innerW: 120, bedPreset: 'custom', bedX: 180, bedY: 180 }],
   ['grande inclinada', { innerL: 260, innerW: 180, baseDepth: 63, lidDepth: 27, pattern: 'cross' }],
+  ['organizador por celda', { lidOrg: true, orgCols: 4, orgRows: 2, orgCover: 'cell' }],
 ];
 for (const [name, p] of splitCases) {
   for (const q of ['draft', 'preview']) {

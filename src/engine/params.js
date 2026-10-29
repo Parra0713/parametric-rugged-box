@@ -15,6 +15,8 @@
  * Unidades: milímetros y grados.
  */
 
+import { orgBase, orgLayout } from './orgLayout.js';
+
 /* ------------------------------------------------------------------------ */
 /*  Valores por defecto                                                     */
 /* ------------------------------------------------------------------------ */
@@ -92,6 +94,16 @@ export const DEFAULTS = {
   finReach: 0,          // alcance de las aletas en % del ancho (0 = hasta el centro de masa)
   toothPitch: 6,        // paso de los dientes de contacto
   finGap: 0,            // holgura aleta‑pieza (0 = 1.5 capas)
+
+  // --- Organizador en la tapa ---
+  lidOrg: false,        // cuadrícula de compartimentos en la tapa
+  orgCols: 6,           // columnas (a lo largo del lado largo)
+  orgRows: 3,           // filas (lado corto)
+  orgMinL: 0,           // largo mínimo de celda (0 = repartir el interior); la caja crece si hace falta
+  orgMinW: 0,           // ancho mínimo de celda
+  orgDepth: 0,          // altura de las celdas (0 = la que dé la tapa); la tapa crece si hace falta
+  orgCover: 'single',   // 'single' | 'row' | 'cell' | 'none': tapas interiores
+  orgScoop: true,       // fondo con chaflán para recoger piezas pequeñas
 
   // --- Insertos interiores ---
   insertMode: 'off',    // 'off' | 'blank' | 'pockets' (alojamientos del contenido SVG)
@@ -217,6 +229,19 @@ export const SCHEMA = [
   ]},
 
   /* ---------------- Tapa ---------------- */
+  { tab: 'contenido', group: 'Organizador en la tapa', items: [
+    { k: 'lidOrg', label: 'Compartimentos en la tapa', type: 'toggle', hint: 'Cuadrícula para piezas pequeñas (terminales, tornillos…) con tapa interior' },
+    { k: 'orgCols', label: 'Columnas (lado largo)', type: 'range', min: 1, max: 20, step: 1, unit: '' },
+    { k: 'orgRows', label: 'Filas (lado corto)', type: 'range', min: 1, max: 12, step: 1, unit: '' },
+    { k: 'orgCover', label: 'Tapa interior', type: 'select', options: [
+      ['single', 'Una para todos los compartimentos'], ['row', 'Una por fila'], ['cell', 'Una por compartimento'], ['none', 'Sin tapa interior']],
+      hint: 'Con bisagra a presión y cierre de clic: sin piezas sueltas' },
+    { k: 'orgMinL', label: 'Largo mínimo de cada celda (0 = repartir)', type: 'range', min: 0, max: 150, step: 0.5, unit: 'mm', hint: 'Si no caben, la caja crece' },
+    { k: 'orgMinW', label: 'Ancho mínimo de cada celda (0 = repartir)', type: 'range', min: 0, max: 150, step: 0.5, unit: 'mm' },
+    { k: 'orgDepth', label: 'Altura de las celdas (0 = la de la tapa)', type: 'range', min: 0, max: 120, step: 0.5, unit: 'mm', hint: 'Si no caben, la tapa crece' },
+    { k: 'orgScoop', label: 'Fondo inclinado para recoger piezas', type: 'toggle', adv: true },
+  ]},
+
   { tab: 'tapa', group: 'Diseño de la tapa', items: [
     { k: 'pattern', label: 'Patrón', type: 'select', options: [
       ['smooth', 'Liso'], ['hex', 'Hexagonal'], ['stripes', 'Estriado'], ['cross', 'Reforzado cruzado'],
@@ -366,6 +391,12 @@ export function derive(P) {
   D.rot90 = P.innerW > P.innerL;
   D.Li = D.rot90 ? P.innerW : P.innerL;
   D.Wi = D.rot90 ? P.innerL : P.innerW;
+  // Organizador en la tapa: si las celdas mínimas no caben, la caja crece.
+  const OB = orgBase(P, lw);
+  if (OB) {
+    if (OB.needL > D.Li + 1e-6) { D.snapped.push(`interior ${r2(D.Li)} → ${OB.needL} mm de largo para ${OB.cols} celdas del organizador`); D.Li = OB.needL; }
+    if (OB.needW > D.Wi + 1e-6) { D.snapped.push(`interior ${r2(D.Wi)} → ${OB.needW} mm de ancho para ${OB.rows} filas del organizador`); D.Wi = OB.needW; }
+  }
 
   D.t = r2(snapW(P.wall)); note('Pared', P.wall, D.t);
   D.ri = clamp(P.innerR, 0.5, Math.min(D.Li, D.Wi) / 2 - 0.5);
@@ -625,6 +656,11 @@ export function derive(P) {
   const DlMin = r2(Math.max(0, HlMin - D.topT));
   let Dl = P.lidMin ? DlMin : P.lidDepth;
   if (Dl < DlMin) { if (!P.lidMin) warn.push(`Tapa ajustada a su mínimo mecánico: ${DlMin} mm.`); Dl = DlMin; }
+  if (OB) {
+    // Celdas + tapa interior + holgura hasta el borde.
+    const need = Math.max(OB.needDl, r2(OB.g0 + OB.ct + 5));
+    if (need > Dl + 1e-6) { D.snapped.push(`tapa ${r2(Dl)} → ${need} mm de profundidad para el organizador`); Dl = need; }
+  }
   D.Hl = r2(snapH(D.topT + Dl));
   D.Dl = r2(D.Hl - D.topT);
   D.lidMin = DlMin;
@@ -780,6 +816,11 @@ export function derive(P) {
   // completo) y 'final' para exportar.
   D.draft = P.quality === 'draft';
   D.seg = P.quality === 'final' ? 96 : D.draft ? 20 : 40;
+  D.org = orgLayout(D, P);
+  if (D.org && (D.org.cellL < 5 || D.org.cellW < 5 || D.org.depth < 3)) {
+    warn.push(`Organizador: celdas demasiado pequeñas (${D.org.cellL}×${D.org.cellW}×${D.org.depth} mm). Reduce filas/columnas o agranda la caja.`);
+    D.org = null;
+  }
   return D;
 }
 

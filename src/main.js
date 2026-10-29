@@ -549,7 +549,7 @@ function computeLayout(res) {
 /* ------------------------------------------------------------------ */
 /*  Panel de resultados                                               */
 /* ------------------------------------------------------------------ */
-const COLORS = { insert: '#7fb3d5', insertLid: '#a9cce3', base: '#343a3f', lid: '#d9601a', latch: '#e8b10c', gasket: '#1fa596', hingePin: '#c8cbce', latchPin: '#c8cbce', cap: '#c8cbce' };
+const COLORS = { insert: '#7fb3d5', insertLid: '#a9cce3', orgPanel: '#9fd3c7', base: '#343a3f', lid: '#d9601a', latch: '#e8b10c', gasket: '#1fa596', hingePin: '#c8cbce', latchPin: '#c8cbce', cap: '#c8cbce' };
 const mm = (v) => `${Number(v).toFixed(2).replace(/\.?0+$/, '')} mm`;
 
 function kv(rows) {
@@ -602,6 +602,8 @@ function renderInfo() {
       ['Profundidad', `${I.baseDepth} + ${I.lidDepth} mm`],
       ['Exterior', `${D.outerL} × ${D.outerW} × ${D.outerH} mm`],
       ['Material (aprox.)', `${(vol / 1000).toFixed(0)} cm³ · ${Math.round(vol / 1000 * 1.24)} g PLA`],
+      ...(D.org ? [['Organizador', `${D.org.cols}×${D.org.rows} celdas de ${D.org.cellL}×${D.org.cellW}×${D.org.depth} mm`, true],
+        ['Tapa interior', { single: 'una para todo', row: `una por fila (${D.org.panels.length})`, cell: `una por celda (${D.org.panels.length})`, none: 'sin tapa interior' }[D.org.cover]]] : []),
     ])));
 
   /* --- Avisos --- */
@@ -938,7 +940,7 @@ function printMesh(p, angle) {
 const IDENT = [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1];
 
 const fileName = (p) => FILE[p.id] + (p.key !== p.id ? '_' + (Number(p.key.replace(/\D/g, '')) + 1) : '');
-const FILE = { insert: 'inserto_base', insertLid: 'inserto_tapa',  base: 'base', lid: 'tapa', latch: 'cierre', gasket: 'junta_TPU', hingePin: 'pasador_bisagra', latchPin: 'pasador_cierre', cap: 'tapon_pasador' };
+const FILE = { insert: 'inserto_base', insertLid: 'inserto_tapa', orgPanel: 'tapa_interior',  base: 'base', lid: 'tapa', latch: 'cierre', gasket: 'junta_TPU', hingePin: 'pasador_bisagra', latchPin: 'pasador_cierre', cap: 'tapon_pasador' };
 
 async function exportZip() {
   const btn = $('#btnZip');

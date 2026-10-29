@@ -105,9 +105,13 @@ export function calibPlan(P, opt = {}) {
   if (mode === 'universal') {
     tests.push(pinRow('P3', 'clearance', 3, P.clearance ?? 0.25, 'Pasador impreso Ø3 (cajas XS a M)'));
     tests.push(pinRow('P5', 'clearanceL', 5, P.clearanceL ?? P.clearance ?? 0.25, 'Pasador impreso Ø5 (cajas grandes)'));
-  } else if (usesPrinted) {
-    const d = D.pinMode === 'printed' ? D.pinD : D.latchPinD;
-    tests.push({ ...pinRow('P', 'clearance', d, D.pinMode === 'printed' ? D.clr : D.clrL, `Pasador impreso Ø${d} de esta caja`), scaled: true });
+  } else if (usesPrinted || (D.org && D.org.has)) {
+    // Pasador impreso de la caja o, si solo usa filamento, el eje Ø3 de las
+    // tapas interiores del organizador (misma unión: eje acostado en agujero
+    // horizontal de la tapa).
+    const d = !usesPrinted ? 3 : D.pinMode === 'printed' ? D.pinD : D.latchPinD;
+    const c0 = !usesPrinted ? (P.clearance ?? 0.25) : D.pinMode === 'printed' ? D.clr : D.clrL;
+    tests.push({ ...pinRow('P', 'clearance', d, c0, usesPrinted ? `Pasador impreso Ø${d} de esta caja` : 'Eje Ø3 de las tapas interiores'), scaled: true });
   }
   if (want(tilted)) {
     tests.push({

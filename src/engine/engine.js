@@ -23,6 +23,7 @@ import { printedPin, filamentCap, filamentLength } from './pins.js';
 import { gridfinityFeet } from './gridfinity.js';
 import { lidRelief } from './pattern.js';
 import { baseInsert, lidInsert } from './insert.js';
+import { orgLidGeometry, orgPanel } from './organizer.js';
 import { transformVerts, hull2D, fitAngle, tiltChoose, rotatedExtent } from '../bedfit.js';
 import { fitsFlat } from '../optimizer.js';
 import { contactCut, supportFins, wedgeVolume, rotAxis, invRigid, overhangRegions, overhangSupports } from './tilt.js';
@@ -276,6 +277,12 @@ function buildLid(D, P, H, L, svg, report) {
 
   let lid = unionAll([core, H.lid, L.lidCheeks, L.keepers, ...tongues(D)]);
   lid = lid.subtract(H.lidHoles);
+  if (D.org) {
+    // Organizador: celdas, carriles y grapas de las tapas interiores.
+    const og = orgLidGeometry(D);
+    lid = lid.add(og.add);
+    if (og.cut) lid = lid.subtract(og.cut);
+  }
   const rel = lidRelief(D, P, svg);
   if (rel.cut) lid = lid.subtract(rel.cut);
   if (rel.add) lid = lid.add(rel.add);
@@ -606,6 +613,32 @@ export function build(P, svg, opt = {}) {
         print: lay, instances: D.latch.xs.map((x) => T(x, 0, z0)),
         qty: D.latch.n, material: 'PETG (flexible) / PLA',
       }, normals));
+
+      // Tapas interiores del organizador: se agrupan las idénticas (misma
+      // forma salvo una traslación) en una sola pieza con varias copias.
+      if (D.org && D.org.has) {
+        const groups = new Map();
+        for (const p of D.org.panels) {
+          const rel = (v, o) => Math.round((v - o) * 100);
+          const cellsRel = p.cells.map((i) => { const c = D.org.cells[i]; return [rel(c.x0, p.x0), rel(c.x1, p.x0), rel(c.y0, p.y0), rel(c.y1, p.y0), p.snapCells.includes(i) ? 1 : 0]; });
+          const sig = JSON.stringify([rel(p.x1, p.x0), rel(p.y1, p.y0), p.clips.map((x) => rel(x, p.x0)), rel(p.tab, p.x0), cellsRel, D.cham > 0 ? [p.x0, p.y0] : 0]);
+          if (!groups.has(sig)) groups.set(sig, []);
+          groups.get(sig).push(p);
+        }
+        let k = 0;
+        for (const list of groups.values()) {
+          const ref = list[0];
+          const man = orgPanel(D, ref);
+          k++;
+          parts.push(part('orgPanel', groups.size > 1 ? `Tapa interior ${k}` : 'Tapa interior', man, {
+            key: `orgPanel${k - 1}`,
+            print: T(0, 0, -D.org.zp0),
+            instances: list.map((p) => T(p.x0 - ref.x0, p.y0 - ref.y0, z0)),
+            qty: list.length, material: 'PETG / PLA',
+            axis: { y: ref.axis.y, z: ref.axis.z + z0 },
+          }, normals));
+        }
+      }
     }
 
     // Junta: si el anillo no cabe en la cama se divide en tramos rectos
@@ -656,7 +689,8 @@ export function build(P, svg, opt = {}) {
       D.insert = ins.info;
       log(D, `inserto base: altura ${ins.info.height} mm, ${ins.info.pockets} alojamientos, ${ins.info.notches.length} huecos para dedos (${Math.round(performance.now() - t1)} ms)`);
     }
-    if (want('B') && P.insertLid) {
+    if (want('B') && P.insertLid && D.org) D.warn.push('Con compartimentos en la tapa no se genera el inserto de la tapa.');
+    if (want('B') && P.insertLid && !D.org) {
       const li = lidInsert(D, P);
       if (li) {
         const lp2 = part('insertLid', 'Inserto de tapa', li.solid, {
@@ -751,7 +785,7 @@ function part(id, name, man, extra, normals) {
 
 /* ---------------- Caché de la base ---------------- */
 let baseCache = null;
-const LID_ONLY = new Set(['pattern', 'relief', 'patternDepth', 'patternSize', 'patternRib',
+const LID_ONLY = new Set(['orgDepth', 'orgScoop', 'pattern', 'relief', 'patternDepth', 'patternSize', 'patternRib',
   'patternMargin', 'stripeAngle', 'patternSeed', 'svgSize', 'svgRotate', 'svgOffsetX', 'svgOffsetY',
   'top', 'lidDepth', 'lidMin', 'bedPreset', 'bedX', 'bedY', 'bedZ', 'printAids', 'aidsInPart',
   'finSpacing', 'finReach', 'toothPitch', 'finGap', 'overhangSupports', 'overhangAngle', 'supportPitch',

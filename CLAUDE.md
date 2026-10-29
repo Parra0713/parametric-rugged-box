@@ -10,6 +10,7 @@ español**. Unidades: milímetros y grados.
 npm run dev          # servidor Vite con recarga (http://localhost:5173)
 npm run build        # dist/rugged-box.html: UN archivo autocontenido (doble clic)
 npm test             # geometría + cama + montaje real (~2 min)
+npm run test:org     # organizador en la tapa: cierra, abre 0–95°, sin soportes
 npm run test:calib   # test de holguras: plan adaptativo, probetas imprimibles, resultados y perfiles
 npm run test:perf    # memoria WASM, reparto A/B, vista rápida y cachés (~1 min)
 npm run test:assembly   # mecánica completa, pasadores montables, puentes ≤ 10 mm, apilado (~45 s)
@@ -39,6 +40,7 @@ registro interno del motor) y `logs/sweep-latest.json` (resumen). **Ejecuta
 | `src/content.js` | SVG calcado del contenido (unidades reales, recorte máx. de esquina). |
 | `src/packer.js` | Acomodo automático de varios objetos (gravedad sobre rejilla de 1 mm, giros 90/180/270°, huecos para dedos compartibles, prefiere cajas que quepan planas). Pura JS. |
 | `src/main.js`, `viewer.js`, `worker.js` | UI, vista three.js (render bajo demanda), hilo de geometría. |
+| `src/engine/orgLayout.js`, `organizer.js` | Organizador en la tapa: `orgBase` (dimensionado, en `derive`), `orgLayout` → `D.org` (celdas, ejes, tapas interiores), geometría de celdas/grapas (`orgLidGeometry`) y de cada tapa interior (`orgPanel`). |
 | `src/engine/calib.js`, `src/calibProfile.js` | Test de holguras: `calibPlan` (puro), `buildCalibration` (probetas, hilo R), `applyResults` (puro); perfiles persistentes. |
 | `src/engineClient.js`, `src/engine/merge.js` | Tres hilos: A + B (vista rápida `draft`, cada uno media caja: `build(P, svg, { only })`) y R (modelo completo `preview` y exportación `final`). `mergeResults` une A y B. |
 
@@ -100,6 +102,14 @@ registro interno del motor) y `logs/sweep-latest.json` (resumen). **Ejecuta
   medir, a `calibPlan`/`applyResults`. Usa `D.filClr` (filamento), `D.clr`
   (pasador impreso), `D.sealClr` (lengüeta), `D.sclr` (apilado): no
   reutilices una para otra cosa.
+- **Organizador**: con la caja cerrada las celdas se abren hacia la base y
+  las tapas interiores (`orgPanel`, grupo B) van entre `D.org.zp0` y `zp1`,
+  por encima del borde (`g0`). Bisagra a presión: eje Ø3 (holgura P3) en
+  grapas con boca hacia +Y; la esquina inferior‑delantera de la grapa se
+  redondea con centro en el eje porque por ahí barre la muesca al abrir.
+  En octógono, lo que queda fuera de la cuerda a la altura del eje se
+  rellena (`cell.lim`). Para probar choques usa `_orgNoSnap` (la
+  interferencia del resalte de clic es a propósito).
 - `frustum(a, z0, b, z1)` es una ENVOLVENTE CONVEXA: solo para secciones
   convexas (offsets de `rrOffset`). Para chaflanes de formas cualquiera
   (alojamientos de insertos) usa `steppedChamfer`. El frustum se comía la
@@ -155,6 +165,10 @@ registro interno del motor) y `logs/sweep-latest.json` (resumen). **Ejecuta
    resultados (B/F conservan el diámetro medido, P desplaza Ø3/Ø5) se
    aplican y persisten. El barrido incluye perfiles extremos, también en
    cajas inclinadas.
+13. Organizador (`organizer.test.mjs` + casos del barrido): celdas ≥ lo
+   pedido, cerrada sin solapes con tapa/base/inserto, cada tapa interior
+   abre 0–95° sin chocar, clic del eje y del faldón, sin voladizos > 50°,
+   cabe en la cama, sin piezas sueltas.
 
 ## Flujo con el PC del usuario
 

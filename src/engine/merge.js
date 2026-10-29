@@ -7,7 +7,7 @@
  * `build()` completo: piezas en el orden canónico, avisos y registro sin
  * duplicados (los de `derive()` salen en ambos).
  */
-const ORDER = ['base', 'lid', 'latch', 'gasket', 'insert', 'insertLid', 'hingePin', 'latchPin', 'cap'];
+const ORDER = ['base', 'lid', 'latch', 'orgPanel', 'gasket', 'insert', 'insertLid', 'hingePin', 'latchPin', 'cap'];
 
 const uniq = (arr) => [...new Set(arr)];
 
