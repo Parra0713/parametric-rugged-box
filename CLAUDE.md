@@ -143,6 +143,12 @@ registro interno del motor) y `logs/sweep-latest.json` (resumen). **Ejecuta
   convexas (offsets de `rrOffset`). Para chaflanes de formas cualquiera
   (alojamientos de insertos) usa `steppedChamfer`. El frustum se comía la
   cubierta entre alojamientos.
+- **Línea de contracción** (`criticalLayers` → ranura en V `vGroove`): la V
+  se coloca en la caída de área (fondo → paredes). Con fondos/techos finos
+  (modo ahorro) la línea cae a ~1 mm de la cama: la V se sube lo justo para
+  no tocar el chaflán del borde (+1 capa) si la línea sigue dentro de ella.
+  Profundidad `D.shadowV` = min(0.5, t − 0.9): la pared detrás conserva 2
+  líneas.
 - **Sin soportes**: toda pieza plana debe quedar con puentes ≤ `D.maxBridge`
   (10 mm, límite de Orca/Bambu). La tapa se imprime boca abajo: cualquier
   cavidad de su cara superior es un techo → `limitBridges` en pattern.js.

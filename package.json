@@ -1,6 +1,6 @@
 {
   "name": "rugged-box",
-  "version": "7.1.0",
+  "version": "7.1.1",
   "description": "Generador paramétrico de cajas Rugged Box imprimibles en 3D (FDM)",
   "scripts": {
     "dev": "vite",

@@ -629,7 +629,10 @@ export function derive(P) {
   D.fc = r2(snapH(clamp(P.floorChamfer, 0, Math.min(D.Li, D.Wi) / 4)));
   if (P.floorChamfer === 0) D.fc = 0;
   D.shadow = !!P.shadowLine;
-  D.shadowV = 0.5;
+  // Profundidad de la V: 0.5 mm, pero la pared que queda detrás conserva
+  // 2 líneas (0.9 mm) aunque sea fina (modo ahorro nervado: piel de 1.35).
+  D.shadowV = r2(Math.min(0.5, D.t - 0.9));
+  if (D.shadowV < 0.3) D.shadow = false;
 
   /* ---- Tapa artística / apilado ---- */
   D.pattern = P.pattern;

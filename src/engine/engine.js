@@ -180,14 +180,20 @@ function buildBase(D, H, L, report) {
 
   // Frente 3: análisis por capas → ranuras de sombra donde cae el tiempo de capa.
   const crit = D.draft ? [] : criticalLayers(core, D.lh, Hb);
-  const zLo = D.stack ? D.hf + 1 : 1.0;
+  // Borde inferior de la V: por encima del chaflán de la base + 1 capa
+  // (apilable: del faldón). Con fondos finos (modo ahorro: 1 mm) la línea cae
+  // a ~1 mm de la cama: la V se sube lo justo para no tocar el chaflán,
+  // siempre que la línea siga dentro de ella.
+  const v = D.shadowV;
+  const zLo = D.stack ? D.hf + 1 : chB + D.lh;
   const zHi = zc - 1.2;
   const grooves = [];
   for (const c of crit) {
     const z = c.z;
-    const ok = D.shadow && z - D.shadowV >= zLo && z + D.shadowV <= zHi;
+    const zg = Math.max(z, zLo + v);
+    const ok = D.shadow && zg - z <= 0.8 * v && zg + v <= zHi;
     report.push({ part: 'Base', z, drop: c.drop, masked: ok ? 'ranura de sombra' : D.stack && z < zLo ? 'chaflán de apilado' : z >= zc - 1.2 ? 'banda' : 'no' });
-    if (ok && grooves.length < 2) grooves.push(z);
+    if (ok && grooves.length < 2) grooves.push(r2(zg));
   }
   for (const z of grooves) core = core.subtract(vGroove(D, t, z));
 
@@ -289,10 +295,17 @@ function buildLid(D, P, H, L, svg, report) {
   const flip = lidFlip(D, 0);
   const crit = D.draft ? [] : criticalLayers(core.transform(flip), D.lh, Hl);
   const grooves = [];
+  // Igual que en la base: la V no toca el bisel del borde superior (+1 capa)
+  // y, con techos finos, se desplaza lo justo hacia dentro de la pieza
+  // siempre que la línea quede dentro de ella. Apilable: el bisel de 45° del
+  // marco (db) ya rompe la línea si cae ahí.
+  const v = D.shadowV, zLoP = ce + D.lh;
   for (const c of crit) {
-    const zw = Math.round((zT - c.z) * 100) / 100;           // altura en mundo
-    const ok = D.shadow && zw + D.shadowV <= zT - 1.0 && zw - D.shadowV >= zc + 1.0;
-    report.push({ part: 'Tapa', z: c.z, drop: c.drop, masked: ok ? 'ranura de sombra' : zw < zc + 1 ? 'banda' : 'no' });
+    const zp = Math.max(c.z, zLoP + v);                      // en impresión (desde la cara superior)
+    const zw = r2(zT - zp);                                  // altura en mundo
+    const ok = D.shadow && zp - c.z <= 0.8 * v && zw - v >= zc + 1.0;
+    report.push({ part: 'Tapa', z: c.z, drop: c.drop,
+      masked: ok ? 'ranura de sombra' : D.stack && c.z < ce ? 'chaflán de apilado' : zT - c.z < zc + 1 ? 'banda' : 'no' });
     if (ok && grooves.length < 2) grooves.push(zw);
   }
   for (const z of grooves) core = core.subtract(vGroove(D, t, z));
@@ -461,6 +474,7 @@ function memoSolid(key, buildFn) {
   // hilo que en dos).
   return { ...r, solid: M().ofMesh({ numProp: 3, vertProperties: ent.vert, triVerts: ent.tri }) };
 }
+const r2 = (v) => Math.round(v * 100) / 100;
 const memoKey = (tag, ...v) => tag + JSON.stringify(v);
 
 function addAids(D, P, pt, solidNative, normals, G = { hx: D.Lo / 2, hy: D.Wo / 2, wall: D.t, mech: true }) {
