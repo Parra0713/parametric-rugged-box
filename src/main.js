@@ -576,8 +576,33 @@ function renderInfoLight() {
   $('#info').classList.add('stale');
 }
 
+/**
+ * Ajustes del laminador para el modo ahorro: la pared ya es un número exacto
+ * de líneas (todo perímetro, sin relleno) y fondo/techo un número exacto de
+ * capas, así que basta un relleno bajo para las zonas gruesas (mecánica,
+ * banda, nervios). Mismos valores en la ficha y en el LEEME.
+ */
+function ecoSlicer(D) {
+  const per = Math.max(2, Math.round(D.t / D.lw));
+  const shell = Math.max(3, Math.ceil(Math.min(D.floor ?? 1, D.topT ?? 1) / D.lh - 1e-6));
+  return [
+    ['Perímetros', `${per} (pared de ${D.t} mm = todo perímetro)`],
+    ['Capas sup./inf.', `${shell} (fondo y techo macizos)`],
+    ['Relleno', '8–10 % giroide (solo mecánica y banda)'],
+    ['Cierres y pasadores', 'como siempre: no ahorrar aquí'],
+  ];
+}
+
+/** Gramos (PLA) de un resultado. */
+const grams = (parts) => Math.round(parts.reduce((s, p) => s + p.volume * p.instances.length, 0) / 1000 * 1.24);
+/** Firma de la caja sin el modo ahorro (para comparar con/sin). */
+const ecoSig = () => JSON.stringify({ ...state.P, eco: false, ...contentPayload() });
+
 function renderInfo() {
   const { D, parts } = state.result;
+  // Material sin el modo ahorro para la misma caja (el último modelo
+  // completo sin ahorro con los mismos parámetros).
+  if (!D.eco) state.ecoRef = { sig: ecoSig(), g: grams(parts) };
   $('#info').classList.remove('stale');
   const I = D.inner;
   const info = $('#info');
@@ -605,6 +630,19 @@ function renderInfo() {
       ...(D.org ? [['Organizador', `${D.org.cols}×${D.org.rows} celdas de ${D.org.cellL}×${D.org.cellW}×${D.org.depth} mm`, true],
         ['Tapa interior', { single: 'una para todo', row: `una por fila (${D.org.panels.length})`, cell: `una por celda (${D.org.panels.length})`, none: 'sin tapa interior' }[D.org.cover]]] : []),
     ])));
+
+  /* --- Modo ahorro --- */
+  if (D.eco) {
+    const g = grams(parts);
+    const ref = state.ecoRef && state.ecoRef.sig === ecoSig() ? state.ecoRef.g : null;
+    info.append(el('section', { class: 'card key' }, el('h3', {}, 'Modo ahorro de material'),
+      kv([
+        ...(ref ? [['Ahorro', `${ref - g} g (−${Math.round(100 * (1 - g / ref))} %) · ${ref} → ${g} g`, true]] : []),
+        ['Cambios', D.ecoChanges.length ? D.ecoChanges.join(' · ') : 'ya estaba en mínimos'],
+        ...ecoSlicer(D),
+      ]),
+      el('p', { class: 'small' }, 'Bisagras, cierres, junta y holguras calibradas no cambian: cierra y sella igual.')));
+  }
 
   /* --- Avisos --- */
   if (D.warn.length) {
@@ -1024,6 +1062,10 @@ function readme(r, layout) {
     '  - Junta: TPU 95A, 0.2 mm, velocidad baja, 100 % de relleno.',
     '  - Tapa: la cara decorada va contra la cama.',
     `  - Sin soportes: en las piezas planas ningún puente supera ${D.maxBridge ?? 10} mm (desactiva los soportes del laminador).`, '',
+    ...(D.eco ? ['MODO AHORRO DE MATERIAL:',
+      `  - Cambios: ${D.ecoChanges.join(', ') || 'ya estaba en mínimos'}.`,
+      ...ecoSlicer(D).map(([k, v]) => `  - ${k}: ${v}.`),
+      '  - La mecánica (bisagras, cierres, junta, holguras) es la misma que sin ahorro.', ''] : []),
     'MONTAJE:',
     '  1. Coloca la junta TPU en la ranura de la base (si aplica).',
     '  2. Alinea los nudillos de la tapa entre los de la base e inserta el pasador por el lado de la cabeza hasta que los dientes salten.',

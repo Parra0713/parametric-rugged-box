@@ -94,6 +94,39 @@ console.log('\nCaché de la base (parámetros "solo tapa")');
   check(!wrong.length, `ningún parámetro "solo tapa" cambia la base${wrong.length ? ': ' + wrong.join(', ') : ''}`);
 }
 
+/* 4b. Caché de la tapa ---------------------------------------------- */
+console.log('\nCaché de la tapa (parámetros que no la tocan)');
+{
+  const items = SCHEMA.flatMap((g) => g.items || []);
+  const wrong = [];
+  const crimp = [[[-60, -20], [60, -20], [60, 20], [-60, 20]]];
+  for (const B of [{}, { stackable: true }, { lidOrg: true, orgCols: 3, orgRows: 2 }, { insertMode: 'pockets', contentPolys: crimp }]) {
+    for (const k of _internal.NOT_LID) {
+      const it = items.find((i) => i.k === k);
+      let alt;
+      if (k === 'contentPolys') alt = [[[-50, -15], [50, -15], [50, 15], [-50, 15]]];
+      else if (!it) continue;
+      else if (it.type === 'range') alt = Math.min(it.max, (DEFAULTS[k] ?? it.min) + 3 * it.step);
+      else if (it.type === 'select') alt = it.options.map((o) => o[0]).find((v) => v !== (B[k] ?? DEFAULTS[k]));
+      else alt = !(B[k] ?? DEFAULTS[k]);
+      const P1 = { ...DEFAULTS, ...B, quality: 'draft' }, P2 = { ...P1, [k]: alt };
+      const lid = (r) => { const b = r.parts.find((x) => x.id === 'lid'); return `${b.volume}/${b.tris}/${b.mesh.vert.length}`; };
+      build(P1, null, { only: 'B' });
+      const cached = lid(build(P2, null, { only: 'B' }));
+      build({ ...P1, innerL: 77 }, null, { only: 'B' });
+      const fresh = lid(build(P2, null, { only: 'B' }));
+      if (cached !== fresh) wrong.push(`${k}=${JSON.stringify(alt)}`);
+    }
+  }
+  check(!wrong.length, `ningún parámetro de contenido/inserto/ayudas cambia la tapa${wrong.length ? ': ' + wrong.join(', ') : ''}`);
+  // Y la caché acelera de verdad el hilo B al tocar el inserto.
+  const P = { ...DEFAULTS, lidOrg: true, orgCols: 6, orgRows: 3, insertMode: 'blank', quality: 'draft' };
+  build(P, null, { only: 'B' });
+  const t0 = performance.now(); build({ ...P, insertTol: 0.4 }, null, { only: 'B' }); const tHit = performance.now() - t0;
+  const t1 = performance.now(); build({ ...P, innerW: 81 }, null, { only: 'B' }); const tMiss = performance.now() - t1;
+  check(tHit < tMiss * 0.5, `tocar el inserto no recalcula la tapa (${Math.round(tHit)} ms frente a ${Math.round(tMiss)} ms)`);
+}
+
 /* 5. Caché de ayudas ------------------------------------------------ */
 console.log('\nCaché de ayudas de impresión');
 {

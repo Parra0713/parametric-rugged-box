@@ -15,7 +15,7 @@
  *                    (orejas anti‑warping, cuna de soporte)
  */
 import { installGC, cleanup, prism, frustum, unionAll, toMesh, M, CS, roundRect, yzExtrude, teardrop } from './geo.js';
-import { derive, pinHeadR } from './params.js';
+import { derive, pinHeadR, ecoParams } from './params.js';
 import { rrOffset, grooveCut, tongues, gasket, stackLines } from './seal.js';
 import { hinges, knuckleSpans } from './hinge.js';
 import { latches } from './latch.js';
@@ -23,7 +23,7 @@ import { printedPin, filamentCap, filamentLength } from './pins.js';
 import { gridfinityFeet } from './gridfinity.js';
 import { lidRelief } from './pattern.js';
 import { baseInsert, lidInsert } from './insert.js';
-import { orgLidGeometry, orgPanel } from './organizer.js';
+import { orgLidGeometry, orgPanel, orgCavity } from './organizer.js';
 import { transformVerts, hull2D, fitAngle, tiltChoose, rotatedExtent } from '../bedfit.js';
 import { fitsFlat } from '../optimizer.js';
 import { contactCut, supportFins, wedgeVolume, rotAxis, invRigid, overhangRegions, overhangSupports } from './tilt.js';
@@ -253,8 +253,8 @@ function buildLid(D, P, H, L, svg, report) {
     prism(rr(0), zB - 1, zi - fc),
     fc > 0 ? frustum(rr(0), zi - fc, rr(-fc), zi) : null,
   ]) : null;
-  let core = unionAll([outer, band]);
-  if (cavity) core = core.subtract(cavity);
+  const shell = unionAll([outer, band]);
+  let core = cavity ? shell.subtract(cavity) : shell;
 
   // Análisis en orientación de impresión (boca abajo).
   const flip = lidFlip(D, 0);
@@ -268,22 +268,42 @@ function buildLid(D, P, H, L, svg, report) {
   }
   for (const z of grooves) core = core.subtract(vGroove(D, t, z));
 
+  let ribBump = null;
   if (D.ribs) {
     let bump = unionAll([prism(rr(F), zB, zT - 0.5), frustum(rr(F), zT - 0.5, rr(F - 0.5), zT)])
       .intersect(prism(cornerZones(D).subtract(rr(t - 0.3)), zB - 1, zT + 1));
     for (const z of grooves) bump = bump.subtract(vGroove(D, F, z));
     core = core.add(bump);
+    ribBump = bump;
   }
 
+  // Organizador: la tapa se vacía con su propio hueco (franja de las tapas
+  // interiores + celdas) en una sola resta. El núcleo "normal" de arriba solo
+  // sirve para el análisis de capas (ranuras de sombra), que no cambia.
+  if (D.org) {
+    core = shell.subtract(orgCavity(D, zB));
+    for (const z of grooves) core = core.subtract(vGroove(D, t, z));
+    if (D.ribs) core = core.add(ribBump);
+  }
   let lid = unionAll([core, H.lid, L.lidCheeks, L.keepers, ...tongues(D)]);
   lid = lid.subtract(H.lidHoles);
   if (D.org) {
-    // Organizador: celdas, carriles y grapas de las tapas interiores.
-    const og = orgLidGeometry(D);
-    lid = lid.add(og.add);
+    // Grapas y canales del eje de las tapas interiores.
+    const og = orgLidGeometry(D, { mechOnly: true });
+    if (og.add) lid = lid.add(og.add);
     if (og.cut) lid = lid.subtract(og.cut);
   }
-  const rel = lidRelief(D, P, svg);
+  // Patrón/logo de la tapa (solo depende de su contorno y de sus ajustes):
+  // se reutiliza entre reconstrucciones si no cambian.
+  const rk = memoKey('rel', D.Li, D.Wi, D.ri, D.cham, D.t, D.seg, D.Hb, D.Hl, D.pd, D.stack, D.maxBridge, D.pattern, D.relief,
+    D.stack ? [D.db, D.hs, D.fwT, D.frameIn, D.rw, D.stackRibs] : null,
+    ['patternSize', 'patternRib', 'patternMargin', 'stripeAngle', 'patternSeed'].map((k) => P[k]), svg);
+  const rm = memoSolid(rk, () => {
+    const r = lidRelief(D, P, svg);
+    const solid = r.cut || r.add;
+    return solid ? { solid, kind: r.cut ? 'cut' : 'add', warn: r.warn } : { solid: M().cube([0, 0, 0]), kind: 'none', warn: r.warn };
+  });
+  const rel = { cut: rm.kind === 'cut' ? rm.solid : null, add: rm.kind === 'add' ? rm.solid : null, warn: rm.warn };
   if (rel.cut) lid = lid.subtract(rel.cut);
   if (rel.add) lid = lid.add(rel.add);
   return { lid, warn: rel.warn };
@@ -361,6 +381,36 @@ export function meshHash(mesh) {
 }
 
 const cloneMesh = (m) => ({ ...m, vert: m.vert.slice(), tri: m.tri.slice() });
+
+/* ---------------- Caché de sólidos entre reconstrucciones ---------------- */
+// Piezas que solo dependen de unas pocas cotas (inserto, tapas interiores):
+// si no cambian, se reutiliza su malla en vez de repetir los booleanos.
+// Al editar la tapa o el organizador ya no se recalcula el inserto (con un
+// calco detallado, 300–400 ms) y viceversa.
+const solidMemo = new Map();
+function memoSolid(key, buildFn) {
+  const hit = solidMemo.get(key);
+  if (hit) {
+    solidMemo.delete(key); solidMemo.set(key, hit);
+    return { ...hit.extra, solid: M().ofMesh({ numProp: 3, vertProperties: hit.vert, triVerts: hit.tri }) };
+  }
+  const r = buildFn();
+  const m = r.solid.getMesh();
+  const vert = new Float32Array(m.numVert * 3);
+  for (let i = 0, j = 0; i < m.vertProperties.length; i += m.numProp, j += 3) {
+    vert[j] = m.vertProperties[i]; vert[j + 1] = m.vertProperties[i + 1]; vert[j + 2] = m.vertProperties[i + 2];
+  }
+  const { solid, ...extra } = r;
+  const ent = { vert, tri: new Uint32Array(m.triVerts), extra: JSON.parse(JSON.stringify(extra)) };
+  solidMemo.set(key, ent);
+  if (solidMemo.size > 16) solidMemo.delete(solidMemo.keys().next().value);
+  // Se devuelve SIEMPRE el sólido rehecho desde la malla guardada: así un
+  // acierto y un fallo de la caché dan exactamente la misma triangulación
+  // (y la misma huella para la caché de ayudas, y el mismo resultado en un
+  // hilo que en dos).
+  return { ...r, solid: M().ofMesh({ numProp: 3, vertProperties: ent.vert, triVerts: ent.tri }) };
+}
+const memoKey = (tag, ...v) => tag + JSON.stringify(v);
 
 function addAids(D, P, pt, solidNative, normals, G = { hx: D.Lo / 2, hy: D.Wo / 2, wall: D.t, mech: true }) {
   if (D.draft) { pt.aids = []; pt.draft = true; return; }   // vista rápida: sin ayudas
@@ -548,6 +598,7 @@ function meshOf(man) {
 export function build(P, svg, opt = {}) {
   if (!ready) throw new Error('Motor no inicializado');
   const t0 = performance.now();
+  P = ecoParams(P);                       // modo ahorro (sin efecto si está apagado)
   let D = derive(P);
   // ¿Se imprimirá inclinada? (misma huella que usa el optimizador de cama).
   // Entonces bisagras y orejetas quedan con el agujero a ~45° y llevan la
@@ -562,6 +613,7 @@ export function build(P, svg, opt = {}) {
   D.log = [];
   let tS = performance.now();
   const stage = (name) => { const t = performance.now(); log(D, `${name}: ${Math.round(t - tS)} ms`); tS = t; };
+  if (D.eco) log(D, `modo ahorro de material: ${D.ecoChanges.join(', ') || 'ya estaba en mínimos'}`);
   if (D.tilted) log(D, `impresión inclinada prevista: agujeros de bisagra y cierre ${D.tiltAdd >= 0 ? '+' : ''}${D.tiltAdd} mm por lado`);
   log(D, `clase ${D.cls} · interior ${D.Li}×${D.Wi} · base ${D.Db} + tapa ${D.Dl} mm · pared ${D.t} · banda ${D.bo}${D.cham ? ` · octógono ${D.cham}` : ''}${D.stack ? ' · apilable' : ''}${D.rot90 ? ' · girada 90°' : ''}`);
   log(D, `bisagras ${D.hinge.n}×${D.hinge.nk} (nudillo ${D.hinge.kl} mm) en x=${D.hinge.xs.join(', ')} · cierres ${D.latch.n}×${D.latchW} mm en x=${D.latch.xs.join(', ')}`);
@@ -596,14 +648,28 @@ export function build(P, svg, opt = {}) {
     }
 
     if (want('B')) {
-      const { lid, warn } = buildLid(D, P, H, L, svg, report);
-      D.warn.push(...warn);
-      const extra = D.stack ? D.hs : D.relief === 'emboss' && (D.pattern !== 'smooth' || svg) ? D.pd : 0;
-      const lp = part('lid', 'Tapa', lid, {
-        print: lidFlip(D, extra), instances: [T(0, 0, z0)], qty: 1, material: 'PETG / PLA / ASA',
-      }, normals);
+      // Tapa (reutilizada si solo cambian el contenido, los insertos o las
+      // ayudas de impresión: no la tocan).
+      const key = lidKey(P, normals, svg);
+      let lp, lidSolid = null;
+      if (lidCache && lidCache.key === key) {
+        lp = clonePart(lidCache.part);
+        report.push(...lidCache.report);
+        D.warn.push(...lidCache.warn);
+      } else {
+        const rep = [];
+        const { lid, warn } = buildLid(D, P, H, L, svg, rep);
+        report.push(...rep);
+        D.warn.push(...warn);
+        const extra = D.stack ? D.hs : D.relief === 'emboss' && (D.pattern !== 'smooth' || svg) ? D.pd : 0;
+        lp = part('lid', 'Tapa', lid, {
+          print: lidFlip(D, extra), instances: [T(0, 0, z0)], qty: 1, material: 'PETG / PLA / ASA',
+        }, normals);
+        lidSolid = lid;
+        lidCache = { key, part: clonePart(lp), report: rep, warn: [...warn] };
+      }
       stage('tapa');
-      addAids(D, P, lp, () => lid, normals);
+      addAids(D, P, lp, () => lidSolid || buildLid(D, P, H, L, svg, []).lid, normals);
       parts.push(lp);
       stage('ayudas tapa');
 
@@ -613,31 +679,35 @@ export function build(P, svg, opt = {}) {
         print: lay, instances: D.latch.xs.map((x) => T(x, 0, z0)),
         qty: D.latch.n, material: 'PETG (flexible) / PLA',
       }, normals));
+    }
 
-      // Tapas interiores del organizador: se agrupan las idénticas (misma
-      // forma salvo una traslación) en una sola pieza con varias copias.
-      if (D.org && D.org.has) {
-        const groups = new Map();
-        for (const p of D.org.panels) {
-          const rel = (v, o) => Math.round((v - o) * 100);
-          const cellsRel = p.cells.map((i) => { const c = D.org.cells[i]; return [rel(c.x0, p.x0), rel(c.x1, p.x0), rel(c.y0, p.y0), rel(c.y1, p.y0), p.snapCells.includes(i) ? 1 : 0]; });
-          const sig = JSON.stringify([rel(p.x1, p.x0), rel(p.y1, p.y0), p.clips.map((x) => rel(x, p.x0)), rel(p.tab, p.x0), cellsRel, D.cham > 0 ? [p.x0, p.y0] : 0]);
-          if (!groups.has(sig)) groups.set(sig, []);
-          groups.get(sig).push(p);
-        }
-        let k = 0;
-        for (const list of groups.values()) {
-          const ref = list[0];
-          const man = orgPanel(D, ref);
-          k++;
-          parts.push(part('orgPanel', groups.size > 1 ? `Tapa interior ${k}` : 'Tapa interior', man, {
-            key: `orgPanel${k - 1}`,
-            print: T(0, 0, -D.org.zp0),
-            instances: list.map((p) => T(p.x0 - ref.x0, p.y0 - ref.y0, z0)),
-            qty: list.length, material: 'PETG / PLA',
-            axis: { y: ref.axis.y, z: ref.axis.z + z0 },
-          }, normals));
-        }
+    // Tapas interiores del organizador (grupo A: la tapa ya es la pieza más
+    // cara del grupo B, así los dos hilos de la vista rápida van parejos).
+    // Las idénticas (misma forma salvo una traslación) son una sola pieza
+    // con varias copias.
+    if (want('A') && D.org && D.org.has) {
+      const groups = new Map();
+      for (const p of D.org.panels) {
+        const rel = (v, o) => Math.round((v - o) * 100);
+        const cellsRel = p.cells.map((i) => { const c = D.org.cells[i]; return [rel(c.x0, p.x0), rel(c.x1, p.x0), rel(c.y0, p.y0), rel(c.y1, p.y0), p.snapCells.includes(i) ? 1 : 0]; });
+        const sig = JSON.stringify([rel(p.x1, p.x0), rel(p.y1, p.y0), p.clips.map((x) => rel(x, p.x0)), rel(p.tab, p.x0), cellsRel, D.cham > 0 ? [p.x0, p.y0] : 0]);
+        if (!groups.has(sig)) groups.set(sig, []);
+        groups.get(sig).push(p);
+      }
+      let k = 0;
+      for (const list of groups.values()) {
+        const ref = list[0];
+        const O = D.org;
+        const man = memoSolid(memoKey('org', ref, O.cells.filter((_, i) => ref.cells.includes(i)), O.a, O.zp0, O.zp1, O.rc, O.sealClr, O.snap,
+          D.Li, D.Wi, D.cham, D.ri, D.seg, D.lw), () => ({ solid: orgPanel(D, ref) })).solid;
+        k++;
+        parts.push(part('orgPanel', groups.size > 1 ? `Tapa interior ${k}` : 'Tapa interior', man, {
+          key: `orgPanel${k - 1}`,
+          print: T(0, 0, -D.org.zp0),
+          instances: list.map((p) => T(p.x0 - ref.x0, p.y0 - ref.y0, z0)),
+          qty: list.length, material: 'PETG / PLA',
+          axis: { y: ref.axis.y, z: ref.axis.z + z0 },
+        }, normals));
       }
     }
 
@@ -677,7 +747,9 @@ export function build(P, svg, opt = {}) {
       const hasObjs = (P.contentObjects && P.contentObjects.length) || (P.contentPolys && P.contentPolys.length);
       const polys = P.insertMode === 'pockets' && hasObjs ? (P.contentPolys || []) : null;
       if (P.insertMode === 'pockets' && !hasObjs) D.warn.push('Inserto con huecos: añade los objetos (SVG) en la pestaña Contenido (se genera en blanco).');
-      const ins = baseInsert(D, P, polys);
+      const ins = memoSolid(memoKey('ins', D.Li, D.Wi, D.ri, D.cham, D.seg, D.fc, D.lw, D.lh, D.Db, D.floorTop, D.draft, D.eco,
+        ['contentObjects', 'fingerCount', 'fingerD', 'fingerPos', 'insertDeck', 'insertH', 'insertMode', 'insertTol', 'pocketTol', 'objClearance'].map((k) => P[k]), polys),
+      () => baseInsert(D, P, polys));
       const ip = part('insert', polys ? 'Inserto con alojamientos' : 'Inserto', ins.solid, {
         print: ins.print, instances: [T(0, 0, z0)], qty: 1, material: 'PLA (relleno 0 %, 2 paredes)',
       }, normals);
@@ -796,9 +868,22 @@ function baseKey(P, normals) {
   for (const k of Object.keys(P).sort()) if (!LID_ONLY.has(k)) o[k] = P[k];
   return JSON.stringify(o) + normals;
 }
+/* ---------------- Caché de la tapa ---------------- */
+// Simétrica a la de la base: estos parámetros no cambian la malla de la tapa
+// (antes de las ayudas, que tienen su propia caché por huella de malla). Al
+// ajustar el contenido o el inserto el hilo B ya no repite la tapa entera.
+let lidCache = null;
+const NOT_LID = new Set(['insertMode', 'insertLid', 'insertH', 'insertTol', 'pocketTol', 'insertDeck', 'fingerCount', 'fingerD',
+  'fingerPos', 'contentPolys', 'contentObjects', 'objClearance', 'objRotate', 'objSpacing', 'objRotateAllow', 'contentFit',
+  'aidsInPart', 'finSpacing', 'finReach', 'toothPitch', 'finGap', 'overhangSupports', 'overhangAngle', 'supportPitch']);
+function lidKey(P, normals, svg) {
+  const o = {};
+  for (const k of Object.keys(P).sort()) if (!NOT_LID.has(k)) o[k] = P[k];
+  return JSON.stringify(o) + normals + (svg || '');
+}
 function clonePart(p) {
   return { ...p, mesh: { ...p.mesh, vert: p.mesh.vert.slice(), tri: p.mesh.tri.slice() } };
 }
 
 /** Para pruebas: acceso a la geometría cruda sin liberar memoria. */
-export const _internal = { derive, hinges, latches, buildBase, buildLid, knuckleSpans, M, cleanup, criticalLayers, LID_ONLY };
+export const _internal = { derive, hinges, latches, buildBase, buildLid, knuckleSpans, M, cleanup, criticalLayers, LID_ONLY, NOT_LID };

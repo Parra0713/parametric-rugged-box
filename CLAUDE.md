@@ -13,6 +13,8 @@ npm test             # geometría + cama + montaje real (~2 min)
 npm run test:org     # organizador en la tapa: cierra, abre 0–95°, sin soportes
 npm run test:calib   # test de holguras: plan adaptativo, probetas imprimibles, resultados y perfiles
 npm run test:perf    # memoria WASM, reparto A/B, vista rápida y cachés (~1 min)
+npm run test:budget  # presupuestos de tiempo por función + línea base (~2 min)
+node tests/budget.test.mjs --update      # guardar la línea base (tests/perf-baseline.json)
 npm run test:assembly   # mecánica completa, pasadores montables, puentes ≤ 10 mm, apilado (~45 s)
 npm run test:quick   # barrido rápido de tamaños (7 casos, ~15 s)
 npm run test:sweep   # barrido completo de 20 a 380 mm (~25 casos, ~30 s–2 min)
@@ -84,9 +86,27 @@ registro interno del motor) y `logs/sweep-latest.json` (resumen). **Ejecuta
   B = tapa, cierre, pasadores, tapones, inserto de la tapa. Una pieza nueva
   va en uno de los dos (si no, la vista rápida no la muestra) y la prueba de
   reparto de `perf.test.mjs` comprueba que A + B = completo.
-- Cachés en engine.js: `baseCache` (LID_ONLY), `aidsMemo` (huella de la malla
-  + parámetros de ayudas, `AID_KEYS`) y `critMemo` (firma del sólido). Si
-  `addAids` empieza a leer un parámetro o una cota nueva, añádela a la clave.
+- Cachés en engine.js: `baseCache` (LID_ONLY), `lidCache` (todo salvo
+  NOT_LID: contenido, insertos, ayudas), `solidMemo` (inserto, tapas
+  interiores, relieve de la tapa; SIEMPRE devuelve el sólido rehecho desde la
+  malla guardada, para que acierto y fallo den la misma triangulación),
+  `aidsMemo` (huella de la malla + `AID_KEYS`) y `critMemo`. Si una pieza
+  empieza a leer un parámetro nuevo, revisa LID_ONLY / NOT_LID / su clave:
+  `perf.test.mjs` prueba cada parámetro de esas listas.
+- El modelo completo ('preview') se reparte en dos hilos (R: grupo A, R2:
+  grupo B) si `navigator.hardwareConcurrency ≥ 4`; la exportación ('final')
+  sigue en un hilo.
+- **Rendimiento de cada función nueva**: añade su entrada en `FEATURES` de
+  `tests/budget.test.mjs` (con presupuesto de vista rápida, cambio de tapa,
+  cambio de contenido y modelo completo, en ms de la máquina de referencia),
+  ejecuta `node tests/budget.test.mjs --update` y sube
+  `tests/perf-baseline.json` en el mismo commit. La prueba falla si se pasa
+  del presupuesto o empeora > 50 % frente a la línea base.
+- **Modo ahorro** (`eco`, `ecoParams` en params.js): solo transforma
+  parámetros que REDUCEN material (pared 4 líneas ≥ 1.6, fondo/techo 5–6
+  capas, banda ≤ 2.4 pero con ≥ 2 líneas a cada lado de la ranura, sin
+  nervios de esquina, relieve en vez de grabado, inserto y organizador
+  finos). Nunca toca mecánica ni holguras; con `eco: false` es la identidad.
 - **Holguras = perfil de la impresora** (`CAL_KEYS` en calib.js: filClr,
   clearance (Ø3), clearanceL (Ø5, se interpola por diámetro), tiltAdd,
   holeComp, sealClr, axialGap, stackClr, latchPre, insertTol, pocketTol).
@@ -156,9 +176,10 @@ registro interno del motor) y `logs/sweep-latest.json` (resumen). **Ejecuta
    (`thicknessChecks`: cortes XY, YZ por la mecánica y XZ por la banda).
 10. Piezas sueltas: agujero del cierre con holgura + `holeComp` y chaflán en
    las dos caras; tapón tipo pinza (`printFitChecks`).
-11. Rendimiento (`perf.test.mjs`): la memoria WASM no crece al reconstruir,
-   A + B = build completo, la vista rápida da piezas válidas y las cachés
-   (base, ayudas) devuelven lo mismo que recalcular.
+11. Rendimiento (`perf.test.mjs` + `budget.test.mjs`): la memoria WASM no
+   crece al reconstruir, A + B = build completo, la vista rápida da piezas
+   válidas, las cachés (base, tapa, ayudas) devuelven lo mismo que
+   recalcular y cada función cumple su presupuesto de tiempo.
 12. Test de holguras (`calib.test.mjs`): universal = siempre 8 probetas;
    "esta caja" se adapta y su valor central es la cota real; probetas
    válidas, en la orientación de su unión, sin voladizos > 50°, < 30 g; los
@@ -169,6 +190,8 @@ registro interno del motor) y `logs/sweep-latest.json` (resumen). **Ejecuta
    pedido, cerrada sin solapes con tapa/base/inserto, cada tapa interior
    abre 0–95° sin chocar, clic del eje y del faldón, sin voladizos > 50°,
    cabe en la cama, sin piezas sueltas.
+14. Modo ahorro (casos "ahorro" del barrido): mismos criterios 1–13 con
+   pared, fondo y techo mínimos, y menos material que sin ahorro.
 
 ## Flujo con el PC del usuario
 

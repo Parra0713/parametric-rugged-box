@@ -1,0 +1,98 @@
+{
+  "caja por defecto": {
+    "draft": 76,
+    "lid": 76,
+    "cont": 15,
+    "preview": 329
+  },
+  "XS 25×25": {
+    "draft": 40,
+    "lid": 38,
+    "cont": 10,
+    "preview": 162
+  },
+  "grande inclinada": {
+    "draft": 75,
+    "lid": 75,
+    "cont": 15,
+    "preview": 2498
+  },
+  "apilable": {
+    "draft": 74,
+    "lid": 64,
+    "cont": 14,
+    "preview": 328
+  },
+  "octógono": {
+    "draft": 112,
+    "lid": 112,
+    "cont": 14,
+    "preview": 441
+  },
+  "patrón hex + relieve": {
+    "draft": 75,
+    "lid": 74,
+    "cont": 13,
+    "preview": 319
+  },
+  "laberinto + tapa mínima": {
+    "draft": 73,
+    "lid": 68,
+    "cont": 14,
+    "preview": 296
+  },
+  "pasadores impresos": {
+    "draft": 78,
+    "lid": 77,
+    "cont": 15,
+    "preview": 306
+  },
+  "Gridfinity": {
+    "draft": 117,
+    "lid": 95,
+    "cont": 14,
+    "preview": 539
+  },
+  "inserto en blanco + tapa": {
+    "draft": 87,
+    "lid": 91,
+    "cont": 26,
+    "preview": 347
+  },
+  "inserto con alojamiento": {
+    "draft": 123,
+    "lid": 103,
+    "cont": 61,
+    "preview": 723
+  },
+  "organizador tapa única": {
+    "draft": 97,
+    "lid": 96,
+    "cont": 15,
+    "preview": 415
+  },
+  "organizador por celda": {
+    "draft": 123,
+    "lid": 127,
+    "cont": 15,
+    "preview": 492
+  },
+  "herramienta completa": {
+    "draft": 150,
+    "lid": 150,
+    "cont": 75,
+    "preview": 626
+  },
+  "ahorro de material": {
+    "draft": 65,
+    "lid": 74,
+    "cont": 14,
+    "preview": 182
+  },
+  "ahorro + herramienta": {
+    "draft": 121,
+    "lid": 122,
+    "cont": 68,
+    "preview": 424
+  }
+}

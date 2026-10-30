@@ -129,7 +129,10 @@ export function baseInsert(D, P, contentPolys) {
       regions.push(reg);
     }
     // Nunca romper la pared exterior del inserto.
-    const region = CS().union(regions).intersect(rr(-tol - wallT - 0.8));
+    let region = CS().union(regions).intersect(rr(-tol - wallT - 0.8));
+    // Vista rápida: contorno simplificado a 0.15 mm (un calco detallado tiene
+    // cientos de vértices y cada booleano 3D con él cuesta decenas de ms).
+    if (D.draft) region = region.simplify(0.15);
     pocket = region;
     info.pockets = objsIn.length;
     info.notches = notchesAll.map(([x, y]) => [Math.round(x * 10) / 10, Math.round(y * 10) / 10]);
@@ -141,7 +144,7 @@ export function baseInsert(D, P, contentPolys) {
   // Nervios bajo la cubierta (retícula ~40 mm): rigidez y apoyo en el suelo.
   const inner = rr(-tol - wallT);
   const b = inner.bounds();
-  const pitch = 40, t = wallT;
+  const pitch = P._eco ? 60 : 40, t = wallT;                 // modo ahorro: nervios más espaciados
   const strips = [];
   const nX = Math.floor((b.max[0] - b.min[0]) / pitch), nY = Math.floor((b.max[1] - b.min[1]) / pitch);
   for (let i = 1; i <= nX; i++) {
@@ -166,7 +169,8 @@ export function baseInsert(D, P, contentPolys) {
     // Chaflán de entrada de 0.6 mm (guía al meter el objeto).
     // (Escalonado: el alojamiento no es convexo; un frustum —envolvente
     // convexa— se comía la cubierta entre huecos en los primeros 0.6 mm.)
-    solid = solid.subtract(steppedChamfer(pocket, H - 0.6, H + 0.01, 0.6, D.lh));
+    // Es un detalle: la vista rápida lo omite.
+    if (!D.draft) solid = solid.subtract(steppedChamfer(pocket, H - 0.6, H + 0.01, 0.6, D.lh));
   }
   solid = solid.translate([0, 0, D.floorTop]);
   // Impresión: cubierta sobre la cama (voltear en Z e Y).

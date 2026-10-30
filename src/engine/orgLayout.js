@@ -56,9 +56,10 @@ export function orgBase(P, lw) {
   const cols = Math.max(1, Math.round(P.orgCols || 1));
   const rows = Math.max(1, Math.round(P.orgRows || 1));
   const cover = ['single', 'row', 'cell', 'none'].includes(P.orgCover) ? P.orgCover : 'single';
-  const wd = r2(Math.max(1.2, 3 * lw));                     // divisores ≥ 3 líneas
+  // Divisores ≥ 3 líneas y tapa interior de 4 (modo ahorro: 2 y 3 líneas).
+  const wd = r2(P._eco ? Math.max(0.9, 2 * lw) : Math.max(1.2, 3 * lw));
   const has = cover !== 'none';
-  const ct = has ? r2(Math.max(1.6, 4 * lw)) : 0;          // tapa interior
+  const ct = has ? r2(P._eco ? Math.max(1.2, 3 * lw) : Math.max(1.6, 4 * lw)) : 0;
   const a = ORG.rho + clr3(P);                              // radio del agujero de la grapa
   // Holgura hasta el borde: la grapa baja hasta la punta de la gota de su
   // agujero + 1 mm de pared (antes 0.5 mm: techo frágil al imprimir).
@@ -161,7 +162,8 @@ export function orgLayout(D, P) {
     // (precarga calibrada del cierre, probeta E, acotada a 0.15–0.35 mm).
     snap: P._orgNoSnap ? (D.sealClr ?? 0.25) : r2((D.sealClr ?? 0.25) + Math.min(0.35, Math.max(0.15, (D.pre ?? 0.15) + 0.05))), sealClr: D.sealClr ?? 0.25,
     rc: r2(Math.min(2.5, cellL / 4, cellW / 4)),
-    scoop: P.orgScoop !== false ? r2(Math.min(6, depth / 3, cellL / 4, cellW / 4)) : 0,
+    // Fondo inclinado (modo ahorro: 3 mm en vez de 6; es macizo y pesa).
+    scoop: P.orgScoop !== false ? r2(Math.min(P._eco ? 3 : 6, depth / 3, cellL / 4, cellW / 4)) : 0,
   };
 }
 

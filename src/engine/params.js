@@ -31,6 +31,9 @@ export const DEFAULTS = {
   innerR: 3,            // radio de las esquinas interiores (inner_corner_radius)
   cornerCut: 0,         // recorte de esquinas a 45° (octógono alargado), 0 = rectángulo
 
+  // --- Ahorro de material ---
+  eco: false,           // modo ahorro: mínimos seguros, misma mecánica y cierre
+
   // --- Pared y fondos ---
   wall: 2.7,            // espesor de pared (6 líneas de 0.45 mm)
   floor: 2.0,           // espesor del fondo de la base
@@ -133,6 +136,49 @@ export const DEFAULTS = {
   quality: 'preview',
 };
 
+/**
+ * Modo ahorro de material: transforma los parámetros (solo REDUCE, nunca
+ * añade material) manteniendo toda la mecánica, el cierre y la impresión sin
+ * soportes. Con `eco` apagado devuelve P tal cual (cero cambios).
+ *
+ *  - Pared: 4 líneas, mínimo 1.6 mm (el mismo suelo que usa el optimizador
+ *    de cama por rigidez y estanqueidad). Antes 6 líneas.
+ *  - Fondo y techo: 5 capas, mínimo 1.0 mm (6 capas / 1.2 mm en cajas de más
+ *    de 190 mm). La regla de 2 líneas/capas sigue cumpliéndose.
+ *  - Banda: vuelo máximo 2.4 mm (la junta sigue cabiendo; ver optimizador).
+ *  - Sin nervios de esquina (parachoques), chaflán interior 1.2 mm.
+ *  - Patrón grabado → en relieve: el grabado obliga a un techo de
+ *    profundidad + 1.2 mm en toda la tapa; en relieve basta el techo mínimo
+ *    y solo se añaden los nervios del dibujo.
+ *  - Inserto: cubierta de 1.0 mm (5 capas) y nervios cada 60 mm.
+ *  - Organizador: divisores de 2 líneas y tapa interior de 3 líneas.
+ * La mecánica (bisagras, cierres, pasadores, junta, holguras calibradas) no
+ * se toca: sus cotas dependen de la clase de tamaño, no de estos ajustes.
+ */
+export function ecoParams(P) {
+  if (!P || !P.eco || P._eco) return P;
+  const lw = P.lineWidth || 0.45, lh = P.layerH || 0.2;
+  const Q = { ...P, _eco: true };
+  const ch = [];
+  const lower = (k, v, label) => {
+    v = Math.round(v * 100) / 100;
+    if (Q[k] > v + 1e-9) { ch.push(`${label} ${Q[k]} → ${v} mm`); Q[k] = v; }
+  };
+  const big = Math.max(P.innerL, P.innerW) > 190;
+  lower('wall', Math.max(4 * lw, 1.6), 'pared');
+  lower('floor', Math.max((big ? 6 : 5) * lh, big ? 1.2 : 1.0), 'fondo');
+  lower('top', Math.max((big ? 6 : 5) * lh, big ? 1.2 : 1.0), 'techo');
+  if (Q.floorChamfer > 1.2) lower('floorChamfer', 1.2, 'chaflán interior');
+  if (Q.cornerRibs) { Q.cornerRibs = false; ch.push('sin nervios de esquina'); }
+  if (Q.relief === 'engrave' && Q.pattern !== 'smooth' && !Q.stackable) {
+    Q.relief = 'emboss';
+    ch.push('patrón en relieve en vez de grabado (techo fino)');
+  }
+  if (Q.insertMode && Q.insertMode !== 'off') lower('insertDeck', Math.max(5 * lh, 1.0), 'cubierta del inserto');
+  Q._ecoChanges = ch;
+  return Q;
+}
+
 /** Parámetros antiguos → nuevos (para enlaces y localStorage previos). */
 export function migrate(saved) {
   const s = { ...saved };
@@ -194,6 +240,8 @@ export const SCHEMA = [
     { k: 'cornerRibs', label: 'Nervios de esquina', type: 'toggle' },
   ]},
   { tab: 'caja', group: 'Paredes', items: [
+    { k: 'eco', label: 'Modo ahorro de material', type: 'toggle',
+      hint: 'Mínimo filamento con la misma mecánica y cierre: paredes y fondos mínimos seguros, banda estrecha, relieve en vez de grabado…' },
     { k: 'wall', label: 'Pared', type: 'range', min: 1.2, max: 5, step: 0.05, unit: 'mm' },
     { k: 'floor', label: 'Fondo', type: 'range', min: 1.2, max: 5, step: 0.1, unit: 'mm', adv: true },
     { k: 'top', label: 'Techo de la tapa', type: 'range', min: 1.2, max: 5, step: 0.1, unit: 'mm', adv: true },
@@ -373,8 +421,11 @@ const r2 = (v) => Math.round(v * 100) / 100;
  * @returns {object} D cotas derivadas + avisos
  */
 export function derive(P) {
+  P = ecoParams(P);
   const warn = [];
   const D = { warn, snapped: [] };
+  D.eco = !!P._eco;
+  D.ecoChanges = [...(P._ecoChanges || [])];
 
   /* ---- Ajuste a la impresora (frente 2 contra la línea de contracción) ---- */
   // Paredes = número entero de líneas de extrusión: el slicer las imprime
@@ -467,7 +518,16 @@ export function derive(P) {
   D.latchBoreD = r2(latchHole0 + D.holeComp);
 
   /* ---- Banda ---- */
-  D.bo = r2(P.bandProud > 0 ? P.bandProud : Mx.bo);
+  D.bo = r2(P.bandProud > 0 ? P.bandProud : D.eco ? Math.min(Mx.bo, 2.4) : Mx.bo);
+  if (D.eco) {
+    // Con la pared fina, la cara de unión debe seguir dejando ≥ 2 líneas a
+    // cada lado de la ranura de la junta/lengüeta: si no, crece la banda
+    // (más barato que engrosar toda la pared).
+    const bo0 = P.bandProud > 0 ? P.bandProud : Mx.bo;
+    const Fmin = r2((P.sealMode === 'tpu' ? 2.4 : 2.0) + 2 * Math.max(0.9, 2 * lw) + 0.05);
+    if (D.t + D.bo < Fmin) D.bo = r2(Fmin - D.t);
+    if (D.bo !== bo0) D.ecoChanges.push(`banda ${bo0} → ${D.bo} mm${D.bo > bo0 ? ' (ranura con 2 líneas por lado)' : ''}`);
+  }
   D.F = r2(D.t + D.bo);              // ancho de la cara de unión
 
   /* ---- Sellado ---- */

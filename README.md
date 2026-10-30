@@ -274,12 +274,46 @@ npm run build    # regenera dist/rugged-box.html
 
 | Pieza | Material | Notas |
 |---|---|---|
-| Base / tapa | PETG, ASA o PLA | 0.2 mm, 4–6 perímetros, 15–25 % gyroid. La tapa, con la cara decorada sobre la cama. |
+| Base / tapa | PETG, ASA o PLA | 0.2 mm, 4–6 perímetros, 15–25 % gyroid (modo ahorro: ver su ficha). La tapa, con la cara decorada sobre la cama. |
 | Cierres | PETG (mejor que PLA: más elástico) | Acostados, como se exportan. 5+ perímetros. |
 | Pasadores | PETG / PLA | Acostados sobre la cara plana, 100 % de relleno. |
 | Junta | TPU 95A | Lenta, 100 % de relleno. |
 
 ---
+
+## Modo ahorro de material (v6.9)
+
+**Caja → Paredes → Modo ahorro de material**: la misma caja con la mínima
+cantidad de filamento. No es un diseño distinto: el motor baja a los mínimos
+seguros todo lo que es "masa" y deja intacto todo lo que es función.
+
+| Se reduce | Valor en ahorro |
+|---|---|
+| Pared | 4 líneas (≥ 1.6 mm), todo perímetro: sin relleno dentro |
+| Fondo y techo | 5 capas (≥ 1.0 mm; 6 capas / 1.2 mm en cajas > 190 mm) |
+| Banda | vuelo ≤ 2.4 mm, pero siempre ≥ 2 líneas a cada lado de la ranura |
+| Nervios de esquina, chaflán interior | fuera / 1.2 mm |
+| Patrón de la tapa | en relieve en vez de grabado (el grabado obliga a un techo grueso) |
+| Inserto, organizador | cubierta de 5 capas, nervios cada 60 mm, divisores de 2 líneas |
+
+**No cambia**: bisagras, cierres, pasadores, junta, lengüetas, holguras
+calibradas, apilado ni la impresión sin soportes; el barrido comprueba los
+mismos criterios que sin ahorro. Ahorro típico: **−30 a −40 %** (caja M
+165 → 99 g; caja de herramienta con organizador 573 → 389 g). La ficha
+muestra el ahorro y los ajustes del laminador que lo completan (perímetros =
+líneas de la pared, 8–10 % de relleno, capas sólidas = fondo/techo); también
+van en el LEEME.
+
+## Rendimiento (v6.9)
+
+* La **tapa también se guarda en caché**: ajustar el contenido, el inserto
+  o las ayudas ya no la recalcula (hilo B de ~150 ms a ~15 ms).
+* Con 4 núcleos o más, el **modelo completo se reparte en dos hilos**
+  (~40 % antes al soltar un control).
+* `npm run test:budget` mide cada función (vista rápida, cambio de tapa,
+  cambio de contenido, modelo completo) normalizado a la velocidad de la
+  máquina y falla si se pasa de su presupuesto o empeora frente a la línea
+  base guardada. Cada función nueva añade su caso.
 
 ## Organizador en la tapa (v6.8)
 

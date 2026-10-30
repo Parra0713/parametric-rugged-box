@@ -5,7 +5,8 @@
  *           construye la mitad de las piezas (A: base, junta, inserto;
  *           B: tapa, cierres, pasadores) y se unen con `mergeResults`.
  *   R     → modelo completo ('preview') cuando el usuario se detiene, y la
- *           exportación ('final'). Va en su propio hilo para que el cálculo
+ *           exportación ('final'). Con ≥ 4 núcleos el modelo completo se
+ *           reparte entre R (grupo A) y R2 (grupo B). Va en su propio hilo para que el cálculo
  *           largo (ayudas de impresión de cajas grandes) nunca retrase la
  *           vista rápida.
  *
@@ -88,6 +89,11 @@ export class EngineClient {
     this.A = new Lane('A');
     this.B = new Lane('B');
     this.R = new Lane('R');
+    // Con 4 núcleos o más, el modelo completo también se reparte en dos
+    // hilos (R: grupo A, R2: grupo B): llega ~40 % antes al soltar el control.
+    // Con menos núcleos competiría con la vista rápida: un solo hilo.
+    const cores = (typeof navigator !== 'undefined' && navigator.hardwareConcurrency) || 2;
+    this.R2 = cores >= 4 ? new Lane('R2') : null;
   }
 
   /** Vista rápida repartida en dos hilos. */
@@ -104,8 +110,17 @@ export class EngineClient {
   }
 
   /** Modelo completo para la vista (calidad 'preview'). */
-  refine(P, svg) {
-    return this.R.run('normal', { P: { ...P, quality: 'preview' }, svg, normals: true });
+  async refine(P, svg) {
+    const q = { ...P, quality: 'preview' };
+    if (!this.R2) return this.R.run('normal', { P: q, svg, normals: true });
+    const [a, b] = await Promise.all([
+      this.R.run('normal', { P: q, svg, normals: true, only: 'A' }),
+      this.R2.run('normal', { P: q, svg, normals: true, only: 'B' }),
+    ]);
+    if (a.superseded || b.superseded) return { superseded: true };
+    if (!a.ok) return a;
+    if (!b.ok) return b;
+    return { ok: true, r: mergeResults(a.r, b.r) };
   }
 
   /** Probetas del test de holguras (cola de exportación: no las reemplaza la vista previa). */

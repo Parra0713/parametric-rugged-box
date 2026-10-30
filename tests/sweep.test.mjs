@@ -106,6 +106,13 @@ cases.push({ name: 'perfil justo L inclinada', p: { innerL: 230, innerW: 150, ba
 // Organizador en la tapa: toda la mecánica de la caja debe seguir intacta.
 cases.push({ name: 'organizador herramienta 6×3 una tapa', p: { innerL: 205, innerW: 100, baseDepth: 30, lidOrg: true, orgCols: 6, orgRows: 3, orgMinL: 33, orgMinW: 32, orgDepth: 26 } });
 cases.push({ name: 'organizador S 3×2 por celda', p: { innerL: 60, innerW: 40, baseDepth: 21, lidDepth: 12, lidOrg: true, orgCols: 3, orgRows: 2, orgCover: 'cell' } });
+// Modo ahorro de material: misma mecánica, cierre e impresión sin soportes.
+cases.push({ name: 'ahorro M estándar', p: { eco: true } });
+cases.push({ name: 'ahorro S filamento', p: { innerL: 60, innerW: 40, baseDepth: 21, lidDepth: 9, eco: true } });
+cases.push({ name: 'ahorro XS 25×25', p: { innerL: 25, innerW: 25, baseDepth: 12, lidDepth: 5, eco: true } });
+cases.push({ name: 'ahorro L inclinada', p: { innerL: 240, innerW: 170, baseDepth: 40, lidDepth: 15, eco: true } });
+cases.push({ name: 'ahorro apilable + laberinto + Gridfinity', p: { stackable: true, sealMode: 'labyrinth', gridfinity: 'baseplate', innerL: 168.5, innerW: 84.5, eco: true } });
+cases.push({ name: 'ahorro organizador herramienta + inserto', p: { innerL: 200, innerW: 100, baseDepth: 30, bandProud: 2.4, lidOrg: true, orgCols: 6, orgRows: 3, orgMinL: 33, orgMinW: 32, orgDepth: 26, insertMode: 'blank', eco: true } });
 cases.push({ name: 'organizador apilable octógono por fila', p: { innerL: 160, innerW: 90, cornerCut: 15, stackable: true, lidOrg: true, orgCols: 5, orgRows: 3, orgCover: 'row' } });
 if (args.quick) cases = cases.filter((c) => /^(20×20|60×40|120×80|250×170|380×260) estándar|apilable|alojamiento|varios|impresos \(|^XS 20×20×5/.test(c.name)).slice(0, 12);
 if (args.filter) cases = cases.filter((c) => c.name.includes(args.filter));

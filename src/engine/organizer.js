@@ -26,8 +26,42 @@ function cellCS(D, O, c, inset = 0) {
 const xCyl = (x0, x1, y, z, r, seg) => M().cylinder(x1 - x0, r, r, seg).rotate([0, 90, 0]).translate([x0, y, z]);
 
 /** Sólido que se añade a la tapa y huecos que se le quitan. */
-export function orgLidGeometry(D) {
+/**
+ * Hueco de la tapa con organizador: la franja de las tapas interiores (del
+ * borde a zp1) + cada celda con su fondo inclinado. Sustituye a la cavidad
+ * normal: así la tapa sale de UNA resta, en vez de vaciarla entera, rellenar
+ * con un bloque y volver a vaciar las celdas (3× más lento).
+ */
+export function orgCavity(D, zB) {
   const O = D.org;
+  // Celdas iguales (lo normal) se construyen UNA vez y se copian: las copias
+  // no se tocan entre sí, así que se juntan con compose (sin booleanos).
+  // En la vista rápida se omite el fondo inclinado (detalle, no mecánica).
+  const s = D.draft ? 0 : O.scoop;
+  const shapes = new Map();
+  const solids = [];
+  for (const c of O.cells) {
+    const w = c.x1 - c.x0, h = c.y1 - c.y0;
+    const clipped = c.lim || D.cham > 0;
+    const key = clipped ? null : `${w.toFixed(3)}x${h.toFixed(3)}`;
+    let solid = key && shapes.get(key);
+    if (!solid) {
+      const cc = clipped ? c : { ...c, x0: -w / 2, x1: w / 2, y0: -h / 2, y1: h / 2 };
+      const Dl = clipped ? D : { ...D, cham: 0, Li: 1e4, Wi: 1e4 };
+      const cs = cellCS(Dl, O, cc);
+      const pr = prism(cs, O.zp1 - 0.5, O.zi - s + 0.01);
+      solid = s > 0.3 ? pr.add(M().hull([prism(cs, O.zi - s, O.zi - s + 0.01), prism(cellCS(Dl, O, cc, s), O.zi - 0.01, O.zi)])) : pr;
+      if (key) shapes.set(key, solid);
+      else { solids.push(solid); continue; }
+    }
+    solids.push(solid.translate([(c.x0 + c.x1) / 2, (c.y0 + c.y1) / 2, 0]));
+  }
+  return prism(rrOffset(D, 0), zB - 1, O.zp1).add(M().compose(solids));
+}
+
+export function orgLidGeometry(D, opt = {}) {
+  const O = D.org;
+  if (opt.mechOnly) return orgMech(D);
   // Bloque: todo el interior de la tapa entre zp1 y el techo, menos las celdas.
   const block0 = prism(rrOffset(D, 0.01), O.zp1, O.zi + 0.01);
   const cuts = [];
@@ -43,47 +77,59 @@ export function orgLidGeometry(D) {
     }
   }
   const block = block0.subtract(unionAll(cuts));
-  const adds = [block];
+  const m = orgMech(D);
+  return { add: m.add ? M().union([block, m.add]) : block, cut: m.cut };
+}
+
+/** Grapas (se añaden) y canales del eje + rebajes de la uña (se quitan). */
+function orgMech(D) {
+  const O = D.org;
+  const adds = [];
   const lidCuts = [];
-  if (O.has) {
-    for (const p of O.panels) {
-      // Canal del eje en el carril (el eje sobresale por encima de zp1), solo
-      // a lo largo del eje de cada tapa interior.
-      const x0 = Math.max(-D.Li / 2 + 0.01, (p.ax0 ?? p.x0) - 0.4), x1 = Math.min(D.Li / 2 - 0.01, (p.ax1 ?? p.x1) + 0.4);
-      lidCuts.push(xCyl(x0, x1, p.axis.y, p.axis.z, O.a, D.seg));
-    }
-    // Grapas: en cada muesca de cada tapa interior.
-    const s = (ORG.open * 2 * ORG.rho) / 2;                  // media boca
-    for (const p of O.panels) {
-      const ax = p.axis;
-      for (const xc of p.clips) {
-        const x0 = xc - ORG.clipL / 2, x1 = xc + ORG.clipL / 2;
-        const zb = ax.z - O.a * Math.SQRT2 - 1.0;            // 1 mm bajo la punta de la gota
-        // Perfil YZ de la grapa (u = Y, v = Z).
-        const body = rectCS(ax.y - O.a - ORG.back, ax.y + O.a + ORG.front, zb, O.zp1 + 0.01);
-        const hole = teardrop(ax.y, ax.z, O.a, false, D.seg);   // punta hacia −Z: arriba al imprimir boca abajo
-        // Boca hacia +Y a la altura del eje: cara inferior horizontal (el
-        // brazo de abajo queda grueso; con una rampa a 45° paralela al flanco
-        // de la gota quedaba una lámina de 0.4 mm) y chaflán de entrada de
-        // 0.6 mm en la arista exterior.
-        const yF = ax.y + O.a + ORG.front;
-        const slot = poly([[ax.y, ax.z + s], [yF + 1, ax.z + s], [yF + 1, ax.z - s - 1.6], [yF - 0.6, ax.z - s], [ax.y, ax.z - s]]);
-        // La esquina de abajo‑delante se redondea con centro en el eje: por
-        // ahí pasa el borde de la muesca de la tapa interior al abrirse.
-        const keep = CS().union([
-          CS().circle(O.a * Math.SQRT2 + 1.05, D.seg).translate([ax.y, ax.z]),
-          rectCS(ax.y - 20, ax.y, ax.z - 20, ax.z + 20),
-          rectCS(ax.y - 20, ax.y + 20, ax.z, ax.z + 20),
-        ]);
-        const prof = body.intersect(keep).subtract(hole).subtract(slot);
-        adds.push(yzExtrude(prof, x0, x1));
-      }
-      // Rebaje para la pestaña de la uña en el borde libre.
-      const yT = p.y1;
-      lidCuts.push(box(p.tab - ORG.tabW / 2 - 0.5, p.tab + ORG.tabW / 2 + 0.5, yT - 0.01, yT + ORG.tabL + 0.5, D.Hb + 0.01, O.zp1 + 0.6));
-    }
+  if (!O.has) return { add: null, cut: null };
+  // Canal del eje en el carril (el eje sobresale por encima de zp1): uno por
+  // eje, del primer al último tramo de eje que lo usa.
+  const byAxis = new Map();
+  for (const p of O.panels) {
+    const k = p.axis.y;
+    const e = byAxis.get(k) || { ax: p.axis, x0: Infinity, x1: -Infinity, panels: [] };
+    e.x0 = Math.min(e.x0, Math.max(-D.Li / 2 + 0.01, (p.ax0 ?? p.x0) - 0.4));
+    e.x1 = Math.max(e.x1, Math.min(D.Li / 2 - 0.01, (p.ax1 ?? p.x1) + 0.4));
+    e.panels.push(p);
+    byAxis.set(k, e);
   }
-  return { add: unionAll(adds.filter(Boolean)), cut: lidCuts.length ? unionAll(lidCuts) : null };
+  const s = (ORG.open * 2 * ORG.rho) / 2;                    // media boca
+  for (const { ax, x0, x1, panels } of byAxis.values()) {
+    lidCuts.push(xCyl(x0, x1, ax.y, ax.z, O.a, D.seg));
+    // Grapa de este eje: una sola vez, luego copias (no se tocan entre sí:
+    // se juntan con compose, sin booleanos).
+    const zb = ax.z - O.a * Math.SQRT2 - 1.0;                // 1 mm bajo la punta de la gota
+    // Perfil YZ de la grapa (u = Y, v = Z).
+    const body = rectCS(ax.y - O.a - ORG.back, ax.y + O.a + ORG.front, zb, O.zp1 + 0.01);
+    const hole = teardrop(ax.y, ax.z, O.a, false, D.seg);   // punta hacia −Z: arriba al imprimir boca abajo
+    // Boca hacia +Y a la altura del eje: cara inferior horizontal (el brazo de
+    // abajo queda grueso; con una rampa a 45° paralela al flanco de la gota
+    // quedaba una lámina de 0.4 mm) y chaflán de entrada de 0.6 mm.
+    const yF = ax.y + O.a + ORG.front;
+    const slot = poly([[ax.y, ax.z + s], [yF + 1, ax.z + s], [yF + 1, ax.z - s - 1.6], [yF - 0.6, ax.z - s], [ax.y, ax.z - s]]);
+    // La esquina de abajo‑delante se redondea con centro en el eje: por ahí
+    // pasa el borde de la muesca de la tapa interior al abrirse.
+    const keep = CS().union([
+      CS().circle(O.a * Math.SQRT2 + 1.05, D.seg).translate([ax.y, ax.z]),
+      rectCS(ax.y - 20, ax.y, ax.z - 20, ax.z + 20),
+      rectCS(ax.y - 20, ax.y + 20, ax.z, ax.z + 20),
+    ]);
+    const clip = yzExtrude(body.intersect(keep).subtract(hole).subtract(slot), -ORG.clipL / 2, ORG.clipL / 2);
+    const copies = [];
+    for (const p of panels) for (const xc of p.clips) copies.push(clip.translate([xc, 0, 0]));
+    adds.push(M().compose(copies));
+  }
+  // Rebajes para la pestaña de la uña en el borde libre.
+  for (const p of O.panels) {
+    const yT = p.y1;
+    lidCuts.push(box(p.tab - ORG.tabW / 2 - 0.5, p.tab + ORG.tabW / 2 + 0.5, yT - 0.01, yT + ORG.tabL + 0.5, D.Hb + 0.01, O.zp1 + 0.6));
+  }
+  return { add: adds.length ? M().compose(adds) : null, cut: lidCuts.length ? unionAll(lidCuts) : null };
 }
 
 /** Una tapa interior en su posición cerrada (marco interno). */
