@@ -281,35 +281,58 @@ npm run build    # regenera dist/rugged-box.html
 
 ---
 
-## Modo ahorro de material (v6.9)
+## Modo ahorro de material (v6.9 – v7.0)
 
-**Caja → Paredes → Modo ahorro de material**: la misma caja con la mínima
-cantidad de filamento. No es un diseño distinto: el motor baja a los mínimos
-seguros todo lo que es "masa" y deja intacto todo lo que es función.
+**Caja → Paredes → Modo ahorro de material** y **Diseño del modo ahorro**:
 
-| Se reduce | Valor en ahorro |
+| Diseño | Qué hace |
 |---|---|
-| Pared | 4 líneas (≥ 1.6 mm), todo perímetro: sin relleno dentro |
-| Fondo y techo | 5 capas (≥ 1.0 mm; 6 capas / 1.2 mm en cajas > 190 mm) |
-| Banda | vuelo ≤ 2.4 mm, pero siempre ≥ 2 líneas a cada lado de la ranura |
-| Nervios de esquina, chaflán interior | fuera / 1.2 mm |
-| Patrón de la tapa | en relieve en vez de grabado (el grabado obliga a un techo grueso) |
-| Inserto, organizador | cubierta de 5 capas, nervios cada 60 mm, divisores de 2 líneas |
+| **Mínimos** (mismo diseño) | Baja a los mínimos seguros todo lo que es masa: pared de 4 líneas (≥ 1.6 mm), fondo y techo de 5 capas (6 en cajas > 190 mm), banda ≤ 2.4 mm con ≥ 2 líneas a cada lado de la ranura, sin nervios de esquina, relieve en vez de grabado, inserto y organizador finos. |
+| **Nervado ligero** (diseño propio) | Piel de **3 líneas** (el mínimo estanco) + **nervios verticales** de 2 líneas que llenan el vuelo de la banda: la envolvente no cambia y los nervios sostienen la banda. Separación = la mayor que da la rigidez de la pared de 4 líneas, con tope para que la piel entre nervios no sea más flexible que la pared original en su vano. La tapa interior del organizador baja a 5 capas (sus faldones hacen de nervios). |
+| **Nervado rígido** (diseño propio) | Igual, con los nervios tan juntos como haga falta para igualar la rigidez de la pared **normal** (la caja sin ahorro). |
 
-**No cambia**: bisagras, cierres, pasadores, junta, lengüetas, holguras
-calibradas, apilado ni la impresión sin soportes; el barrido comprueba los
-mismos criterios que sin ahorro. Ahorro típico: **−30 a −40 %** (caja M
-165 → 99 g; caja de herramienta con organizador 573 → 389 g). La ficha
-muestra el ahorro y los ajustes del laminador que lo completan (perímetros =
-líneas de la pared, 8–10 % de relleno, capas sólidas = fondo/techo); también
-van en el LEEME.
+En todos: bisagras, cierres, pasadores, junta, lengüetas, holguras
+calibradas, organizador e impresión sin soportes **no cambian** (mismos
+criterios del barrido). Los nervios nunca van en las esquinas, frente a
+bisagras y cierres ni en el camino de pasadores y tapones.
 
-## Rendimiento (v6.9)
+**Comparativa** (`npm run eco:compare`; gramos de laminador capa a capa con
+los ajustes recomendados de cada variante, rigidez a flexión de la pared
+frente a la normal, tiempo relativo aproximado):
+
+| Caja | Normal | Mínimos | Nervado ligero | Nervado rígido |
+|---|---|---|---|---|
+| M 120×80 | 160 g · 100 % rígida | 96 g (−40 %) · 30 % | 86 g (−47 %) · 48 % | 88 g (−45 %) · **104 %** |
+| Herramienta + organizador 6×3 + inserto | 506 g | 345 g (−32 %) · 30 % | 311 g (−39 %) · 54 % | 315 g (−38 %) · **104 %** |
+| L 260×180 | 527 g | 347 g (−34 %) · 30 % | 313 g (−41 %) · 35 % | 325 g (−38 %) · **104 %** |
+
+La teoría que lo explica: la rigidez a flexión de una pared crece con el
+cubo del espesor (t³), así que adelgazar la pared maciza de 2.7 a 1.8 mm la
+deja en (1.8/2.7)³ ≈ 30 %. Un nervio aleja material del eje neutro (Steiner)
+y recupera esa rigidez con muy poco material: con 3 líneas de piel y nervios
+de 0.9 × 2.9 mm cada 7.5 mm la pared vuelve al 104 % gastando menos que la de
+mínimos. Reglas de nervios usadas (diseño de piezas de plástico, adaptadas
+a FDM): ancho ≈ 50–70 % de la piel (aquí 2 líneas, sin rechupes en FDM),
+alto ≤ 3 × piel, hueco entre nervios ≥ 2 × piel. La piel de 3 líneas es el
+mínimo que Prusa recomienda para piezas estancas (3–4 perímetros), y la
+resistencia de una pieza FDM depende más del número de perímetros que del
+relleno.
+
+El inserto ya era un "marco": se imprime boca abajo, hueco y con nervios
+interiores (2 paredes, 0 % de relleno); no hay más que quitarle sin perder
+la cara de trabajo.
+
+## Rendimiento (v6.9 – v7.0)
 
 * La **tapa también se guarda en caché**: ajustar el contenido, el inserto
   o las ayudas ya no la recalcula (hilo B de ~150 ms a ~15 ms).
-* Con 4 núcleos o más, el **modelo completo se reparte en dos hilos**
-  (~40 % antes al soltar un control).
+* Con 4 núcleos o más, el **modelo completo y la exportación se reparten en
+  dos hilos** (~40 % antes al soltar un control).
+* El visor pide la **gráfica dedicada** (`powerPreference: 'high-performance'`):
+  en equipos con gráfica integrada + dedicada (p. ej. un portátil con dos gráficas)
+  ya no se queda en la integrada. La geometría (CSG) no puede ir a la GPU:
+  manifold‑3d en WebAssembly es de un solo hilo y sin GPU; por eso el
+  paralelismo es entre hilos (vista rápida en 2, modelo completo en 2).
 * `npm run test:budget` mide cada función (vista rápida, cambio de tapa,
   cambio de contenido, modelo completo) normalizado a la velocidad de la
   máquina y falla si se pasa de su presupuesto o empeora frente a la línea

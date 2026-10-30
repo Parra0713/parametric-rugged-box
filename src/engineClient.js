@@ -129,7 +129,17 @@ export class EngineClient {
   }
 
   /** Modelo final para exportar (no lo reemplaza la vista previa). */
-  final(P, svg) {
-    return this.R.run('final', { P: { ...P, quality: 'final' }, svg, normals: false });
+  async final(P, svg) {
+    const q = { ...P, quality: 'final' };
+    if (!this.R2) return this.R.run('final', { P: q, svg, normals: false });
+    // Con R2 la exportación también va repartida en dos hilos.
+    const [a, b] = await Promise.all([
+      this.R.run('final', { P: q, svg, normals: false, only: 'A' }),
+      this.R2.run('final', { P: q, svg, normals: false, only: 'B' }),
+    ]);
+    if (a.superseded || b.superseded) return { superseded: true };
+    if (!a.ok) return a;
+    if (!b.ok) return b;
+    return { ok: true, r: mergeResults(a.r, b.r) };
   }
 }

@@ -59,7 +59,9 @@ export function orgBase(P, lw) {
   // Divisores ≥ 3 líneas y tapa interior de 4 (modo ahorro: 2 y 3 líneas).
   const wd = r2(P._eco ? Math.max(0.9, 2 * lw) : Math.max(1.2, 3 * lw));
   const has = cover !== 'none';
-  const ct = has ? r2(P._eco ? Math.max(1.2, 3 * lw) : Math.max(1.6, 4 * lw)) : 0;
+  // Nervado: la tapa interior baja a 5 capas; sus faldones (2 mm, sobre el
+  // borde de cada celda) hacen de nervios y le devuelven la rigidez.
+  const ct = has ? r2(P._ecoRib ? Math.max(1.0, 5 * (P.layerH || 0.2)) : P._eco ? Math.max(1.2, 3 * lw) : Math.max(1.6, 4 * lw)) : 0;
   const a = ORG.rho + clr3(P);                              // radio del agujero de la grapa
   // Holgura hasta el borde: la grapa baja hasta la punta de la gota de su
   // agujero + 1 mm de pared (antes 0.5 mm: techo frágil al imprimir).

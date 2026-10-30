@@ -113,6 +113,22 @@ cases.push({ name: 'ahorro XS 25×25', p: { innerL: 25, innerW: 25, baseDepth: 1
 cases.push({ name: 'ahorro L inclinada', p: { innerL: 240, innerW: 170, baseDepth: 40, lidDepth: 15, eco: true } });
 cases.push({ name: 'ahorro apilable + laberinto + Gridfinity', p: { stackable: true, sealMode: 'labyrinth', gridfinity: 'baseplate', innerL: 168.5, innerW: 84.5, eco: true } });
 cases.push({ name: 'ahorro organizador herramienta + inserto', p: { innerL: 200, innerW: 100, baseDepth: 30, bandProud: 2.4, lidOrg: true, orgCols: 6, orgRows: 3, orgMinL: 33, orgMinW: 32, orgDepth: 26, insertMode: 'blank', eco: true } });
+// Modo ahorro nervado (piel de 3 líneas + nervios verticales): mismos criterios.
+const rib = { eco: true, ecoDesign: 'rib' };
+cases.push({ name: 'nervado M estándar', p: { ...rib } });
+cases.push({ name: 'nervado S filamento', p: { innerL: 60, innerW: 40, baseDepth: 21, lidDepth: 9, ...rib } });
+cases.push({ name: 'nervado XS 25×25', p: { innerL: 25, innerW: 25, baseDepth: 12, lidDepth: 5, ...rib } });
+cases.push({ name: 'nervado L inclinada', p: { innerL: 240, innerW: 170, baseDepth: 40, lidDepth: 15, ...rib } });
+cases.push({ name: 'nervado octógono + pasadores impresos', p: { innerL: 160, innerW: 90, cornerCut: 15, pinMode: 'printed', latchPinMode: 'printed', ...rib } });
+cases.push({ name: 'nervado laberinto + 3 cierres', p: { innerL: 320, innerW: 120, baseDepth: 40, sealMode: 'labyrinth', ...rib } });
+cases.push({ name: 'nervado organizador por celda + inserto', p: { innerL: 200, innerW: 100, baseDepth: 30, bandProud: 2.4, lidOrg: true, orgCols: 6, orgRows: 3, orgMinL: 33, orgMinW: 32, orgDepth: 26, orgCover: 'cell', insertMode: 'blank', ...rib } });
+cases.push({ name: 'nervado apilable (cae a mínimos)', p: { stackable: true, ...rib } });
+const ribS = { eco: true, ecoDesign: 'ribStiff' };
+cases.push({ name: 'nervado rígido M estándar', p: { ...ribS } });
+cases.push({ name: 'nervado rígido XS 25×25', p: { innerL: 25, innerW: 25, baseDepth: 12, lidDepth: 5, ...ribS } });
+cases.push({ name: 'nervado rígido L inclinada + pasadores impresos', p: { innerL: 240, innerW: 170, baseDepth: 40, lidDepth: 15, pinMode: 'printed', latchPinMode: 'printed', ...ribS } });
+cases.push({ name: 'nervado rígido herramienta + organizador + inserto', p: { innerL: 200, innerW: 100, baseDepth: 30, bandProud: 2.4, lidOrg: true, orgCols: 6, orgRows: 3, orgMinL: 33, orgMinW: 32, orgDepth: 26, insertMode: 'blank', ...ribS } });
+cases.push({ name: 'nervado rígido octógono + laberinto', p: { innerL: 160, innerW: 90, cornerCut: 15, sealMode: 'labyrinth', ...ribS } });
 cases.push({ name: 'organizador apilable octógono por fila', p: { innerL: 160, innerW: 90, cornerCut: 15, stackable: true, lidOrg: true, orgCols: 5, orgRows: 3, orgCover: 'row' } });
 if (args.quick) cases = cases.filter((c) => /^(20×20|60×40|120×80|250×170|380×260) estándar|apilable|alojamiento|varios|impresos \(|^XS 20×20×5/.test(c.name)).slice(0, 12);
 if (args.filter) cases = cases.filter((c) => c.name.includes(args.filter));

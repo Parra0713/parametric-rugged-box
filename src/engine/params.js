@@ -33,6 +33,7 @@ export const DEFAULTS = {
 
   // --- Ahorro de material ---
   eco: false,           // modo ahorro: mínimos seguros, misma mecánica y cierre
+  ecoDesign: 'min',     // 'min' (mismo diseño, mínimos) | 'rib' (piel fina + nervios)
 
   // --- Pared y fondos ---
   wall: 2.7,            // espesor de pared (6 líneas de 0.45 mm)
@@ -165,7 +166,12 @@ export function ecoParams(P) {
     if (Q[k] > v + 1e-9) { ch.push(`${label} ${Q[k]} → ${v} mm`); Q[k] = v; }
   };
   const big = Math.max(P.innerL, P.innerW) > 190;
-  lower('wall', Math.max(4 * lw, 1.6), 'pared');
+  // Nervado: piel de 3 líneas (mínimo para que sea estanca) y la rigidez la
+  // ponen los nervios verticales (ver wallRibs en derive).
+  const rib = (P.ecoDesign === 'rib' || P.ecoDesign === 'ribStiff') && !P.stackable;
+  if (rib) Q._ecoRib = P.ecoDesign === 'ribStiff' ? 'stiff' : 'light';
+  Q._wall0 = P.wall;
+  lower('wall', rib ? Math.max(3 * lw, 1.2) : Math.max(4 * lw, 1.6), 'pared');
   lower('floor', Math.max((big ? 6 : 5) * lh, big ? 1.2 : 1.0), 'fondo');
   lower('top', Math.max((big ? 6 : 5) * lh, big ? 1.2 : 1.0), 'techo');
   if (Q.floorChamfer > 1.2) lower('floorChamfer', 1.2, 'chaflán interior');
@@ -242,6 +248,9 @@ export const SCHEMA = [
   { tab: 'caja', group: 'Paredes', items: [
     { k: 'eco', label: 'Modo ahorro de material', type: 'toggle',
       hint: 'Mínimo filamento con la misma mecánica y cierre: paredes y fondos mínimos seguros, banda estrecha, relieve en vez de grabado…' },
+    { k: 'ecoDesign', label: 'Diseño del modo ahorro', type: 'select', options: [
+      ['min', 'Mínimos (mismo diseño)'], ['rib', 'Nervado ligero (máximo ahorro)'], ['ribStiff', 'Nervado rígido (como la caja normal)']],
+      hint: 'Solo con el modo ahorro. Nervado: pared de 3 líneas con nervios verticales dentro del vuelo de la banda. Ligero: tan rígida como la de mínimos con menos material; rígido: tan rígida como la caja normal' },
     { k: 'wall', label: 'Pared', type: 'range', min: 1.2, max: 5, step: 0.05, unit: 'mm' },
     { k: 'floor', label: 'Fondo', type: 'range', min: 1.2, max: 5, step: 0.1, unit: 'mm', adv: true },
     { k: 'top', label: 'Techo de la tapa', type: 'range', min: 1.2, max: 5, step: 0.1, unit: 'mm', adv: true },
@@ -450,6 +459,7 @@ export function derive(P) {
   }
 
   D.t = r2(snapW(P.wall)); note('Pared', P.wall, D.t);
+  D.t0 = P._wall0 != null ? r2(snapW(P._wall0)) : D.t;      // pared sin modo ahorro
   D.ri = clamp(P.innerR, 0.5, Math.min(D.Li, D.Wi) / 2 - 0.5);
   // Esquinas recortadas: pierna del chaflán sobre el rectángulo interior.
   D.cham = r2(clamp(P.cornerCut || 0, 0, Math.min(D.Li, D.Wi) / 2 - D.ri - 1));
@@ -844,6 +854,21 @@ export function derive(P) {
     });
   }
 
+  /* ---- Nervios de pared (modo ahorro nervado) ---- */
+  D.wallRibs = P._ecoRib ? wallRibs(D, P, lw) : null;
+  if (P._ecoRib && !D.wallRibs) {
+    D.ecoChanges.push('sin sitio para nervios: pared de 3 líneas sin nervar');
+  } else if (D.wallRibs) {
+    const R = D.wallRibs;
+    D.ecoChanges.push(`nervios de ${R.w}×${R.h} mm cada ${R.pitch} mm (${R.n} en total, rigidez ${Math.round(100 * R.stiff)} % de la pared ${P._ecoRib === 'stiff' ? 'normal' : 'de 4 líneas'})`);
+  }
+
+  // Rigidez a flexión de la pared frente a la de la caja sin ahorro.
+  if (D.eco) {
+    const R = D.wallRibs;
+    D.ecoStiff = r2((R ? ribbedI(D.t, R.w, R.h, R.pitch) : D.t ** 3 / 12) / (D.t0 ** 3 / 12));
+  }
+
   /* ---- Pies Gridfinity / origen vertical ---- */
   D.z0 = D.gfFeet ? D.gfH : 0;
 
@@ -911,4 +936,74 @@ function spread(n, avail, len) {
   const xs = [];
   for (let i = 0; i < n; i++) xs.push(r2(-edge + (2 * edge * i) / (n - 1)));
   return xs;
+}
+
+/**
+ * Rigidez a flexión por mm de ancho (mm⁴/mm) de una pared de piel `t` con
+ * nervios de `w` × `h` cada `p` mm por un lado (placa nervada "difuminada":
+ * eje neutro común, Steiner). Flexión que curva la pared en vertical (el
+ * vano corto de una pared de caja: entre fondo y banda), la que rigidizan
+ * unos nervios verticales.
+ */
+export function ribbedI(t, w, h, p) {
+  const As = t, Ar = (w * h) / p;
+  const ys = t / 2, yr = t + h / 2;
+  const yb = (As * ys + Ar * yr) / (As + Ar);
+  return t ** 3 / 12 + As * (ys - yb) ** 2 + (w * h ** 3 / 12) / p + Ar * (yr - yb) ** 2;
+}
+
+/**
+ * Nervios verticales de pared para el modo ahorro "nervado".
+ * Reglas (diseño de nervios en plástico, adaptadas a FDM):
+ *  - ancho = 2 líneas (≥ 50–60 % de la piel, mínimo imprimible y sin
+ *    rechupes en FDM), alto = vuelo de la banda (≤ 3 × piel): la envolvente
+ *    de la caja no cambia y los nervios sostienen el chaflán de la banda;
+ *  - separación ≥ 2 × piel; se elige la MAYOR que iguala la rigidez de la
+ *    pared maciza de 4 líneas (ribbedI), con tope de 40 mm;
+ *  - nunca en las esquinas, ni frente a bisagras y cierres (± margen), ni en
+ *    el camino de pasadores y tapones (se recortan alrededor de cada eje).
+ * Devuelve null si no hay sitio o la banda es demasiado estrecha.
+ */
+function wallRibs(D, P, lw) {
+  const w = r2(2 * lw), h = r2(D.bo), t = D.t;
+  // Objetivo de rigidez: "ligero" = la pared maciza de 4 líneas (la de los
+  // mínimos); "rígido" = la pared normal, la que tendría sin modo ahorro.
+  const t4 = P._ecoRib === 'stiff' ? Math.max(D.t0, 4 * lw, 1.6) : Math.max(4 * lw, 1.6);
+  if (h < 1.2 || D.stack) return null;
+  const target = t4 ** 3 / 12;
+  // Tope de separación: la piel entre dos nervios es una placa apoyada en
+  // ellos; para que no sea más flexible que la pared original en su vano
+  // (fondo → banda, H) su vano p cumple p⁴/t³ ≤ H⁴/t4³ → p ≤ H·(t/t4)^¾.
+  const H = Math.max(10, D.Hb - D.bandH - D.bo);
+  const pMax = clamp(H * (t / t4) ** 0.75, 12, 40);
+  let pitch = 0;
+  // Separación mínima: hueco entre nervios ≥ 2 × piel (regla de diseño).
+  for (let p = Math.floor(pMax * 2) / 2; p >= 2 * t + w; p -= 0.5) if (ribbedI(t, w, h, p) >= target) { pitch = p; break; }
+  if (!pitch) return null;
+  const m = 2.5 + D.bo;                                   // margen frente a la mecánica
+  const ex = D.Lo / 2 - D.ro - D.cham - 1 - w / 2, ey = D.Wo / 2 - D.ro - D.cham - 1 - w / 2;
+  const spots = (half) => {
+    if (half <= 0) return [];
+    const n = Math.floor((2 * half) / pitch);
+    const x0 = -(n * pitch) / 2;
+    return Array.from({ length: n + 1 }, (_, i) => r2(x0 + i * pitch));
+  };
+  const blocked = (x, list, len) => list.some((xc) => Math.abs(x - xc) < len / 2 + m);
+  const hingeSide = Math.sign(D.ya) || 1, latchSide = Math.sign(D.yp) || -1;
+  const long = [];
+  for (const side of [1, -1]) {
+    for (const x of spots(ex)) {
+      if (side === hingeSide && blocked(x, D.hinge.xs, D.hinge.len)) continue;
+      if (side === latchSide && blocked(x, D.latch.xs, D.latch.span)) continue;
+      long.push([x, side]);
+    }
+  }
+  const short = [];
+  for (const side of [1, -1]) for (const y of spots(ey)) short.push([y, side]);
+  const n = long.length + short.length;
+  if (!n) return null;
+  // Ejes de pasadores/tapones: tubo libre a lo largo de X.
+  const R = Math.max(D.capR ?? 2, pinHeadR(D.pinD), pinHeadR(D.latchPinD)) + 1.5;
+  return { w, h, pitch: r2(pitch), long, short, n, axes: [[D.ya, D.za], [D.yp, D.zp]], axisR: r2(R),
+    stiff: ribbedI(t, w, h, pitch) / target };
 }

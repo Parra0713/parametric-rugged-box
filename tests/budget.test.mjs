@@ -91,6 +91,9 @@ const FEATURES = [
   ['herramienta completa', CRIMP, { draft: 350, lid: 300, preview: 2500 }],
   ['ahorro de material', { eco: true }, { draft: 150, lid: 120, preview: 700 }],
   ['ahorro + herramienta', { ...CRIMP, eco: true }, { draft: 350, lid: 300, preview: 2500 }],
+  ['ahorro nervado', { eco: true, ecoDesign: 'rib' }, { draft: 170, lid: 140, preview: 800 }],
+  ['nervado + herramienta', { ...CRIMP, eco: true, ecoDesign: 'rib' }, { draft: 380, lid: 330, preview: 2700 }],
+  ['nervado rígido + herramienta', { ...CRIMP, eco: true, ecoDesign: 'ribStiff' }, { draft: 400, lid: 350, preview: 2800 }],
 ];
 
 /* Medición --------------------------------------------------------- */

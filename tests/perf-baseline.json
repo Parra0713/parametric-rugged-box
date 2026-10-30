@@ -94,5 +94,23 @@
     "lid": 122,
     "cont": 68,
     "preview": 424
+  },
+  "ahorro nervado": {
+    "draft": 84,
+    "lid": 79,
+    "cont": 16,
+    "preview": 236
+  },
+  "nervado + herramienta": {
+    "draft": 154,
+    "lid": 152,
+    "cont": 69,
+    "preview": 491
+  },
+  "nervado rígido + herramienta": {
+    "draft": 173,
+    "lid": 179,
+    "cont": 68,
+    "preview": 552
   }
 }

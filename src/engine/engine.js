@@ -127,6 +127,25 @@ function cornerZones(D) {
   return CS().union(zs);
 }
 
+/**
+ * Nervios de pared del modo ahorro nervado (D.wallRibs): huella 2D de las
+ * franjas, solo por fuera de la pared y dentro de la envolvente de la banda.
+ */
+function wallRibZone(D) {
+  const R = D.wallRibs, big = 400;
+  const strips = [
+    ...R.long.map(([x, s]) => CS().square([R.w, big], false).translate([x - R.w / 2, s > 0 ? 0 : -big])),
+    ...R.short.map(([y, s]) => CS().square([big, R.w], false).translate([s > 0 ? 0 : -big, y - R.w / 2])),
+  ];
+  return CS().union(strips).subtract(rrOffset(D, D.t - 0.3)).intersect(rrOffset(D, D.F + 0.01));
+}
+
+/** Tubos libres a lo largo de los ejes de pasadores y tapones (se restan a los nervios). */
+function wallRibAxes(D) {
+  const R = D.wallRibs;
+  return unionAll(R.axes.map(([y, z]) => yzExtrude(CS().circle(R.axisR, 24).translate([y, z]), -D.Lo, D.Lo)));
+}
+
 /* ================================================================ */
 /*  Base                                                            */
 /* ================================================================ */
@@ -181,6 +200,16 @@ function buildBase(D, H, L, report) {
     ]).intersect(prism(cornerZones(D).subtract(rr(t - 0.3)), -1, Hb + 1));   // solo por fuera de la pared
     for (const z of grooves) bump = bump.subtract(vGroove(D, F, z));
     core = core.add(bump);
+  }
+
+  // Modo ahorro nervado: nervios verticales hasta la banda (misma envolvente).
+  if (D.wallRibs) {
+    let rib = unionAll([
+      D.gfFeet ? prism(rr(F), 0, chB) : frustum(rr(F - chB), 0, rr(F), chB),
+      prism(rr(F), chB, Hb),
+    ]).intersect(prism(wallRibZone(D), -1, Hb + 1)).subtract(wallRibAxes(D));
+    for (const z of grooves) rib = rib.subtract(vGroove(D, F, z));
+    core = core.add(rib);
   }
 
   // Canal de montaje del pasador del cierre a través del nervio de esquina
@@ -277,6 +306,14 @@ function buildLid(D, P, H, L, svg, report) {
     ribBump = bump;
   }
 
+  let wallRib = null;
+  if (D.wallRibs) {
+    wallRib = unionAll([prism(rr(F), zB, zT - 0.5), frustum(rr(F), zT - 0.5, rr(F - 0.5), zT)])
+      .intersect(prism(wallRibZone(D), zB - 1, zT + 1)).subtract(wallRibAxes(D));
+    for (const z of grooves) wallRib = wallRib.subtract(vGroove(D, F, z));
+    core = core.add(wallRib);
+  }
+
   // Organizador: la tapa se vacía con su propio hueco (franja de las tapas
   // interiores + celdas) en una sola resta. El núcleo "normal" de arriba solo
   // sirve para el análisis de capas (ranuras de sombra), que no cambia.
@@ -284,6 +321,7 @@ function buildLid(D, P, H, L, svg, report) {
     core = shell.subtract(orgCavity(D, zB));
     for (const z of grooves) core = core.subtract(vGroove(D, t, z));
     if (D.ribs) core = core.add(ribBump);
+    if (wallRib) core = core.add(wallRib);
   }
   let lid = unionAll([core, H.lid, L.lidCheeks, L.keepers, ...tongues(D)]);
   lid = lid.subtract(H.lidHoles);

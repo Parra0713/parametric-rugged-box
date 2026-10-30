@@ -14,6 +14,7 @@ npm run test:org     # organizador en la tapa: cierra, abre 0–95°, sin soport
 npm run test:calib   # test de holguras: plan adaptativo, probetas imprimibles, resultados y perfiles
 npm run test:perf    # memoria WASM, reparto A/B, vista rápida y cachés (~1 min)
 npm run test:budget  # presupuestos de tiempo por función + línea base (~2 min)
+npm run eco:compare  # comparativa del modo ahorro: gramos de laminador, rigidez y tiempo
 node tests/budget.test.mjs --update      # guardar la línea base (tests/perf-baseline.json)
 npm run test:assembly   # mecánica completa, pasadores montables, puentes ≤ 10 mm, apilado (~45 s)
 npm run test:quick   # barrido rápido de tamaños (7 casos, ~15 s)
@@ -107,6 +108,14 @@ registro interno del motor) y `logs/sweep-latest.json` (resumen). **Ejecuta
   capas, banda ≤ 2.4 pero con ≥ 2 líneas a cada lado de la ranura, sin
   nervios de esquina, relieve en vez de grabado, inserto y organizador
   finos). Nunca toca mecánica ni holguras; con `eco: false` es la identidad.
+  `ecoDesign`: 'min' | 'rib' (ligero) | 'ribStiff' (rígido) → `P._ecoRib`,
+  piel de 3 líneas y `D.wallRibs` (params.js `wallRibs`/`ribbedI`; geometría
+  `wallRibZone`/`wallRibAxes` en engine.js). Los nervios no salen de rr(F),
+  evitan esquinas, mecánica ± (2.5 + bo) y un tubo alrededor de cada eje.
+  Con apilable cae a mínimos.
+- `src/engine/estimate.js`: gramos de laminador (perímetros, capas sólidas,
+  relleno, capa a capa) y minutos aproximados. Úsalo (no el volumen
+  macizo) para comparar diseños; `tests/estimate.test.mjs` lo valida.
 - **Holguras = perfil de la impresora** (`CAL_KEYS` en calib.js: filClr,
   clearance (Ø3), clearanceL (Ø5, se interpola por diámetro), tiltAdd,
   holeComp, sealClr, axialGap, stackClr, latchPre, insertTol, pocketTol).
@@ -190,8 +199,8 @@ registro interno del motor) y `logs/sweep-latest.json` (resumen). **Ejecuta
    pedido, cerrada sin solapes con tapa/base/inserto, cada tapa interior
    abre 0–95° sin chocar, clic del eje y del faldón, sin voladizos > 50°,
    cabe en la cama, sin piezas sueltas.
-14. Modo ahorro (casos "ahorro" del barrido): mismos criterios 1–13 con
-   pared, fondo y techo mínimos, y menos material que sin ahorro.
+14. Modo ahorro (casos "ahorro" y "nervado" del barrido): mismos criterios
+   1–13 con pared, fondo y techo mínimos o piel nervada.
 
 ## Flujo con el PC del usuario
 

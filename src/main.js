@@ -596,7 +596,7 @@ function ecoSlicer(D) {
 /** Gramos (PLA) de un resultado. */
 const grams = (parts) => Math.round(parts.reduce((s, p) => s + p.volume * p.instances.length, 0) / 1000 * 1.24);
 /** Firma de la caja sin el modo ahorro (para comparar con/sin). */
-const ecoSig = () => JSON.stringify({ ...state.P, eco: false, ...contentPayload() });
+const ecoSig = () => JSON.stringify({ ...state.P, eco: false, ecoDesign: null, ...contentPayload() });
 
 function renderInfo() {
   const { D, parts } = state.result;
@@ -639,6 +639,7 @@ function renderInfo() {
       kv([
         ...(ref ? [['Ahorro', `${ref - g} g (−${Math.round(100 * (1 - g / ref))} %) · ${ref} → ${g} g`, true]] : []),
         ['Cambios', D.ecoChanges.length ? D.ecoChanges.join(' · ') : 'ya estaba en mínimos'],
+        ...(D.ecoStiff != null ? [['Rigidez de la pared', `${Math.round(100 * D.ecoStiff)} % de la caja normal${D.ecoStiff < 0.6 ? ' (el diseño "Nervado rígido" la recupera con menos material)' : ''}`, D.ecoStiff >= 0.95]] : []),
         ...ecoSlicer(D),
       ]),
       el('p', { class: 'small' }, 'Bisagras, cierres, junta y holguras calibradas no cambian: cierra y sella igual.')));

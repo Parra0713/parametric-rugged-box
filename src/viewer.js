@@ -25,7 +25,9 @@ const fromCols = (a) => new THREE.Matrix4().fromArray(a);
 export class Viewer {
   constructor(el) {
     this.el = el;
-    this.renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: 'low-power' });
+    // 'high-performance': en equipos con gráfica integrada + dedicada (p. ej.
+    // un portátil con dos gráficas) el navegador usa la dedicada para el visor.
+    this.renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: 'high-performance' });
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
     this.renderer.localClippingEnabled = true;
     el.appendChild(this.renderer.domElement);
