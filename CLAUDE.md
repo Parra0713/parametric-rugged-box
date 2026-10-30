@@ -106,7 +106,7 @@ registro interno del motor) y `logs/sweep-latest.json` (resumen). **Ejecuta
 - **Modo ahorro** (`eco`, `ecoParams` en params.js): solo transforma
   parámetros que REDUCEN material (pared 4 líneas ≥ 1.6, fondo/techo 5–6
   capas, banda ≤ 2.4 pero con ≥ 2 líneas a cada lado de la ranura, sin
-  nervios de esquina, relieve en vez de grabado, inserto y organizador
+  nervios de esquina, grabado con piel mínima bajo las celdas (`_ecoEngrave`; antes relieve: dejaba la cara colgando), inserto y organizador
   finos). Nunca toca mecánica ni holguras; con `eco: false` es la identidad.
   `ecoDesign`: 'min' | 'rib' (ligero) | 'ribStiff' (rígido) → `P._ecoRib`,
   piel de 3 líneas y `D.wallRibs` (params.js `wallRibs`/`ribbedI`; geometría
@@ -179,7 +179,9 @@ registro interno del motor) y `logs/sweep-latest.json` (resumen). **Ejecuta
 5. Insertos: sin interferencia con la caja ni con el contenido.
 6. Pasadores y tapones: no se solapan con la caja, la tapa abre sin tocarlos,
    tienen camino de montaje libre y el filamento entra recto.
-7. Piezas planas: ningún puente/voladizo más ancho que `maxBridge`.
+7. Piezas planas: ningún puente/voladizo más ancho que `maxBridge` y ninguna
+   ménsula a 90° en el borde (zona sin apoyo que toca el contorno de la capa;
+   p. ej. la tapa en relieve, impresa boca abajo, debe apoyar todo su contorno).
 8. Mecánica completa en base y tapa (`mechChecks`).
 9. Espesor mínimo de 2 líneas (0.9 mm) en base y tapa, lengüetas incluidas
    (`thicknessChecks`: cortes XY, YZ por la mecánica y XZ por la banda).

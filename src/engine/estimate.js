@@ -20,13 +20,16 @@ import { M } from './geo.js';
 
 /**
  * @param solid Manifold en orientación de impresión (z ≥ 0)
- * @param o { lw, lh, perimeters, topBottom, infill, density }
+ * @param o { lw, lh, perimeters, topBottom | top + bottom, infill, density }
  * @returns { g, perimeter, solid, sparse } en gramos y `min`: minutos de
  *   impresión aproximados (velocidades típicas, sin aceleraciones; sirve para
  *   comparar variantes, no como el tiempo exacto del laminador)
  */
 export function sliceEstimate(solid, o) {
   const { lw = 0.45, lh = 0.2, perimeters = 4, topBottom = 5, infill = 0.15, density = 1.24 } = o;
+  // Capas sólidas superiores e inferiores por separado (como el laminador);
+  // `topBottom` es el valor común por defecto.
+  const top = o.top ?? topBottom, bottom = o.bottom ?? topBottom;
   const bb = solid.boundingBox();
   const z0 = bb.min[2], n = Math.max(1, Math.round((bb.max[2] - z0) / lh));
   const cs = [];
@@ -55,7 +58,9 @@ export function sliceEstimate(solid, o) {
     // Núcleo "cubierto": dentro de la pieza en todas las capas vecinas.
     let cover = inner[i];
     let open = false;
-    for (let j = i - topBottom; j <= i + topBottom && !open; j++) {
+    // Sólido si en las `bottom` capas de abajo (es un fondo) o en las `top`
+    // de arriba (es un techo) el punto queda fuera de la pieza.
+    for (let j = i - bottom; j <= i + top && !open; j++) {
       if (j === i) continue;
       if (j < 0 || j >= n) { open = true; break; }
       cover = cover.intersect(cs[j]);

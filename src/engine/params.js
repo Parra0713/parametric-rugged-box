@@ -148,9 +148,10 @@ export const DEFAULTS = {
  *    de 190 mm). La regla de 2 líneas/capas sigue cumpliéndose.
  *  - Banda: vuelo máximo 2.4 mm (la junta sigue cabiendo; ver optimizador).
  *  - Sin nervios de esquina (parachoques), chaflán interior 1.2 mm.
- *  - Patrón grabado → en relieve: el grabado obliga a un techo de
- *    profundidad + 1.2 mm en toda la tapa; en relieve basta el techo mínimo
- *    y solo se añaden los nervios del dibujo.
+ *  - Patrón grabado: sigue grabado, con piel mínima (≥ 0.9 mm en capas
+ *    enteras) bajo las celdas en vez de 1.2 mm. Antes pasaba a
+ *    relieve, que impreso boca abajo deja la cara colgando (puentes en toda
+ *    la cara y ménsula en el borde) y además pesa más.
  *  - Inserto: cubierta de 1.0 mm (5 capas) y nervios cada 60 mm.
  *  - Organizador: divisores de 2 líneas y tapa interior de 3 líneas.
  * La mecánica (bisagras, cierres, pasadores, junta, holguras calibradas) no
@@ -176,10 +177,10 @@ export function ecoParams(P) {
   lower('top', Math.max((big ? 6 : 5) * lh, big ? 1.2 : 1.0), 'techo');
   if (Q.floorChamfer > 1.2) lower('floorChamfer', 1.2, 'chaflán interior');
   if (Q.cornerRibs) { Q.cornerRibs = false; ch.push('sin nervios de esquina'); }
-  if (Q.relief === 'engrave' && Q.pattern !== 'smooth' && !Q.stackable) {
-    Q.relief = 'emboss';
-    ch.push('patrón en relieve en vez de grabado (techo fino)');
-  }
+  // Patrón grabado: se mantiene el grabado (el relieve, impreso boca abajo,
+  // deja toda la cara colgando sobre los nervios) pero con piel mínima bajo
+  // las celdas (ver derive).
+  if (Q.relief === 'engrave' && Q.pattern !== 'smooth' && !Q.stackable) Q._ecoEngrave = true;
   if (Q.insertMode && Q.insertMode !== 'off') lower('insertDeck', Math.max(5 * lh, 1.0), 'cubierta del inserto');
   Q._ecoChanges = ch;
   return Q;
@@ -247,7 +248,7 @@ export const SCHEMA = [
   ]},
   { tab: 'caja', group: 'Paredes', items: [
     { k: 'eco', label: 'Modo ahorro de material', type: 'toggle',
-      hint: 'Mínimo filamento con la misma mecánica y cierre: paredes y fondos mínimos seguros, banda estrecha, relieve en vez de grabado…' },
+      hint: 'Mínimo filamento con la misma mecánica y cierre: paredes y fondos mínimos seguros, banda estrecha, grabado con piel mínima…' },
     { k: 'ecoDesign', label: 'Diseño del modo ahorro', type: 'select', options: [
       ['min', 'Mínimos (mismo diseño)'], ['rib', 'Nervado ligero (máximo ahorro)'], ['ribStiff', 'Nervado rígido (como la caja normal)']],
       hint: 'Solo con el modo ahorro. Nervado: pared de 3 líneas con nervios verticales dentro del vuelo de la banda. Ligero: tan rígida como la de mínimos con menos material; rígido: tan rígida como la caja normal' },
@@ -669,7 +670,12 @@ export function derive(P) {
   D.gwS = r2(D.rw + 1.0);           // ancho de ranura del pie (0.5 mm por lado)
   D.stackRibs = { xs: [], ys: [] };
   const engr = !D.stack && P.relief === 'engrave' && P.pattern !== 'smooth';
-  D.topT = r2(snapH(engr ? Math.max(P.top, D.pd + 1.2) : P.top));
+  // Grabado: bajo cada celda queda una piel de 1.2 mm (modo ahorro: el
+  // mínimo de 2 líneas, 0.9 mm, en capas enteras; la tapa queda como una
+  // placa con retícula de nervios, más rígida que una lisa del mismo peso).
+  const skin = P._ecoEngrave ? Math.ceil(0.9 / lh - 1e-6) * lh : 1.2;
+  D.topT = r2(snapH(engr ? Math.max(P.top, D.pd + skin) : P.top));
+  if (P._ecoEngrave) D.ecoChanges.push(`grabado con piel de ${r2(D.topT - D.pd)} mm bajo las celdas (techo ${D.topT} mm)`);
   D.floor = r2(snapH(P.floor)); note('Fondo', P.floor, D.floor);
 
   /* ---- Gridfinity ---- */
@@ -722,7 +728,10 @@ export function derive(P) {
 
   // Tapa: banda + retén. Altura mínima para alojar el retén y la carcasa.
   D.bandHl = r2(snapH(Math.max(Mx.bandHlMin ?? 3.0, D.kth + 1.0)));
-  const HlMin = r2(D.bandHl + 1.6);
+  // Sobre la banda cabe su chaflán de 45° entero (vuelo bo) + el bisel del
+  // borde superior (0.5 mm; apilable: db): la tapa se imprime boca abajo y,
+  // si no cabían, la banda quedaba en ménsula a 90° (tapa mínima).
+  const HlMin = r2(D.bandHl + Math.max(1.6, D.bo + (D.stack ? D.db : 0.5)));
   const DlMin = r2(Math.max(0, HlMin - D.topT));
   let Dl = P.lidMin ? DlMin : P.lidDepth;
   if (Dl < DlMin) { if (!P.lidMin) warn.push(`Tapa ajustada a su mínimo mecánico: ${DlMin} mm.`); Dl = DlMin; }

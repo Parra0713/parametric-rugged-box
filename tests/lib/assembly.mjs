@@ -114,6 +114,17 @@ export function bridgeChecks(r, maxBridge = 10) {
     let w = 0, at = 0;
     for (const x of reg) { const s = inscribedWidth(x.region); if (s > w) { w = s; at = x.z; } }
     out.push({ ok: w <= maxBridge + 0.3, msg: `${pt.name} plana: puente/voladizo más ancho ${w.toFixed(1)} mm${w ? ` a z=${at.toFixed(1)}` : ''} (máx ${maxBridge})` });
+    // Ménsula en el borde: una zona sin apoyo que llega al contorno exterior
+    // de la capa no es un puente (solo apoya por un lado) y cuelga a 90°.
+    // (Caso real: tapa en relieve cuyo borde quedaba a `pd` de la cama.)
+    let edge = 0, edgeAt = 0;
+    for (const x of reg) {
+      const layer = R.slice(x.z);
+      const band = layer.subtract(layer.offset(-0.6, 'Round', 2, 12));
+      const a = x.region.intersect(band).area();
+      if (a > edge) { edge = a; edgeAt = x.z; }
+    }
+    out.push({ ok: edge < 15, msg: `${pt.name} plana: sin ménsulas a 90° en el borde (${edge.toFixed(1)} mm²${edge ? ` a z=${edgeAt.toFixed(1)}` : ''})` });
   }
   return out;
 }

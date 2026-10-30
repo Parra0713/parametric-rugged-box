@@ -21,7 +21,7 @@ import { hinges, knuckleSpans } from './hinge.js';
 import { latches } from './latch.js';
 import { printedPin, filamentCap, filamentLength } from './pins.js';
 import { gridfinityFeet } from './gridfinity.js';
-import { lidRelief } from './pattern.js';
+import { lidRelief, patternArea } from './pattern.js';
 import { baseInsert, lidInsert } from './insert.js';
 import { orgLidGeometry, orgPanel, orgCavity } from './organizer.js';
 import { transformVerts, hull2D, fitAngle, tiltChoose, rotatedExtent } from '../bedfit.js';
@@ -297,10 +297,15 @@ function buildLid(D, P, H, L, svg, report) {
   }
   for (const z of grooves) core = core.subtract(vGroove(D, t, z));
 
+  // Remate superior de nervios de esquina y de pared: 45° hasta la cara
+  // superior. Apilable: la tapa apoya en el marco de apilado y su cara
+  // superior (rr(t − ce)) empieza a `hs` de la cama; el nervio debe bajar en
+  // chaflán hasta ese contorno o queda en ménsula a 90°.
+  const cr = D.stack ? F - (t - ce) : 0.5;
   let ribBump = null;
   if (D.ribs) {
-    let bump = unionAll([prism(rr(F), zB, zT - 0.5), frustum(rr(F), zT - 0.5, rr(F - 0.5), zT)])
-      .intersect(prism(cornerZones(D).subtract(rr(t - 0.3)), zB - 1, zT + 1));
+    let bump = unionAll([prism(rr(F), zB, zT - cr), frustum(rr(F), zT - cr, rr(F - cr), zT)])
+      .intersect(prism(cornerZones(D).subtract(rr(D.stack ? Math.max(0.05, t - ce - 0.3) : t - 0.3)), zB - 1, zT + 1));
     for (const z of grooves) bump = bump.subtract(vGroove(D, F, z));
     core = core.add(bump);
     ribBump = bump;
@@ -308,7 +313,7 @@ function buildLid(D, P, H, L, svg, report) {
 
   let wallRib = null;
   if (D.wallRibs) {
-    wallRib = unionAll([prism(rr(F), zB, zT - 0.5), frustum(rr(F), zT - 0.5, rr(F - 0.5), zT)])
+    wallRib = unionAll([prism(rr(F), zB, zT - cr), frustum(rr(F), zT - cr, rr(F - cr), zT)])
       .intersect(prism(wallRibZone(D), zB - 1, zT + 1)).subtract(wallRibAxes(D));
     for (const z of grooves) wallRib = wallRib.subtract(vGroove(D, F, z));
     core = core.add(wallRib);
@@ -344,6 +349,14 @@ function buildLid(D, P, H, L, svg, report) {
   const rel = { cut: rm.kind === 'cut' ? rm.solid : null, add: rm.kind === 'add' ? rm.solid : null, warn: rm.warn };
   if (rel.cut) lid = lid.subtract(rel.cut);
   if (rel.add) lid = lid.add(rel.add);
+  // Relieve: la tapa se imprime boca abajo apoyada en el relieve. Todo lo que
+  // llega a la cara superior fuera del área del patrón (margen, bisel, nervios
+  // de esquina y de pared) sube también `pd`: si no, el contorno entero queda
+  // en ménsula a 90° a `pd` de la cama.
+  if (rel.add && !D.stack) {
+    const edge = core.slice(zT - 0.02).subtract(patternArea(D, P));
+    if (!edge.isEmpty()) lid = lid.add(prism(edge, zT - 0.01, zT + D.pd));
+  }
   return { lid, warn: rel.warn };
 }
 

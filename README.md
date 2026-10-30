@@ -287,7 +287,7 @@ npm run build    # regenera dist/rugged-box.html
 
 | Diseño | Qué hace |
 |---|---|
-| **Mínimos** (mismo diseño) | Baja a los mínimos seguros todo lo que es masa: pared de 4 líneas (≥ 1.6 mm), fondo y techo de 5 capas (6 en cajas > 190 mm), banda ≤ 2.4 mm con ≥ 2 líneas a cada lado de la ranura, sin nervios de esquina, relieve en vez de grabado, inserto y organizador finos. |
+| **Mínimos** (mismo diseño) | Baja a los mínimos seguros todo lo que es masa: pared de 4 líneas (≥ 1.6 mm), fondo y techo de 5 capas (6 en cajas > 190 mm), banda ≤ 2.4 mm con ≥ 2 líneas a cada lado de la ranura, sin nervios de esquina, patrón grabado con piel mínima (0.9 mm en capas enteras) bajo las celdas, inserto y organizador finos. |
 | **Nervado ligero** (diseño propio) | Piel de **3 líneas** (el mínimo estanco) + **nervios verticales** de 2 líneas que llenan el vuelo de la banda: la envolvente no cambia y los nervios sostienen la banda. Separación = la mayor que da la rigidez de la pared de 4 líneas, con tope para que la piel entre nervios no sea más flexible que la pared original en su vano. La tapa interior del organizador baja a 5 capas (sus faldones hacen de nervios). |
 | **Nervado rígido** (diseño propio) | Igual, con los nervios tan juntos como haga falta para igualar la rigidez de la pared **normal** (la caja sin ahorro). |
 
@@ -302,9 +302,24 @@ frente a la normal, tiempo relativo aproximado):
 
 | Caja | Normal | Mínimos | Nervado ligero | Nervado rígido |
 |---|---|---|---|---|
-| M 120×80 | 160 g · 100 % rígida | 96 g (−40 %) · 30 % | 86 g (−47 %) · 48 % | 88 g (−45 %) · **104 %** |
-| Herramienta + organizador 6×3 + inserto | 506 g | 345 g (−32 %) · 30 % | 311 g (−39 %) · 54 % | 315 g (−38 %) · **104 %** |
-| L 260×180 | 527 g | 347 g (−34 %) · 30 % | 313 g (−41 %) · 35 % | 325 g (−38 %) · **104 %** |
+| M 120×80 | 160 g · 100 % rígida | 98 g (−39 %) · 30 % | 87 g (−46 %) · 48 % | 89 g (−44 %) · **104 %** |
+| Herramienta + organizador 6×3 + inserto | 506 g | 343 g (−32 %) · 30 % | 309 g (−39 %) · 54 % | 313 g (−38 %) · **104 %** |
+| L 260×180 | 527 g | 339 g (−36 %) · 30 % | 305 g (−42 %) · 35 % | 317 g (−40 %) · **104 %** |
+
+Ojo: esa comparativa supone la caja normal laminada con 6 perímetros y 20 %
+de relleno. Con un perfil de 2 perímetros y relleno bajo (0.24 Draft de
+Orca para la Mi impresora) las paredes gruesas ya salen casi huecas y el ahorro
+real medido en Orca es de ~15 % (herramienta: 330 → 279 g eco, 276 g
+nervado); el nervado entonces aporta sobre todo rigidez, no gramos.
+
+**Patrón de la tapa en ahorro (v7.1)**: el grabado se mantiene con piel
+mínima bajo las celdas (≥ 0.9 mm en capas enteras). Antes pasaba a relieve,
+que impreso boca abajo dejaba la cara entera colgando sobre los nervios y el
+contorno en ménsula a 90°. El relieve normal ahora apoya todo el contorno en
+la cama (margen, bisel y nervios suben con el relieve), la tapa mínima
+reserva altura para el chaflán completo de la banda y, en apilable, los
+nervios de esquina bajan en chaflán hasta el marco. El barrido comprueba
+que ninguna pieza plana tenga ménsulas a 90° en el borde.
 
 La teoría que lo explica: la rigidez a flexión de una pared crece con el
 cubo del espesor (t³), así que adelgazar la pared maciza de 2.7 a 1.8 mm la

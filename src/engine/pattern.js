@@ -332,6 +332,8 @@ export function lidRelief(D, P, svg) {
     if (lineArt && cells) raised = raised.add(cells);
   }
   if (logo) raised = raised.add(logo);
+  // El borde (fuera del área del patrón) lo completa buildLid con la huella
+  // real de la cara superior (nervios de esquina y de pared incluidos).
   // Lo que no está en relieve es un techo en el aire (impresión boca abajo).
   const lim = limitBridges(area.subtract(raised), maxW, P.patternRib);
   if (lim.split) {

@@ -123,6 +123,10 @@ cases.push({ name: 'nervado octógono + pasadores impresos', p: { innerL: 160, i
 cases.push({ name: 'nervado laberinto + 3 cierres', p: { innerL: 320, innerW: 120, baseDepth: 40, sealMode: 'labyrinth', ...rib } });
 cases.push({ name: 'nervado organizador por celda + inserto', p: { innerL: 200, innerW: 100, baseDepth: 30, bandProud: 2.4, lidOrg: true, orgCols: 6, orgRows: 3, orgMinL: 33, orgMinW: 32, orgDepth: 26, orgCover: 'cell', insertMode: 'blank', ...rib } });
 cases.push({ name: 'nervado apilable (cae a mínimos)', p: { stackable: true, ...rib } });
+// Relieve impreso boca abajo: todo el contorno apoya en la cama (sin ménsulas).
+cases.push({ name: 'relieve hex con nervios de esquina', p: { relief: 'emboss', pattern: 'hex', cornerRibs: true } });
+cases.push({ name: 'relieve + nervado rígido', p: { relief: 'emboss', pattern: 'cross', eco: true, ecoDesign: 'ribStiff' } });
+cases.push({ name: 'ahorro grabado octógono', p: { eco: true, pattern: 'hex', cornerCut: 15, innerL: 160, innerW: 90 } });
 const ribS = { eco: true, ecoDesign: 'ribStiff' };
 cases.push({ name: 'nervado rígido M estándar', p: { ...ribS } });
 cases.push({ name: 'nervado rígido XS 25×25', p: { innerL: 25, innerW: 25, baseDepth: 12, lidDepth: 5, ...ribS } });
