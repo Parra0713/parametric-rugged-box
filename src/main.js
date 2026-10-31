@@ -814,7 +814,9 @@ function calibControl() {
     box.append(el('div', { class: 'card key calmsg' },
       el('strong', {}, m.changes.length ? 'Holguras actualizadas' : 'Sin cambios: los valores actuales ya eran los mejores'),
       m.changes.length ? el('ul', {}, m.changes.map((c) => el('li', {}, `${CAL_NAMES[c.k]}: ${fmt(c.from)} → ${fmt(c.to)} (${c.why})`))) : null,
-      m.retest ? el('div', { class: 'warnTxt' }, 'Alguna probeta quedó fuera del rango: genera otro test (se centrará en los nuevos valores).') : null,
+      m.retest ? el('div', { class: 'warnTxt' }, m.autoPlan
+        ? `Fuera de rango: ${m.retestIds.join(', ')}. Ya está generado un test SOLO con ${m.retestIds.length > 1 ? 'esas probetas' : 'esa probeta'}, centrado en los nuevos valores: descárgalo abajo.`
+        : 'Alguna probeta quedó fuera del rango: genera otro test (se centrará en los nuevos valores).') : null,
       el('button', { class: 'ghost sm', onclick: () => { state.calibMsg = null; buildParams(); } }, 'Cerrar')));
   }
 
@@ -831,12 +833,22 @@ function calibControl() {
       buildParams();
       showCalib();
     } }, 'Generar test de holguras');
+    // Esta caja usa holguras que el perfil no ha medido: test solo de esas.
+    const goMissing = missing.length && p.calibrated ? el('button', { class: 'sm', onclick: () => {
+      const plan = calibPlan(state.P, { fine: fine.checked, mode: 'box', onlyKeys: missing });
+      if (!plan.tests.length) { alert('No hay probetas para esas holguras.'); return; }
+      plan.P = { ...state.P };
+      p.plan = plan; p.choices = {}; saveProfiles(st);
+      state.calibMsg = null;
+      buildParams();
+      showCalib();
+    } }, `Test solo de lo que falta (${missing.map((k) => CAL_NAMES[k]).join(', ')})`) : null;
     box.append(
       el('p', { class: 'small' }, 'Imprime probetas que reproducen cada unión de la caja en la MISMA orientación en que se imprime (agujeros horizontales, verticales e inclinados, paredes en XY, primera capa, puente del retén), con holguras numeradas. Marcas la que mejor funcionó y el perfil se ajusta solo.'),
       el('label', { class: 'chk' }, modeU, ' Universal: vale para todas las cajas, de XS a L (≈ 25 g, ≈ 1 h 15 min)'),
       el('label', { class: 'chk' }, modeB, ' Solo las uniones de esta caja (≈ 10–25 g)'),
       el('label', { class: 'chk' }, fine, ' Paso fino (0.025 mm) para afinar un perfil ya calibrado'),
-      el('div', { class: 'row' }, go));
+      el('div', { class: 'row' }, go, goMissing));
   } else {
     const plan = p.plan;
     const info = state.calibResult?.info;
@@ -867,6 +879,17 @@ function calibControl() {
       const choices = { ...p.choices };
       setFromTest(st, res, plan, choices);
       applyProfile();
+      // Probetas fuera de rango: se genera solo de esas un test nuevo,
+      // centrado en el valor ya desplazado (las demás no se reimprimen).
+      if (res.retestIds && res.retestIds.length) {
+        const again = calibPlan(state.P, { fine: plan.fine, mode: plan.mode, only: res.retestIds });
+        if (again.tests.length) {
+          again.P = { ...state.P };
+          const q = activeProfile(st);
+          q.plan = again; q.choices = {}; saveProfiles(st);
+          res.autoPlan = true;
+        }
+      }
       state.calibMsg = res;
       hideCalib();
       buildParams();

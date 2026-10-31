@@ -104,7 +104,17 @@ export function latches(D) {
     keepers.push(yzExtrude(kp, a - D.cheekW, b + D.cheekW));
     holes.push(yzExtrude(teardrop(-D.sp, D.zp, D.latchHoleD / 2, true, D.seg), a - D.cheekW - 1, b + D.cheekW + 1));
     // Hueco para el barril bajo el fondo de la ranura (entre las mejillas).
-    pockets.push(yzExtrude(rect(-D.sh - 2, -(D.sw + 0.3), D.zp - D.rl - 1.2, D.Hb - D.gd - D.mem), a, b));
+    // Su techo, junto a la pared, se imprimía como un puente de ~14 mm entre
+    // las mejillas (o una ménsula de 2 mm desde la pared): ahora la esquina
+    // interior‑superior baja en chaflán de 45° desde la pared (sin voladizo),
+    // tanto como permite el barril (≥ 0.4 mm de holgura a su giro).
+    const yin = -(D.sw + 0.3), yout = -D.sh - 2, z0 = D.zp - D.rl - 1.2, top = D.Hb - D.gd - D.mem;
+    const depth = yin + D.Wi / 2 + D.F;                       // del hueco a la cara de la banda
+    const cMax = yin + top + D.sp - D.zp - Math.SQRT2 * (D.rl + 0.4);
+    const c = Math.max(0, Math.min(depth, cMax, top - z0 - 0.5));
+    pockets.push(yzExtrude(c > 0.3
+      ? poly([[yout, z0], [yin, z0], [yin, top - c], [yin - c, top], [yout, top]])
+      : rect(yout, yin, z0, top), a, b));
   }
   return {
     lugs: unionAll(lugs),

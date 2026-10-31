@@ -1,116 +1,116 @@
 {
   "caja por defecto": {
-    "draft": 76,
-    "lid": 76,
-    "cont": 15,
-    "preview": 329
+    "draft": 70,
+    "lid": 70,
+    "cont": 13,
+    "preview": 304
   },
   "XS 25×25": {
-    "draft": 40,
-    "lid": 38,
+    "draft": 41,
+    "lid": 35,
     "cont": 10,
-    "preview": 162
+    "preview": 145
   },
   "grande inclinada": {
-    "draft": 75,
-    "lid": 75,
-    "cont": 15,
-    "preview": 2498
+    "draft": 74,
+    "lid": 71,
+    "cont": 14,
+    "preview": 2539
   },
   "apilable": {
-    "draft": 74,
-    "lid": 64,
-    "cont": 14,
-    "preview": 328
+    "draft": 65,
+    "lid": 60,
+    "cont": 15,
+    "preview": 351
   },
   "octógono": {
-    "draft": 112,
-    "lid": 112,
-    "cont": 14,
-    "preview": 441
+    "draft": 118,
+    "lid": 119,
+    "cont": 16,
+    "preview": 451
   },
   "patrón hex + relieve": {
-    "draft": 75,
-    "lid": 74,
-    "cont": 13,
-    "preview": 319
+    "draft": 87,
+    "lid": 87,
+    "cont": 12,
+    "preview": 313
   },
   "laberinto + tapa mínima": {
-    "draft": 73,
+    "draft": 64,
     "lid": 68,
     "cont": 14,
-    "preview": 296
+    "preview": 299
   },
   "pasadores impresos": {
-    "draft": 78,
-    "lid": 77,
-    "cont": 15,
-    "preview": 306
+    "draft": 66,
+    "lid": 67,
+    "cont": 12,
+    "preview": 273
   },
   "Gridfinity": {
-    "draft": 117,
-    "lid": 95,
-    "cont": 14,
-    "preview": 539
+    "draft": 108,
+    "lid": 76,
+    "cont": 13,
+    "preview": 477
   },
   "inserto en blanco + tapa": {
-    "draft": 87,
-    "lid": 91,
-    "cont": 26,
-    "preview": 347
+    "draft": 84,
+    "lid": 83,
+    "cont": 24,
+    "preview": 323
   },
   "inserto con alojamiento": {
-    "draft": 123,
-    "lid": 103,
-    "cont": 61,
-    "preview": 723
+    "draft": 115,
+    "lid": 105,
+    "cont": 56,
+    "preview": 711
   },
   "organizador tapa única": {
-    "draft": 97,
-    "lid": 96,
-    "cont": 15,
-    "preview": 415
+    "draft": 119,
+    "lid": 106,
+    "cont": 16,
+    "preview": 433
   },
   "organizador por celda": {
-    "draft": 123,
-    "lid": 127,
-    "cont": 15,
-    "preview": 492
+    "draft": 179,
+    "lid": 177,
+    "cont": 19,
+    "preview": 637
   },
   "herramienta completa": {
-    "draft": 150,
-    "lid": 150,
-    "cont": 75,
-    "preview": 626
+    "draft": 174,
+    "lid": 162,
+    "cont": 71,
+    "preview": 634
   },
   "ahorro de material": {
-    "draft": 65,
-    "lid": 74,
-    "cont": 14,
-    "preview": 182
+    "draft": 59,
+    "lid": 57,
+    "cont": 13,
+    "preview": 205
   },
   "ahorro + herramienta": {
-    "draft": 121,
-    "lid": 122,
-    "cont": 68,
-    "preview": 424
+    "draft": 142,
+    "lid": 138,
+    "cont": 66,
+    "preview": 564
   },
   "ahorro nervado": {
-    "draft": 84,
-    "lid": 79,
-    "cont": 16,
-    "preview": 236
+    "draft": 70,
+    "lid": 72,
+    "cont": 13,
+    "preview": 282
   },
   "nervado + herramienta": {
-    "draft": 154,
-    "lid": 152,
-    "cont": 69,
-    "preview": 491
+    "draft": 158,
+    "lid": 163,
+    "cont": 63,
+    "preview": 772
   },
   "nervado rígido + herramienta": {
-    "draft": 173,
-    "lid": 179,
-    "cont": 68,
-    "preview": 552
+    "draft": 191,
+    "lid": 197,
+    "cont": 19,
+    "preview": 813
   }
 }

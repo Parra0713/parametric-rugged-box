@@ -341,14 +341,16 @@ function buildLid(D, P, H, L, svg, report) {
     if (D.ribs) core = core.add(ribBump);
     if (wallRib) core = core.add(wallRib);
   }
+  if (D.org) {
+    // Bloques de pivote, canales del eje y pozos de las tapas interiores:
+    // todo es interior, así que se hace sobre el núcleo (malla más pequeña
+    // que la tapa con bisagras y cierres: booleanos más rápidos).
+    const og = orgLidGeometry(D, { mechOnly: true });
+    if (og.add) core = core.add(og.add);
+    if (og.cut) core = core.subtract(og.cut);
+  }
   let lid = unionAll([core, H.lid, L.lidCheeks, L.keepers, ...tongues(D)]);
   lid = lid.subtract(H.lidHoles);
-  if (D.org) {
-    // Grapas y canales del eje de las tapas interiores.
-    const og = orgLidGeometry(D, { mechOnly: true });
-    if (og.add) lid = lid.add(og.add);
-    if (og.cut) lid = lid.subtract(og.cut);
-  }
   // Patrón/logo de la tapa (solo depende de su contorno y de sus ajustes):
   // se reutiliza entre reconstrucciones si no cambian.
   const rk = memoKey('rel', D.Li, D.Wi, D.ri, D.cham, D.t, D.seg, D.Hb, D.Hl, D.pd, D.stack, D.maxBridge, D.pattern, D.relief,
@@ -397,6 +399,58 @@ function earsFor(D, xyz) {
     CS().circle(8, 32).translate([x, y]));
   if (!discs.length) return null;
   return CS().union(discs);                       // 2D: se recorta a la cama antes de extruir
+}
+
+/**
+ * Orejas de retiro fácil ("brim estructurado"): la oreja NO toca la pieza.
+ * Queda separada de la huella de la primera capa por una ranura de `gap` y
+ * unida a ella por 3 puentecitos de 1 capa por oreja. El laminador no las
+ * funde con la pieza; la tensión de la contracción tira de la oreja a través
+ * de los puentes (sigue anclando la esquina) y al terminar se arrancan con
+ * los dedos: los puentes son lo único que hay que romper.
+ * @returns {{ body: CrossSection, bridges: CrossSection }} en 2D
+ */
+function earsDetached(D, xyz, foot) {
+  const discs = earsFor(D, xyz);
+  if (!discs) return null;
+  const gap = Math.max(0.4, D.lw);                      // ≥ 1 línea: el laminador no las une
+  const wb = Math.max(0.6, 1.5 * D.lw);                 // ancho del puente
+  const body = discs.subtract(foot.offset(gap, 'Round', 2, 16));
+  // Puentes: cortos y perpendiculares al contorno de la pieza, en la esquina
+  // y a ±5 mm de ella a lo largo del contorno; cruzan la ranura con 0.8 mm
+  // de solape en la pieza y en la oreja.
+  const fb = foot.bounds();
+  const cx = (fb.min[0] + fb.max[0]) / 2, cy = (fb.min[1] + fb.max[1]) / 2;
+  const ring = foot.offset(gap + 0.8, 'Round', 2, 16).subtract(foot.offset(-0.8, 'Round', 2, 16));
+  const polys = foot.toPolygons();
+  const area = (q) => q.reduce((acc, [x, y], i) => { const [u, v] = q[(i + 1) % q.length]; return acc + x * v - u * y; }, 0) / 2;
+  const outer = polys.reduce((m, q) => (Math.abs(area(q)) > Math.abs(area(m)) ? q : m), polys[0]);
+  const n = outer.length;
+  const at = (i) => outer[((i % n) + n) % n];
+  const spokes = [];
+  for (const d of discs.decompose()) {
+    const b = d.bounds();
+    const ox = (b.min[0] + b.max[0]) / 2, oy = (b.min[1] + b.max[1]) / 2;
+    let k0 = 0, best = Infinity;
+    outer.forEach(([x, y], i) => { const q = (x - ox) ** 2 + (y - oy) ** 2; if (q < best) { best = q; k0 = i; } });
+    const pts = [at(k0)];
+    for (const dir of [1, -1]) {                       // 5 mm a cada lado
+      let acc = 0, i = k0;
+      while (acc < 5 && Math.abs(i - k0) < n) {
+        const [x0, y0] = at(i), [x1, y1] = at(i + dir);
+        const l = Math.hypot(x1 - x0, y1 - y0);
+        if (acc + l >= 5) { const f = (5 - acc) / l; pts.push([x0 + f * (x1 - x0), y0 + f * (y1 - y0), Math.atan2(y1 - y0, x1 - x0)]); break; }
+        acc += l; i += dir;
+      }
+    }
+    for (const [x, y, tang] of pts) {
+      // Normal = perpendicular a la tangente (en la esquina, hacia el centro de la oreja).
+      const ang = tang === undefined ? Math.atan2(y - cy, x - cx) * 180 / Math.PI : tang * 180 / Math.PI + 90;
+      spokes.push(CS().square([2 * (gap + 1.6), wb], true).rotate(ang).translate([x, y]));
+    }
+  }
+  const bridges = CS().union(spokes).intersect(ring).intersect(discs);
+  return { body, bridges };
 }
 
 /**
@@ -514,10 +568,18 @@ function addAidsRaw(D, P, pt, solidNative, normals, G) {
     pt.place = { angle: fit.angle };
     const big = Math.max(fit.w, fit.h) > 0.7 * Math.min(bed.x, bed.y);
     if (fit.mode === 'diagonal' || big) {
-      const ears = earsFor(D, xyz);
+      // Huella de las dos primeras capas (la base lleva un chaflán abajo: la
+      // segunda capa es más ancha que la primera).
+      const Sp = solidNative().transform(pt.print);
+      const foot = Sp.slice(Math.min(0.1, D.lh / 2)).add(Sp.slice(2 * D.lh - 0.02));
+      const ears = earsDetached(D, xyz, foot);
       if (ears) {
-        const clipped = clipToBed(ears, hull, fit.angle, P.bedX, P.bedY);
-        if (!clipped.isEmpty()) pt.aids.push({ name: 'Orejas anti‑warping', ...meshOf(prism(clipped, 0, 2 * D.lh)) });
+        const body = clipToBed(ears.body, hull, fit.angle, P.bedX, P.bedY);
+        const bridges = clipToBed(ears.bridges, hull, fit.angle, P.bedX, P.bedY);
+        if (!body.isEmpty()) {
+          const solid = unionAll([prism(body, 0, 2 * D.lh), bridges.isEmpty() ? null : prism(bridges, 0, D.lh)]);
+          pt.aids.push({ name: 'Orejas anti‑warping (retiro fácil)', ...meshOf(solid) });
+        }
       }
     }
     return;
@@ -693,13 +755,14 @@ export function build(P, svg, opt = {}) {
     // Base (reutilizada si solo cambian parámetros de la tapa).
     if (want('A')) {
       const key = baseKey(P, normals);
-      let bp;
+      let bp, baseSolid = null;
       if (baseCache && baseCache.key === key) {
         bp = clonePart(baseCache.part);
         report.push(...baseCache.report);
       } else {
         const rep = [];
         const base = buildBase(D, H, L, rep);
+        baseSolid = base;
         report.push(...rep);
         bp = part('base', 'Base', base, {
           print: T(0, 0, z0), instances: [T(0, 0, z0)], qty: 1, material: 'PETG / PLA / ASA',
@@ -707,7 +770,9 @@ export function build(P, svg, opt = {}) {
         baseCache = { key, part: clonePart(bp), report: rep };
       }
       stage('base');
-      addAids(D, P, bp, () => buildBase(D, H, L, []), normals);
+      // El sólido ya construido (las orejas cortan su huella): solo se rehace
+      // si la base salió de la caché.
+      addAids(D, P, bp, () => baseSolid || buildBase(D, H, L, []), normals);
       parts.push(bp);
       stage('ayudas base');
     }
@@ -755,7 +820,8 @@ export function build(P, svg, opt = {}) {
       for (const p of D.org.panels) {
         const rel = (v, o) => Math.round((v - o) * 100);
         const cellsRel = p.cells.map((i) => { const c = D.org.cells[i]; return [rel(c.x0, p.x0), rel(c.x1, p.x0), rel(c.y0, p.y0), rel(c.y1, p.y0), p.snapCells.includes(i) ? 1 : 0]; });
-        const sig = JSON.stringify([rel(p.x1, p.x0), rel(p.y1, p.y0), p.clips.map((x) => rel(x, p.x0)), rel(p.tab, p.x0), cellsRel, D.cham > 0 ? [p.x0, p.y0] : 0]);
+        const sig = JSON.stringify([rel(p.x1, p.x0), rel(p.y1, p.y0), p.pivots.map((x) => rel(x, p.x0)), rel(p.ax0, p.x0), rel(p.ax1, p.x0), p.well ? [rel(p.well.x0, p.x0), rel(p.well.y0, p.y0), p.well.atWall] : 0,
+          D.org.wells.filter((w) => w.x1 > p.x0 - 3 && w.x0 < p.x1 + 3 && w.y1 > p.y0 - 12 && w.y0 < p.y1 + 12).map((w) => [rel(w.x0, p.x0), rel(w.y0, p.y0), rel(w.x1, p.x0), rel(w.y1, p.y0)]), rel(p.tab, p.x0), cellsRel, D.cham > 0 ? [p.x0, p.y0] : 0]);
         if (!groups.has(sig)) groups.set(sig, []);
         groups.get(sig).push(p);
       }

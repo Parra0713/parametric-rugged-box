@@ -353,7 +353,7 @@ la cara de trabajo.
   máquina y falla si se pasa de su presupuesto o empeora frente a la línea
   base guardada. Cada función nueva añade su caso.
 
-## Organizador en la tapa (v6.8)
+## Organizador en la tapa (v6.8 – v7.2)
 
 **Contenido → Organizador en la tapa**: cuadrícula de compartimentos
 integrada en la tapa (terminales, tornillos, fusibles…) con **tapas
@@ -366,21 +366,47 @@ con el inserto a medida del calco SVG).
   la cuadrícula reparte el interior disponible.
 * **Tapa interior**: una para todos los compartimentos, una por fila, una
   por compartimento o ninguna.
-* **Sin piezas sueltas**: cada tapa interior lleva un eje Ø3 impreso en su
-  borde (acostado, como los pasadores) que entra de lado en grapas en "C"
-  del carril de la tapa. Cierre de clic: un faldón entra en cada celda con
-  la holgura deslizante calibrada (probeta C) y un resalte con la precarga
-  calibrada (probeta E). El faldón también impide que las piezas pasen de
-  una celda a otra.
+* **Bisagra de pivotes (v7.2)**: cada tapa interior lleva un eje Ø3 impreso
+  en su borde cuyos extremos entran en **agujeros cerrados** de dos bloques
+  de pivote (en las paredes o, con una tapa por celda, entre celdas). Abrir y
+  cerrar carga el agujero entero, no un clic, así que no se gasta. Se monta
+  deslizándola hacia el carril con los pivotes por su ranura: al final saltan
+  a su agujero (retén de 0.3–0.45 mm, de la precarga calibrada). Antes eran
+  grapas en "C" con la punta en el aire y un clic que con el uso aflojaba.
+  Cierre de clic: un faldón entra en cada celda con la holgura deslizante
+  calibrada (probeta C) y un resalte con la precarga calibrada (probeta E).
+* **Apertura**: en el borde libre de cada tapa interior hay un **pozo para
+  el dedo** (bolsillo cerrado, separado de las celdas) y la tapa interior
+  asoma sobre su mitad como pestaña: se mete la yema detrás y se tira. En
+  celdas demasiado pequeñas para un dedo no se añade.
+* **Sin marcas por fuera**: los divisores y carriles quedan separados de la
+  pared exterior por una ranura de 1 línea. Fundidos a ella, al contraerse
+  tiraban de la pared y marcaban una línea vertical en el exterior (el
+  "rechupe" frente a un nervio de las piezas inyectadas).
 * **Fondo inclinado** en cada celda para recoger piezas pequeñas.
-* Sin soportes: la tapa se imprime boca abajo (celdas y grapas hacia
-  arriba, agujero de las grapas en gota) y las tapas interiores con la cara
-  exterior en la cama. Las tapas interiores idénticas se exportan una vez
+* Sin soportes: la tapa se imprime boca abajo (celdas, bloques y pozos hacia
+  arriba, agujeros en gota, ranuras de montaje con chaflán de 45°) y las tapas
+  interiores con la cara exterior en la cama. Las tapas interiores idénticas se exportan una vez
   con su número de copias.
 * Se adapta a todo: octógono (las esquinas fuera del giro se rellenan),
   apilable, girada, XS a L e impresión inclinada. `tests/organizer.test.mjs`
   comprueba que todo cierra, que cada tapa interior abre 0–95° sin chocar y
   que nada necesita soportes.
+
+## Mejoras de impresión (v7.2)
+
+* **Orejas anti‑warping de retiro fácil** (brim estructurado): la oreja ya
+  no toca la pieza; queda separada por una ranura de 1 línea y unida por 3
+  puentecitos de 1 capa por oreja. Sigue anclando la esquina y se arranca con
+  los dedos (antes quedaba fundida al borde).
+* **Encastre del cierre en la base**: el techo del hueco del barril se
+  imprimía como un puente de ~14 mm junto a la pared; ahora baja en chaflán
+  de 45° desde la pared (con 0.4 mm de holgura al giro del barril).
+* **Calibración parcial**: si una probeta queda fuera de rango ("todas
+  duras"/"todas flojas"), al aplicar los resultados se genera solo un test
+  nuevo con esa(s) probeta(s), centrado en el valor corregido (p. ej. A y B:
+  3 g / 12 min en vez de 25 g / 72 min). Y si la caja usa holguras que el
+  perfil no ha medido, un botón genera solo esas.
 
 ## Calibración de holguras (v6.6)
 

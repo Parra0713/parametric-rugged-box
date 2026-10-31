@@ -181,5 +181,23 @@ console.log('\nPerfiles');
   check(prof.activeProfile(st3).values.clearance === DEFAULTS.clearance, 'restablecer vuelve a los valores por defecto');
 }
 
+/* Fuera de rango: test nuevo SOLO de esas probetas ------------------- */
+console.log('\nRepetición parcial');
+{
+  const P0 = { ...DEFAULTS };
+  const plan = calibPlan(P0);
+  const res = applyResults(plan, { A: 'tight', C: 3, B: 'loose', E: 2 }, P0);
+  check(res.retest && JSON.stringify(res.retestIds) === JSON.stringify(['A', 'B']), `fuera de rango: ${res.retestIds.join(', ')}`);
+  const P1 = { ...P0, ...res.values };
+  const again = calibPlan(P1, { only: res.retestIds });
+  const tA = again.tests.find((t) => t.id === 'A');
+  const lastA = plan.tests.find((t) => t.id === 'A').variants.at(-1).value;
+  check(again.tests.map((t) => t.id).join(',') === 'A,B' && again.partial && /solo A, B/.test(again.summary),
+    `el test nuevo solo lleva ${again.tests.map((t) => t.id).join(', ')} (${again.summary})`);
+  check(tA.variants[Math.floor(tA.variants.length / 2)].value > lastA, `A se centra más allá de la más holgada (${lastA} → centro ${tA.variants[Math.floor(tA.variants.length / 2)].value})`);
+  const partial = calibPlan({ ...P0, pinMode: 'printed' }, { mode: 'box', onlyKeys: ['clearance'] });
+  check(partial.tests.length === 1 && partial.tests[0].key === 'clearance', `solo lo que falta: ${partial.tests.map((t) => t.id).join(', ')}`);
+}
+
 console.log(fails ? `\n${fails} FALLOS` : '\nTodo correcto');
 process.exit(fails ? 1 : 0);

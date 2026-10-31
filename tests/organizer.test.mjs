@@ -9,8 +9,13 @@
  *  2. Cerrada: las tapas interiores no se solapan con la tapa, la base ni
  *     entre sí (la caja cierra con el organizador lleno).
  *  3. Cada tapa interior abre 0–95° sobre su eje sin chocar.
- *  4. Bisagra a presión: eje Ø3 > boca de la grapa (clic) y < agujero
- *     (gira); faldón con la holgura calibrada y resalte con interferencia.
+ *  4. Bisagra de pivotes: eje Ø3 < agujero (gira), cada pivote entra
+ *     `pinE` en un agujero CERRADO; la ranura de montaje deja un retén
+ *     (`lip`) y el camino de montaje (deslizar hacia −Y) solo roza en ese
+ *     retén. Faldón con la holgura calibrada y resalte con interferencia.
+ *  7. Apertura: pozo para el dedo libre (sin tapa ni tapa encima) y pestaña
+ *     de la tapa interior sobre su primera mitad.
+ *  8. Divisores y carriles separados de la pared exterior (sin marcas).
  *  5. Imprimibles sin soportes: tapas interiores sin voladizos > 50°; la tapa
  *     no gana voladizos por el organizador. Caben en la cama.
  *  6. Sin piezas sueltas: el organizador no añade pasadores ni tapones.
@@ -18,7 +23,8 @@
 import Module from 'manifold-3d';
 import { init, build } from '../src/engine/engine.js';
 import { DEFAULTS } from '../src/engine/params.js';
-import { M } from '../src/engine/geo.js';
+import { M, CS, prism } from '../src/engine/geo.js';
+import { rrOffset } from '../src/engine/seal.js';
 import { ORG } from '../src/engine/orgLayout.js';
 import { transformVerts, hull2D, fitAngle } from '../src/bedfit.js';
 
@@ -95,8 +101,65 @@ for (const [name, p] of cases) {
     }
   });
   check(worst < 0.5, `todas abren 0–95° sin chocar (peor ${worst.toFixed(2)} mm³ ${where})`);
-  const mouth = ORG.open * 2 * ORG.rho;
-  check(2 * ORG.rho > mouth + 0.3 && O.a > ORG.rho, `eje Ø${2 * ORG.rho}: boca ${mouth.toFixed(2)} (clic ${((2 * ORG.rho - mouth) / 2).toFixed(2)} por lado), agujero Ø${(2 * O.a).toFixed(2)}`);
+  check(O.a > ORG.rho && O.lip >= 0.25 && ORG.pinE - O.lip >= 0.6 && O.hd > ORG.pinE,
+    `pivotes Ø${2 * ORG.rho} en agujero cerrado Ø${(2 * O.a).toFixed(2)}: entran ${ORG.pinE} mm, retén de montaje ${O.lip} mm`);
+  // Camino de montaje: la tapa interior entra deslizando hacia −Y; fuera de
+  // las puntas de los pivotes (el retén, que salta) no toca la tapa.
+  {
+    let worstM = 0;
+    const qs = rs.parts.filter((x) => x.id === 'orgPanel');
+    for (const pp of qs) {
+      const inst = pp.instances[0];
+      const q = toMan(pp.mesh, inst);
+      const dx = inst[12];
+      const pan = O.panels.find((p) => Math.abs(p.x0 - (pp.bbox.min[0] + dx)) < 1.5 || Math.abs(p.ax0 - (pp.bbox.min[0] + dx)) < 1.5) || O.panels[0];
+      for (const dy of [0.4, 1.2, 2.2, O.blockR + 0.6, O.blockR + 1.6]) {
+        const tips = M().union([
+          M().cube([O.lip + 0.05, 8, 8]).translate([pan.ax0 - 0.05, pan.axis.y - 4 + dy, pan.axis.z - 4]),
+          M().cube([O.lip + 0.05, 8, 8]).translate([pan.ax1 - O.lip, pan.axis.y - 4 + dy, pan.axis.z - 4]),
+        ]);
+        // Se monta abierta (colgando a 90°, como queda al abrirla) y deslizando hacia −Y.
+        const qq = rotX(q, -90, pan.axis.y, pan.axis.z + z0);
+        worstM = Math.max(worstM, qq.translate([0, dy, 0]).subtract(tips.translate([0, 0, z0])).intersect(lid).volume());
+      }
+    }
+    check(worstM < 0.05, `se monta deslizando hacia −Y: solo saltan los retenes (${worstM.toFixed(3)} mm³)`);
+    // Retención: sin doblar la tapa interior, los pivotes no salen (ni hacia +Y
+    // por la ranura, ni hacia abajo/arriba).
+    let held = Infinity;
+    for (const pp of qs) {
+      const q = toMan(pp.mesh, pp.instances[0]);
+      for (const d of [[0, 0.8, 0], [0, 0, -0.8], [0, 0, 0.8]]) held = Math.min(held, q.translate(d).intersect(lid).volume());
+    }
+    check(held > 0.05, `los pivotes quedan retenidos en sus agujeros (mín. ${held.toFixed(2)} mm³ de choque al intentar sacarla)`);
+  }
+  // Apertura: pozo libre y pestaña.
+  {
+    const wellsOk = O.panels.filter((p) => p.well).every((p) => {
+      const w = p.well;
+      const probe = M().cube([w.x1 - w.x0 - 2, w.y1 - w.yTab - 1.2, w.h - 1.2 + O.g0]).translate([w.x0 + 1, w.yTab + 0.6, D.Hb + z0 + 0.3]);
+      const free = probe.intersect(lid).volume() + probe.intersect(all).volume();
+      const tab = M().cube([w.x1 - w.x0 - 2, w.yTab - w.y0 - 1, O.ct - 0.2]).translate([w.x0 + 1, w.y0 + 0.5, O.zp0 + z0 + 0.1]).intersect(all).volume();
+      return free < 0.05 && tab > 0.5 * (w.x1 - w.x0 - 2) * (w.yTab - w.y0 - 1) * (O.ct - 0.2);
+    });
+    const nW = O.panels.filter((p) => p.well).length;
+    const fits = O.cellW >= 22 && O.cellL >= 14;
+    check((nW > 0 || !fits) && wellsOk, `pozo para el dedo libre y pestaña en ${nW}/${O.panels.length} tapas interiores${fits ? '' : ' (celdas demasiado pequeñas para un dedo)'}`);
+  }
+  // Divisores separados de la pared exterior a media altura de celda.
+  {
+    const zm = (O.zp1 + O.zi) / 2 + z0;
+    const layer = lid.slice(zm);
+    const band = rrOffset(D, 0).subtract(rrOffset(D, -(O.gap - 0.1)));
+    const touch = layer.intersect(band).area();
+    check(touch < 0.5, `divisores y carriles no tocan la pared exterior (${touch.toFixed(2)} mm² en la ranura de ${O.gap} mm)`);
+  }
+  {
+    // Cada tapa interior con celdas de clic lleva de verdad sus resaltes.
+    const vol = (rr) => rr.parts.filter((x) => x.id === 'orgPanel').reduce((acc, x) => acc + x.volume * x.instances.length, 0);
+    const extra = vol(r) - vol(rs);
+    check(extra > 0.5 * O.panels.reduce((acc, p) => acc + p.snapCells.length, 0), `resaltes de clic presentes (${extra.toFixed(1)} mm³ en ${O.panels.reduce((acc, p) => acc + p.snapCells.length, 0)} celdas)`);
+  }
   check(Math.abs(O.sealClr - D.sealClr) < 1e-6 && O.snap - O.sealClr >= 0.15, `faldón con holgura ${O.sealClr} y resalte de ${(O.snap - O.sealClr).toFixed(2)} de interferencia`);
   const ov = panelsP.map(steepOverhang);
   check(ov.every((v) => v < 0.5), `tapas interiores sin voladizos > 50° (${ov.map((v) => v.toFixed(1)).join(', ')} mm²)`);

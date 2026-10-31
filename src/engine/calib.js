@@ -158,13 +158,21 @@ export function calibPlan(P, opt = {}) {
     how: 'Monta el cierre de prueba con su pasador en cada puesto y ciérralo. Elige el número en el que cierra con un clic firme, queda sin juego y se abre con la uña sin forzar.',
   });
 
+  // Solo algunas probetas (repetir las que quedaron fuera de rango o medir
+  // las que faltan): el resto ya está bien medido y no se reimprime.
+  const only = Array.isArray(opt.only) && opt.only.length ? new Set(opt.only) : null;
+  const onlyKeys = Array.isArray(opt.onlyKeys) && opt.onlyKeys.length ? new Set(opt.onlyKeys) : null;
+  const kept = tests.filter((t) => (!only || only.has(t.id)) && (!onlyKeys || onlyKeys.has(t.key)
+    || (t.key === 'clearance' && onlyKeys.has('clearanceL'))));
   return {
     version: 2, mode, created: Date.now(), fine: !!opt.fine, step, n,
+    partial: only || onlyKeys ? kept.map((t) => t.id) : null,
     lw: D.lw ?? P.lineWidth, lh: D.lh ?? P.layerH, cls: D.cls,
-    summary: mode === 'universal'
+    summary: (mode === 'universal'
       ? 'universal (todas las cajas, XS a L)'
-      : `esta caja: clase ${D.cls}${usesFil ? ' · filamento' : ''}${usesPrinted ? ' · pasador impreso' : ''}${tilted ? ' · inclinada' : ''}${D.stack ? ' · apilable' : ''}`,
-    tests,
+      : `esta caja: clase ${D.cls}${usesFil ? ' · filamento' : ''}${usesPrinted ? ' · pasador impreso' : ''}${tilted ? ' · inclinada' : ''}${D.stack ? ' · apilable' : ''}`)
+      + (only || onlyKeys ? ` · solo ${kept.map((t) => t.id).join(', ')}` : ''),
+    tests: kept,
   };
 }
 
@@ -184,6 +192,7 @@ export function applyResults(plan, choices, current) {
   const values = { ...current };
   const changes = [];
   let retest = false;
+  const retestIds = [];
   const set = (k, v, why) => {
     const to = r3(clampK(k, v));
     if (Math.abs(to - (current[k] ?? to)) > 1e-6) changes.push({ k, from: current[k], to, why });
@@ -196,8 +205,8 @@ export function applyResults(plan, choices, current) {
     // Si quedó fuera del rango (preCarga: "tight" = no cierra → menos precarga).
     const sign = t.key === 'latchPre' ? -1 : 1;
     const st = t.stepE || plan.step;
-    if (c === 'tight') { retest = true; return sign > 0 ? vs[vs.length - 1].value + st : vs[0].value - st; }
-    if (c === 'loose') { retest = true; return sign > 0 ? vs[0].value - st : vs[vs.length - 1].value + st; }
+    if (c === 'tight') { retest = true; retestIds.push(t.id); return sign > 0 ? vs[vs.length - 1].value + st : vs[0].value - st; }
+    if (c === 'loose') { retest = true; retestIds.push(t.id); return sign > 0 ? vs[0].value - st : vs[vs.length - 1].value + st; }
     const v = vs.find((x) => x.n === Number(c));
     return v ? v.value : null;
   };
@@ -262,7 +271,7 @@ export function applyResults(plan, choices, current) {
   if (tD) { const v = pick(tD); if (v != null) set('stackClr', v, 'probeta d'); }
   const tE = byId('E');
   if (tE) { const v = pick(tE); if (v != null) set('latchPre', v, 'probeta E'); }
-  return { values, changes, retest };
+  return { values, changes, retest, retestIds };
 }
 
 /* ================================================================ */

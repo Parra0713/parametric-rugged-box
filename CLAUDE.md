@@ -132,13 +132,31 @@ registro interno del motor) y `logs/sweep-latest.json` (resumen). **Ejecuta
   (pasador impreso), `D.sealClr` (lengüeta), `D.sclr` (apilado): no
   reutilices una para otra cosa.
 - **Organizador**: con la caja cerrada las celdas se abren hacia la base y
-  las tapas interiores (`orgPanel`, grupo B) van entre `D.org.zp0` y `zp1`,
-  por encima del borde (`g0`). Bisagra a presión: eje Ø3 (holgura P3) en
-  grapas con boca hacia +Y; la esquina inferior‑delantera de la grapa se
-  redondea con centro en el eje porque por ahí barre la muesca al abrir.
+  las tapas interiores (`orgPanel`, grupo A) van entre `D.org.zp0` y `zp1`,
+  por encima del borde (`g0`). Bisagra de PIVOTES: eje Ø3 (holgura P3) en el
+  borde de la tapa interior, cuyos extremos (`p.ax0/ax1`, caras `p.pivots`)
+  entran `ORG.pinE` en agujeros cerrados en gota de bloques de pivote
+  (`D.org.blocks`: de pared, con `s` = ±1, o `mid` entre celdas). Montaje:
+  ranura desde +Y de `pinE − lip` + embocadura a 45° en planta; el canal del
+  eje en el carril está abierto hacia +Y (la tapa interior se desliza). Los
+  agujeros y ranuras se restan a toda la tapa (el pivote sobresale de zp1).
+  Pozos para el dedo (`D.org.wells`) dentro de la huella de cada tapa
+  interior; las celdas que pisan (`c.cut`) se recortan con un divisor
+  alrededor y su fondo inclinado se hace sin la muesca y luego se resta.
+  Ranura de desacople `O.gap` (1 línea) entre divisores/carriles y la pared,
+  de zp1 a zi − 0.6; las esquinas de celda contra la pared, en ángulo recto.
   En octógono, lo que queda fuera de la cuerda a la altura del eje se
   rellena (`cell.lim`). Para probar choques usa `_orgNoSnap` (la
-  interferencia del resalte de clic es a propósito).
+  interferencia del resalte de clic es a propósito). Tapas interiores
+  agrupadas por firma (engine.js): si añades algo que distinga dos tapas
+  (pozos ajenos, muescas), inclúyelo en la firma o se reutilizará la geometría
+  equivocada.
+- **Orejas anti‑warping** (`earsDetached`): separadas de la huella de las
+  dos primeras capas por `max(0.4, lw)` y unidas con 3 puentes de 1 capa
+  perpendiculares al contorno. No las fundas con la pieza.
+- **Calibración parcial**: `calibPlan(P, { only: [ids] })` o `{ onlyKeys }`;
+  `applyResults` devuelve `retestIds` (probetas fuera de rango) y la UI
+  genera el test solo con esas.
 - `frustum(a, z0, b, z1)` es una ENVOLVENTE CONVEXA: solo para secciones
   convexas (offsets de `rrOffset`). Para chaflanes de formas cualquiera
   (alojamientos de insertos) usa `steppedChamfer`. El frustum se comía la
