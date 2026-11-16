@@ -101,7 +101,7 @@ registro interno del motor) y `logs/sweep-latest.json` (resumen). **Ejecuta
   marca con `pin()` (p. ej. la forma del octógono en `rrOffset`); (3) usar
   un objeto liberado lanza "Cannot pass deleted object": ejecuta el barrido
   completo tras tocar esto. `tests/mempeak.test.mjs` mide el pico de cada
-  caja en un proceso nuevo y tiene presupuesto (herramienta por celda
+  caja en un proceso nuevo y tiene presupuesto (205 mm, 18 tapas interiores,
   inclinada: 375 → 145 MB).
 - Soportes de voladizos (`overhangSupports`): la holgura con la pieza se
   resta en seis pasos evaluados (no la unión de seis copias casi iguales) y
