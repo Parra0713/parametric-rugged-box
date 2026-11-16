@@ -365,3 +365,7 @@ natural, sin líneas Co-Authored-By ni enlaces a sesiones. No se
 suben `node_modules/`, `scratch/`, `logs/` ni archivos de entorno o claves
 (ver `.gitignore`). `dist/rugged-box.html` SÍ se sube (es la app lista para
 usar): compílala (`npm run build`) en el mismo commit que cambie `src/`.
+Publicación: `.github/workflows/pages.yml` copia `dist/rugged-box.html` a
+GitHub Pages en cada push que la cambie; `release.yml` crea la release al
+subir una etiqueta `vX.Y.Z`, con la app adjunta y las notas de
+`docs/releases/vX.Y.Z.md` (escritas en tono natural, sin aire de IA).

@@ -5,7 +5,10 @@ Defines el espacio interior y obtienes, en tiempo real, una caja completa con
 bisagras, cierres autobloqueantes, junta hermética y compartimentos, lista
 para imprimir **sin soportes y sin tornillería**.
 
+**[Abrir el generador en el navegador](https://parra0713.github.io/parametric-rugged-box/)** · [Descargar la última versión](https://github.com/Parra0713/parametric-rugged-box/releases/latest)
+
 [![Licencia: MIT](https://img.shields.io/badge/licencia-MIT-blue.svg)](LICENSE)
+[![Versión](https://img.shields.io/github/v/release/Parra0713/parametric-rugged-box?label=versión)](https://github.com/Parra0713/parametric-rugged-box/releases/latest)
 ![Sin instalación](https://img.shields.io/badge/instalación-ninguna-brightgreen.svg)
 ![Funciona sin internet](https://img.shields.io/badge/funciona-sin%20internet-brightgreen.svg)
 
@@ -75,9 +78,16 @@ para imprimir **sin soportes y sin tornillería**.
 
 ## Empezar
 
-### Sin instalar nada
+### En el navegador
 
-1. Descarga [`dist/rugged-box.html`](dist/rugged-box.html).
+Abre **https://parra0713.github.io/parametric-rugged-box/**. Nada se envía a
+ningún servidor: la caja se calcula en tu navegador y tus ajustes se guardan
+solo en él.
+
+### Sin conexión
+
+1. Descarga `rugged-box-vX.Y.Z.html` de la
+   [última versión](https://github.com/Parra0713/parametric-rugged-box/releases/latest).
 2. Ábrelo con doble clic en Chrome, Edge o Firefox.
 
 Todo el programa, incluido el motor de geometría, va dentro de ese archivo.
@@ -163,6 +173,10 @@ Se agradecen issues y pull requests. Antes de abrir uno:
   [guía de interfaz](docs/GUIA-INTERFAZ.md) y pasa `npm run test:ui`.
 - Una función nueva añade su caso a `tests/budget.test.mjs` (presupuesto de
   rendimiento).
+- Para publicar una versión: sube `version` en `package.json` y `VERSION` en
+  `src/engine/params.js`, compila (`npm run build`), escribe sus notas en
+  `docs/releases/vX.Y.Z.md` y sube la etiqueta (`git tag vX.Y.Z` y
+  `git push --tags`). La release y la página se actualizan solas.
 - Textos de la interfaz, comentarios y mensajes de commit, en español.
 
 ## Licencia y créditos
