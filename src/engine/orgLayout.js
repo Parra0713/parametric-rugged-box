@@ -123,8 +123,33 @@ function magnetDims(P, lw, ct) {
   const pd = r2(h + MAG.recess);
   // Resalte de la tapa interior: lo que el imán no cabe en su espesor.
   const hb = r2(Math.max(0, Math.ceil((pd + MAG.skin - ct) / lh - 1e-6) * lh));
-  return { d, h, rOut, rIn, wall, Rp: r2(rOut + wall), pd, hb };
+  // Cuántos por tapa interior: 0 = automático (lo sugerido por la carga).
+  const count = Math.min(8, Math.max(0, Math.round(Number(P.magnetCount) || 0)));
+  return { d, h, rOut, rIn, wall, Rp: r2(rOut + wall), pd, hb, count, pull: magnetPull(d, h) };
 }
+
+/**
+ * Fuerza estimada (gramos) con la que se sujetan dos imanes de disco N35
+ * iguales, cara con cara a 0.4 mm. Campo en el eje de un disco
+ * (B = Br/2·[(z+h)/√((z+h)²+R²) − z/√(z²+R²)], Br = 1.2 T) a media
+ * separación, fuerza B²A/2μ0 y un factor 4 que ajusta la fórmula a los
+ * valores de catálogo (6×2 ≈ 0.5 kg en contacto); luego la mitad, por lo que
+ * un imán barato y un alojamiento impreso dan de menos. Es una ESTIMACIÓN
+ * para sugerir cuántos poner, no un dato de catálogo.
+ */
+export function magnetPull(d, h) {
+  const R = d / 2, z = (MAG.air + 2 * MAG.recess) / 2;
+  const B = 0.6 * ((z + h) / Math.hypot(z + h, R) - z / Math.hypot(z, R));
+  const N = (B * B * Math.PI * R * R * 1e-6) / (2 * 4e-7 * Math.PI);
+  return Math.round((N / 9.81) * 1000 * 4 * 0.5);
+}
+
+/**
+ * Carga estimada (gramos) que deben sujetar los imanes de una tapa interior:
+ * sus celdas medio llenas de tornillería (≈ 3 g/cm³ a granel), la mitad la
+ * lleva la bisagra, y ×1.5 por las sacudidas al abrir la caja.
+ */
+export const coverLoad = (volCm3) => Math.round(volCm3 * 0.5 * 3 * 0.5 * 1.5);
 
 /** Holgura de giro en Ø3 (la de la calibración, interpolada como en derive). */
 const clr3 = (P) => P.clearance ?? 0.25;
@@ -339,10 +364,10 @@ export function orgLayout(D, P, side = 'lid') {
     for (const p of panels) p.lim = r2(Math.min(...p.cells.map((i) => cells[i].lim)));
   }
   // Traba magnética: pilares + resaltes (si no caben, se vuelve al clic).
-  let latch = 'snap', magnets = [], magnetWarn = null;
+  let latch = 'snap', magnets = [], magnetWarn = null, magnetInfo = null;
   if (has && B.magnet) {
     const res = placeMagnets(D, B, { cells, panels, rowsY, depth, cellL, cellW });
-    if (res.ok) { latch = 'magnet'; magnets = res.magnets; } else magnetWarn = res.why;
+    if (res.ok) { latch = 'magnet'; magnets = res.magnets; magnetInfo = res.info; } else magnetWarn = res.why;
   }
   for (const c of cells) c.mags = magnets.map((m, i) => (m.x - B.magnet.Rp < c.x1 && m.x + B.magnet.Rp > c.x0 && m.y - B.magnet.Rp < c.y1 && m.y + B.magnet.Rp > c.y0 ? i : -1)).filter((i) => i >= 0);
   if (has) {
@@ -355,11 +380,16 @@ export function orgLayout(D, P, side = 'lid') {
     }
   }
   return {
-    ...B, latch, magnets, magnetWarn,
+    ...B, latch, magnets, magnetWarn, magnetInfo,
     cellL, cellW, depth, zp0, zp1, za, zi, zb, hd, lip, blockR, cells, axes, panels, blocks, wells,
     // Resalte de clic: sobresale la holgura deslizante + la interferencia
     // (precarga calibrada del cierre, probeta E, acotada a 0.15–0.35 mm).
     snap: P._orgNoSnap ? (D.sealClr ?? 0.25) : r2((D.sealClr ?? 0.25) + Math.min(0.35, Math.max(0.15, (D.pre ?? 0.15) + 0.05))), sealClr: D.sealClr ?? 0.25,
+    // Retén del borde libre (traba mecánica): resalte de la cara +Y del
+    // faldón que salta a una muesca en V de la pared exterior. `detI` es lo
+    // que hay que vencer (0.4 mm); encajado queda SIN tensión (no cede con
+    // el tiempo). `detK`: lo que sobresale el resalte del faldón.
+    detI: 0.4, detK: r2((D.sealClr ?? 0.25) + (P._orgNoSnap ? 0 : 0.4)),
     rc: r2(Math.min(2.5, cellL / 4, cellW / 4)),
     // Fondo inclinado (modo ahorro: 3 mm en vez de 6; es macizo y pesa).
     scoop: B.scoopOn ? r2(Math.min(P._eco ? 3 : 6, depth / 3, cellL / 4, cellW / 4)) : 0,
@@ -419,11 +449,17 @@ function placeMagnets(D, B, G) {
     if (!valid.length) return { ok: false, why: `no cabe un imán de Ø${Mg.d} mm junto al borde libre (celdas de ${G.cellL}×${G.cellW} mm)` };
     const width = p.x1 - p.x0, mid = (p.x0 + p.x1) / 2;
     const sep = 2 * Rp + 1;
+    // Sugerencia: los que hacen falta para la carga estimada (mínimo 2 en
+    // tapas anchas, para que no se levante una esquina).
+    const vol = p.cells.reduce((a, i) => a + (cells[i].x1 - cells[i].x0) * (cells[i].y1 - cells[i].y0), 0) * depth / 1000;
+    const load = coverLoad(vol);
+    const suggested = Math.min(6, Math.max(row.length > 1 || width >= 60 ? 2 : 1, Math.ceil(load / Math.max(1, Mg.pull))));
+    const want = Mg.count || suggested;
     let picked;
     if (row.length === 1) {
       // Tapa de una celda: una esquina (la derecha: todas iguales) o las dos.
       const right = valid.find((c) => c.corner && c.x > mid), left = valid.find((c) => c.corner && c.x < mid);
-      picked = width >= 60 && right && left && right.x - left.x >= sep ? [left, right] : [right || left || valid[0]];
+      picked = want >= 2 && right && left && right.x - left.x >= sep ? [left, right] : [right || left || valid[0]];
     } else {
       // Varias celdas: reparto SIMÉTRICO respecto al centro de la tapa (la
       // pestaña está en el centro: si se tira de ella, los imanes sueltan a la
@@ -432,7 +468,7 @@ function placeMagnets(D, B, G) {
       const center = valid.find((c) => Math.abs(c.x - mid) < 0.05);
       const pairs = valid.filter((c) => c.x > mid + 0.05 && valid.some((q) => Math.abs(q.x + c.x - 2 * mid) < 0.05))
         .sort((u, v) => u.x - v.x);
-      let n = Math.min(4, Math.max(2, Math.round(width / 75)));
+      let n = Math.min(want, 2 * pairs.length + (center ? 1 : 0));
       if (n % 2 && !center) n = n + 1 <= 2 * pairs.length ? n + 1 : n - 1;
       const half = [];
       for (let i = 0; i < Math.floor(n / 2); i++) {
@@ -449,7 +485,16 @@ function placeMagnets(D, B, G) {
     // `yc`: cara del carril del borde libre (el resalte de la tapa interior y
     // su hueco en el cuerpo no pasan de ahí); `xa`/`xb`: lo mismo en X.
     p.magnets = picked.map((c) => ({ x: c.x, y, yc: atWall ? null : r2(rowsY[p.rowLast][1]), xa: c.xa, xb: c.xb })).sort((u, v) => u.x - v.x);
+    p.magnetPlan = { suggested, load, asked: Mg.count, placed: p.magnets.length };
     for (const m of p.magnets) out.push({ ...m, panel: panels.indexOf(p) });
   }
-  return { ok: true, magnets: out };
+  // Resumen para la interfaz: lo sugerido, lo puesto y si lo pedido no cabe.
+  const plans = panels.map((p) => p.magnetPlan);
+  const short = Mg.count && plans.some((q) => q.placed < Mg.count);
+  const info = {
+    pull: Mg.pull, load: Math.max(...plans.map((q) => q.load)), suggested: Math.max(...plans.map((q) => q.suggested)),
+    asked: Mg.count, placed: plans.map((q) => q.placed),
+    note: short ? `solo caben ${Math.min(...plans.map((q) => q.placed))} imanes por tapa interior de los ${Mg.count} pedidos` : null,
+  };
+  return { ok: true, magnets: out, info };
 }

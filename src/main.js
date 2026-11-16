@@ -824,6 +824,11 @@ function renderInfo() {
   if (mags.length) {
     const n = 2 * mags.reduce((s, O) => s + O.magnets.length, 0);
     extra.push(`${n} imanes de disco de ${dims(mags[0].magnet.d, mags[0].magnet.h)} (dos por punto de cierre)`);
+    // Sugerencia de cantidad (estimación): fuerza de una pareja frente a la
+    // carga de una tapa interior con las celdas medio llenas de tornillería.
+    const mi = mags.map((O) => O.magnetInfo).sort((u, v) => v.suggested - u.suggested)[0];
+    const put = Math.min(...mags.flatMap((O) => O.magnetInfo.placed));
+    extra.push(`Imanes por tapa interior: ${mi.asked ? `${put} (elegidos por ti)` : `${put} (automático)`}. Sugeridos: ${mi.suggested}, porque cada pareja sujeta unos ${mi.pull}${NB}g y una tapa cargada pide unos ${mi.load}${NB}g (estimación)${mi.asked && put < mi.suggested ? '. Con menos de los sugeridos puede abrirse sola con la caja llena' : ''}`);
   }
   if (D.cord) extra.push(`${mm(D.cord.length)} de filamento TPU de 1,75${NB}mm para la junta`);
   if (fl0.hinge) extra.push(`${fl0.hingeQty} trozo${fl0.hingeQty > 1 ? 's' : ''} de ${mm(fl0.hinge)} de filamento de 1,75${NB}mm para las bisagras`);
@@ -1318,7 +1323,9 @@ function readme(r, layout) {
   ];
   if (orgs.length) {
     lines.push(`  4. Tapas interiores (${orgs.map(([n]) => n).join(' y ')}): se montan abiertas a 90°, deslizándolas hacia el lado de su eje hasta que los dos pivotes salten a sus agujeros (clic).`,
-      '     Para sacarlas, tira en sentido contrario. Se abren metiendo la yema del dedo en el pozo, detrás de la pestaña.');
+      '     Para sacarlas, tira en sentido contrario. Se abren metiendo la yema del dedo en el pozo y enganchando el nervio que hay bajo la pestaña.',
+      '     Traba de clic: al cerrar, el borde libre salta a una muesca de la pared (se nota el clic). Encajada no queda en tensión.',
+      '     Si no caben planas en la cama, el archivo ya las trae inclinadas con sus aletas y soportes (como la base y la tapa).');
     if (mags.length) lines.push(
       `  5. Imanes (${mags[0][1].magnet.d} × ${mags[0][1].magnet.h} mm): van a presión, uno en cada pilar de la caja y otro en cada resalte de las tapas interiores, cara con cara.`,
       '     Mete primero los de la caja, apretando con algo plano hasta el fondo. ANTES de meter cada imán de una tapa interior comprueba la polaridad:',

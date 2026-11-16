@@ -80,7 +80,7 @@ registro interno del motor) y `logs/sweep-latest.json` (resumen). **Ejecuta
   bool` en un ajuste o en un grupo = solo se muestra cuando aplica). No
   añadas controles a mano en `main.js`. `SCHEMA` lleva funciones: no viaja
   a los hilos (solo `P`).
-- Las ayudas de impresión (`addAids`) se aplican a base, tapa e insertos; el
+- Las ayudas de impresión (`addAids`) se aplican a base, tapa, insertos y tapas interiores; el
   parámetro `G` describe el contorno y si hay mecánica que proteger.
 - Memoria WASM: todo objeto creado se libera en `cleanup()` al final de
   `build`; no guardes `Manifold`/`CrossSection` entre llamadas. En las
@@ -183,6 +183,20 @@ registro interno del motor) y `logs/sweep-latest.json` (resumen). **Ejecuta
   liso). El resalte y su hueco no pasan de la cara del carril ni del divisor
   vecino (`m.yc`, `m.xa/xb`): si no, adelgazan la pared de al lado. Reparto
   simétrico respecto a la pestaña. Sin sitio → `O.magnetWarn` y clic.
+  Cantidad por tapa interior: `magnetCount` (0 = automático). La sugerencia
+  sale de `magnetPull(d, h)` (fuerza estimada de una pareja) y `coverLoad`
+  (celdas medio llenas de tornillería); `O.magnetInfo` lo resume para la
+  interfaz y avisa si lo pedido no cabe. Son estimaciones: dilo así.
+- **Traba mecánica** (`orgLatch: 'snap'`): resaltes de fricción en los
+  faldones (±X) más un RETÉN en el borde libre (`detentSpots`,
+  `O.detI`/`O.detK`): resalte a 45° en la cara +Y del faldón que salta a una
+  muesca en V de la pared exterior y queda sin tensión. Solo en tapas
+  interiores cuyo borde libre da a la pared exterior (un carril intermedio
+  lleva el canal del eje siguiente: no admite muesca). Nervio de agarre
+  bajo la pestaña, dentro del pozo.
+- Las tapas interiores pasan por `addAids` como las demás piezas (impresión
+  centrada; orejas, o inclinada con aletas y soportes). `G.noCut`: sin
+  bisel de contacto (una placa fina apoya en su canto).
 - **Junta de cordón** (`sealMode: 'cord'`): filamento TPU Ø1.75 crudo;
   `D.gap` = Ø·(1 − c), `D.gw` para llenar ≤ 85 %, sin pieza `gasket`;
   `D.cord.length` (grupo A) = perímetro del eje de la ranura + 1 %.
@@ -343,9 +357,10 @@ ajuste nuevo debe pasar ambos.
    medibles, y ni el visor, ni el documento, ni la memoria de JS crecen
    tras 24 cambios completos.
 
-## Flujo con el PC del usuario
+## Repositorio
 
-El repo vive en `la carpeta del repositorio` (git local, rama
-`main`). Se desarrolla en la nube y se sincroniza con un tar; en el PC se
-compila y prueba con `./node_modules/.bin/vite build` y `node tests/...`
-(la VM del PC no tiene acceso a npm). Commits con autor Parra0713.
+Git, rama `main`, remoto `origin` en GitHub
+(`Parra0713/parametric-rugged-box`). Mensajes de commit en español. No se
+suben `node_modules/`, `scratch/`, `logs/` ni archivos de entorno o claves
+(ver `.gitignore`). `dist/rugged-box.html` SÍ se sube (es la app lista para
+usar): compílala (`npm run build`) en el mismo commit que cambie `src/`.

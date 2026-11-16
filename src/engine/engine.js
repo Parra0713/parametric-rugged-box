@@ -24,6 +24,7 @@ import { gridfinityFeet } from './gridfinity.js';
 import { lidRelief, patternArea } from './pattern.js';
 import { baseInsert, lidInsert } from './insert.js';
 import { orgMech, orgPanel, orgCavity } from './organizer.js';
+import { ORG } from './orgLayout.js';
 import { transformVerts, hull2D, fitAngle, tiltChoose, rotatedExtent } from '../bedfit.js';
 import { fitsFlat } from '../optimizer.js';
 import { contactCut, supportFins, wedgeVolume, rotAxis, invRigid, overhangRegions, overhangSupports } from './tilt.js';
@@ -581,7 +582,7 @@ function addAids(D, P, pt, solidNative, normals, G = { hx: D.Lo / 2, hy: D.Wo / 
     place: pt.place && { ...pt.place }, tilt: pt.tilt && JSON.parse(JSON.stringify(pt.tilt)),
     aids: pt.aids.map((a) => ({ ...a, mesh: cloneMesh(a.mesh) })), log: D.log.slice(n0),
   });
-  if (aidsMemo.size > 6) aidsMemo.delete(aidsMemo.keys().next().value);
+  if (aidsMemo.size > 24) aidsMemo.delete(aidsMemo.keys().next().value);   // base, tapa, insertos y tapas interiores
 }
 
 function addAidsRaw(D, P, pt, solidNative, normals, G) {
@@ -650,7 +651,9 @@ function addAidsRaw(D, P, pt, solidNative, normals, G) {
   const zmin = R0.boundingBox().min[2];
   const bq = Q.boundingBox();
   const axisLen = tilt.axis === 'X' ? bq.max[0] - bq.min[0] : bq.max[1] - bq.min[1];
-  const cut = contactCut(R0, zmin, axisLen, G.wall, D.lh);
+  // Una placa fina (tapa interior) apoya en su canto: no se le hace bisel
+  // (el de las paredes de la caja se la comería); la sujetan las aletas.
+  const cut = G.noCut ? { h: 0, width: G.wall } : contactCut(R0, zmin, axisLen, G.wall, D.lh);
   const zc = zmin + cut.h;
   let Q2 = Q;
   let symmetric = false;
@@ -856,8 +859,8 @@ export function build(P, svg, opt = {}) {
     // Tapas interiores de los compartimentos. Las de la TAPA van en el grupo A
     // y las de la BASE en el B: así cada hilo de la vista rápida lleva una
     // mitad de la caja y las tapas interiores de la otra (van parejos).
-    if (want('A') && D.org && D.org.has) parts.push(...orgPanelParts(D, D.org, 'lid', z0, normals));
-    if (want('B') && D.orgB && D.orgB.has) parts.push(...orgPanelParts(D, D.orgB, 'base', z0, normals));
+    if (want('A') && D.org && D.org.has) parts.push(...orgPanelParts(D, P, D.org, 'lid', z0, normals));
+    if (want('B') && D.orgB && D.orgB.has) parts.push(...orgPanelParts(D, P, D.orgB, 'base', z0, normals));
 
     // Junta: si el anillo no cabe en la cama se divide en tramos rectos
     // (cortes en los lados largos, donde la ranura es recta). El TPU se
@@ -1026,7 +1029,7 @@ export function build(P, svg, opt = {}) {
  * La malla es siempre la del "marco de tapa"; las de la base se colocan con
  * el giro de 180° (orgFlip).
  */
-function orgPanelParts(D, O, side, z0, normals) {
+function orgPanelParts(D, P, O, side, z0, normals) {
   const out = [];
   const groups = new Map();
   const rel = (v, o) => Math.round((v - o) * 100);
@@ -1034,7 +1037,9 @@ function orgPanelParts(D, O, side, z0, normals) {
     const cellsRel = p.cells.map((i) => { const c = O.cells[i]; return [rel(c.x0, p.x0), rel(c.x1, p.x0), rel(c.y0, p.y0), rel(c.y1, p.y0), p.snapCells.includes(i) ? 1 : 0]; });
     const sig = JSON.stringify([rel(p.x1, p.x0), rel(p.y1, p.y0), p.pivots.map((x) => rel(x, p.x0)), rel(p.ax0, p.x0), rel(p.ax1, p.x0), p.well ? [rel(p.well.x0, p.x0), rel(p.well.y0, p.y0), p.well.atWall] : 0,
       O.wells.filter((w) => w.x1 > p.x0 - 3 && w.x0 < p.x1 + 3 && w.y1 > p.y0 - 12 && w.y0 < p.y1 + 12).map((w) => [rel(w.x0, p.x0), rel(w.y0, p.y0), rel(w.x1, p.x0), rel(w.y1, p.y0)]), rel(p.tab, p.x0), cellsRel,
-      (p.magnets || []).map((m) => [rel(m.x, p.x0), rel(m.y, p.y0)]), D.cham > 0 ? [p.x0, p.y0] : 0]);
+      (p.magnets || []).map((m) => [rel(m.x, p.x0), rel(m.y, p.y0)]), D.cham > 0 ? [p.x0, p.y0] : 0,
+      // Retén del borde libre: solo contra la pared exterior y en su tramo recto.
+      p.y1 >= D.Wi / 2 - 0.31 ? (Math.max(Math.abs(p.x0), Math.abs(p.x1)) > D.Li / 2 - Math.max(D.ri, 1) - 12 ? ['w', p.x0] : 'w') : 0]);
     if (!groups.has(sig)) groups.set(sig, []);
     groups.get(sig).push(p);
   }
@@ -1044,19 +1049,27 @@ function orgPanelParts(D, O, side, z0, normals) {
   for (const list of groups.values()) {
     const m0 = mark();
     const ref = list[0];
-    const man = memoSolid(memoKey('org', ref, O.cells.filter((_, i) => ref.cells.includes(i)), O.blocks, O.wells, O.a, O.zp0, O.zp1, O.rc, O.sealClr, O.snap,
+    const man = memoSolid(memoKey('org', ref, O.cells.filter((_, i) => ref.cells.includes(i)), O.blocks, O.wells, O.a, O.zp0, O.zp1, O.rc, O.sealClr, O.snap, O.detK,
       O.latch, O.latch === 'magnet' ? [O.magnet, O.magnets] : 0, D.Li, D.Wi, D.cham, D.ri, D.seg, D.lw), () => ({ solid: orgPanel(D, O, ref) })).solid;
     k++;
     const label = base ? 'Tapa interior de la base' : 'Tapa interior';
-    out.push(part('orgPanel', groups.size > 1 ? `${label} ${k}` : label, man, {
+    // Impresión centrada en el origen (como base, tapa e insertos): así le
+    // valen las mismas ayudas de cama (diagonal + orejas, o inclinada con
+    // bisel, aletas y soportes embebidos).
+    const cx = (ref.ax0 + ref.ax1) / 2, cy = (ref.axis.y - ORG.rho + ref.y1) / 2;
+    const pt = part('orgPanel', groups.size > 1 ? `${label} ${k}` : label, man, {
       key: `orgPanel${base ? 'B' : ''}${k - 1}`, side,
-      print: T(0, 0, -O.zp0),
+      print: T(-cx, -cy, -O.zp0),
       instances: list.map((p) => (base ? mul(mul(T(0, 0, z0), RX), T(p.x0 - ref.x0, p.y0 - ref.y0, 0)) : T(p.x0 - ref.x0, p.y0 - ref.y0, z0))),
       qty: list.length, material: 'PETG / PLA',
       // Eje de giro de la copia de referencia (ensamblaje); el visor suma el
       // desplazamiento en Y de cada copia.
       axis: base ? { y: -ref.axis.y, z: 2 * D.Hb - ref.axis.z + z0 } : { y: ref.axis.y, z: ref.axis.z + z0 },
-    }, normals));
+    }, normals);
+    addAids(D, P, pt, () => man, normals, {
+      hx: (ref.ax1 - ref.ax0) / 2, hy: (ref.y1 - ref.axis.y + ORG.rho) / 2, wall: O.ct, mech: false, noCut: true,
+    });
+    out.push(pt);
     release(m0);
   }
   return out;

@@ -247,6 +247,19 @@ export function orgMech(D, O) {
   adds.push(M().compose(solids));
   // Pozos para el dedo: bolsillo de la franja hasta zp1 + h.
   if (O.wells.length) lidCuts.push(M().compose(O.wells.map((w) => prism(wellCS(w), O.zp1 - 0.6, O.zp1 + w.h))));
+  // Traba mecánica: muescas en V de la pared exterior para los retenes del
+  // borde libre (más anchas y hondas que el resalte: encajado no aprieta).
+  if (O.latch === 'snap' && O.has) {
+    const { zc } = detentZ(O);
+    const gD = O.detI + 0.1, gh = gD + 0.15;
+    const yw = D.Wi / 2;
+    const grooves = [];
+    for (const p of O.panels) for (const i of p.snapCells) for (const sp of detentSpots(D, O, p, O.cells[i])) {
+      // Sección (y, z) → extruida a lo largo de X.
+      grooves.push(poly([[-0.01, -gh], [gD, 0], [-0.01, gh]]).extrude(sp.len + 1).rotate([90, 0, 90]).translate([sp.xc - sp.len / 2 - 0.5, yw, zc]));
+    }
+    if (grooves.length) lidCuts.push(M().compose(grooves));
+  }
   // Traba magnética: pilar del cuerpo (del fondo de la celda hasta 0.2 mm del
   // resalte de la tapa interior) con el alojamiento del imán en su extremo.
   let add = M().compose(adds);
@@ -262,6 +275,41 @@ export function orgMech(D, O) {
   }
   return { add, cut: lidCuts.length ? unionAll(lidCuts) : null };
 }
+
+/** Grosor del faldón y su anillo en una celda (sin imanes). */
+const skirtT = (D) => Math.max(0.9, 2 * D.lw);
+const skirtRing = (D, O, c) => cellCS(D, O, c, O.sealClr).subtract(cellCS(D, O, c, O.sealClr + skirtT(D)));
+
+/**
+ * Retenes del borde libre de una celda (traba mecánica): tramos de la cara
+ * +Y del faldón, a los dos lados del pozo si lo hay, donde va un resalte que
+ * salta a una muesca de la pared exterior. Solo en tapas interiores cuyo
+ * borde libre da a la pared exterior (es maciza; un carril intermedio lleva
+ * el canal del eje siguiente y no admite muesca) y en su tramo recto.
+ * Devuelve [{ xc, ys, len }] (ys: cara del faldón; la pared está a sealClr).
+ */
+function detentSpots(D, O, p, c, ring = skirtRing(D, O, c)) {
+  if (O.latch !== 'snap' || c.r !== p.rowLast || p.y1 < D.Wi / 2 - 0.31 || c.y1 < D.Wi / 2 - 0.05) return [];
+  const st = skirtT(D), ys = D.Wi / 2 - O.sealClr;
+  const cx0 = c.lim ? Math.max(c.x0, -c.lim) : c.x0, cx1 = c.lim ? Math.min(c.x1, c.lim) : c.x1;
+  const straight = D.Li / 2 - (D.cham > 0 ? D.cham : Math.max(D.ri, 1)) - 1;
+  const fits = (xc, len) => Math.abs(xc) + len / 2 <= straight && xc - len / 2 >= cx0 + 1 && xc + len / 2 <= cx1 - 1
+    && (() => { const r = rectCS(xc - len / 2 - 0.3, xc + len / 2 + 0.3, ys - st * 0.8, ys); return ring.intersect(r).area() > 0.98 * r.area(); })();
+  const xm = (cx0 + cx1) / 2, w = cx1 - cx0;
+  for (const len of [8, 6, 4.5, 3.5]) {
+    if (len > w / 3) continue;
+    if (fits(xm, len)) return [{ xc: xm, ys, len }];
+    // Con el pozo en medio: un retén a cada lado, centrado en su tramo.
+    const ok = [];
+    for (let xc = cx0 + 1 + len / 2; xc <= cx1 - 1 - len / 2 + 1e-6; xc += 0.25) if (fits(xc, len)) ok.push(xc);
+    const mid = (a) => (a.length ? [a[a.length >> 1]] : []);
+    const out = [...mid(ok.filter((x) => x < xm)), ...mid(ok.filter((x) => x > xm))].map((xc) => ({ xc: Math.round(xc * 100) / 100, ys, len }));
+    if (out.length) return out;
+  }
+  return [];
+}
+/** Altura (z) del centro del retén y media altura de su base. */
+const detentZ = (O) => { const hb = O.detK + 0.05; return { hb, zc: O.zp1 + ORG.skirtH - hb - 0.05 }; };
 
 /** Planta de los bloques de pivote (para recortar las tapas interiores). */
 function blocksPlan(O, b, yGrow = 0) {
@@ -352,6 +400,21 @@ export function orgPanel(D, O, p) {
         }
       }
     }
+  }
+  // Retén del borde libre: resalte a 45° en la cara +Y del faldón.
+  if (O.latch === 'snap') {
+    const { hb, zc } = detentZ(O);
+    for (const i of p.snapCells) for (const sp of detentSpots(D, O, p, O.cells[i])) {
+      skirts.push(poly([[-st / 2, -hb], [0, -hb], [O.detK, 0], [0, hb], [-st / 2, hb]]).extrude(sp.len).rotate([90, 0, 90]).translate([sp.xc - sp.len / 2, sp.ys, zc]));
+    }
+  }
+  // Agarre de la pestaña: un nervio bajo su borde, dentro del pozo. La yema
+  // entra en el pozo, se dobla bajo la pestaña y engancha el nervio: se tira
+  // con el dedo, no con la uña.
+  if (p.well && !D.draft) {
+    const w = p.well;
+    const rib = rectCS(w.x0 + 1.5, w.x1 - 1.5, w.yTab - 1.4, w.yTab - 0.2);
+    if (w.x1 - w.x0 >= 9 && w.yTab - w.y0 >= 2.6) skirts.push(prism(rib.intersect(plate), O.zp1 - 0.01, O.zp1 + Math.min(1.6, w.h - 2.5)));
   }
   m = m.add(unionAll(skirts));
   // Traba magnética: resalte en la cara interior (frente a su pilar) con el

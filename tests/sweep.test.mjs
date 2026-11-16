@@ -146,6 +146,8 @@ cases.push({ name: 'imanes herramienta por celda en la tapa', p: { innerL: 205, 
 cases.push({ name: 'huecos para objetos en la tapa y en la base', p: { innerL: 160, innerW: 100, baseDepth: 30, lidDepth: 20, insertMode: 'pockets', lidMode: 'pockets', contentPolys: [ellipse(160, 100)] } });
 cases.push({ name: 'huecos para objetos solo en la tapa', p: { innerL: 120, innerW: 80, lidDepth: 18, lidMode: 'pockets', contentPolys: [ellipse(120, 80)] } });
 cases.push({ name: 'parámetros antiguos (lidOrg + insertLid)', p: { innerL: 120, innerW: 80, lidDepth: 18, lidOrg: true, orgCols: 3, orgRows: 2, insertLid: true, insertMode: 'blank' } });
+cases.push({ name: 'tapas interiores inclinadas (no caben planas)', p: { innerL: 290, innerW: 150, baseDepth: 40, lidDepth: 25, lidMode: 'org', orgCols: 6, orgRows: 3, insertMode: 'org', orgBCols: 4, orgBRows: 2, orgBCover: 'row' } });
+cases.push({ name: 'imanes elegidos (3 por tapa)', p: { innerL: 180, innerW: 100, lidDepth: 22, lidMode: 'org', orgCols: 4, orgRows: 2, orgLatch: 'magnet', magnetCount: 3 } });
 cases.push({ name: 'cordón TPU M estándar', p: { sealMode: 'cord' } });
 cases.push({ name: 'cordón TPU XS 25×25', p: { innerL: 25, innerW: 25, baseDepth: 12, lidDepth: 5, sealMode: 'cord' } });
 cases.push({ name: 'cordón TPU L inclinada + apilable', p: { innerL: 240, innerW: 170, baseDepth: 40, lidDepth: 15, stackable: true, sealMode: 'cord' } });
@@ -263,6 +265,12 @@ for (const c of cases) {
     for (const side of ['base', 'lid']) {
       const O = side === 'base' ? r.D.orgB : r.D.org;
       if (P.orgLatch === 'magnet' && O && O.has) check(O.latch === 'magnet' && O.magnets.length >= O.panels.length, `traba magnética (${side}): ${O.magnets.length} parejas de imanes en ${O.panels.length} tapas interiores`);
+    }
+    // Ayudas de cama también en las tapas interiores: si no caben planas van
+    // inclinadas con aletas (sin bisel: es una placa) y el eje intacto.
+    for (const q of pp) {
+      const fitsFlat = !!q.place;
+      check(Array.isArray(q.aids) && (fitsFlat || (q.tilt && q.tilt.cut === 0 && q.aids.some((a) => /Aletas/.test(a.name)))), `${q.name}: ${fitsFlat ? 'cabe plana' : `inclinada ${q.tilt?.alpha}° con ${q.aids.map((a) => a.name.split(' (')[0]).join(' + ')}`}`);
     }
     if (P.sealMode === 'cord') {
       check(!r.parts.some((q) => q.id === 'gasket') && r.D.cord && r.D.cord.length > 2 * (D.Li + D.Wi) * 0.9 && D.gd - D.tl > 0.6 * 1.75 && D.gd - D.tl < 0.9 * 1.75 && D.fill <= 0.95,

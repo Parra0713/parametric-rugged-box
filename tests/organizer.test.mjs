@@ -78,6 +78,8 @@ const cases = [
   ['M · 3×2 por celda · imanes 8×3', { innerL: 150, innerW: 100, lidDepth: 22, orgCols: 3, orgRows: 2, orgCover: 'cell', orgLatch: 'magnet', magnetD: 8, magnetH: 3 }],
   ['M octógono · 4×2 por fila · imanes 5×1', { innerL: 160, innerW: 90, cornerCut: 15, lidDepth: 20, orgCols: 4, orgRows: 2, orgCover: 'row', orgLatch: 'magnet', magnetD: 5, magnetH: 1 }],
   ['S · 2×2 una tapa · imanes 4×0,8 (sin resalte)', { innerL: 80, innerW: 60, lidDepth: 14, orgCols: 2, orgRows: 2, orgCover: 'single', orgLatch: 'magnet', magnetD: 4, magnetH: 0.8 }],
+  ['herramienta · una tapa · 2 imanes elegidos', { ...user, orgCover: 'single', orgLatch: 'magnet', magnetCount: 2 }],
+  ['M · 4×2 por fila · 5 imanes elegidos', { innerL: 180, innerW: 100, lidDepth: 22, orgCols: 4, orgRows: 2, orgCover: 'row', orgLatch: 'magnet', magnetCount: 5 }],
   // En la base (mismo organizador, girado) y en las dos mitades.
   ['BASE · M 4×2 una tapa', { innerL: 140, innerW: 90, baseDepth: 40, orgCols: 4, orgRows: 2, orgCover: 'single' }, 'base'],
   ['BASE · M 4×3 por fila', { innerL: 150, innerW: 110, baseDepth: 35, orgCols: 4, orgRows: 3, orgCover: 'row' }, 'base'],
@@ -222,6 +224,12 @@ function checkSide(P, r, rs, side, both) {
       const tab = M().cube([w.x1 - w.x0 - 2, w.yTab - w.y0 - 1, O.ct - 0.2]).translate([w.x0 + 1, w.y0 + 0.5, O.zp0 + 0.1]).intersect(all).volume();
       return free < 0.05 && tab > 0.5 * (w.x1 - w.x0 - 2) * (w.yTab - w.y0 - 1) * (O.ct - 0.2);
     });
+    // Agarre: nervio bajo el borde de la pestaña, dentro del pozo.
+    const grip = O.panels.filter((q) => q.well && q.well.x1 - q.well.x0 >= 9).every((q) => {
+      const w = q.well;
+      return M().cube([w.x1 - w.x0 - 4, 0.8, 0.8]).translate([w.x0 + 2, w.yTab - 1.2, O.zp1 + 0.2]).intersect(all).volume() > 0.9 * (w.x1 - w.x0 - 4) * 0.64;
+    });
+    check(grip, `${tag}nervio de agarre bajo la pestaña`);
     const nW = O.panels.filter((q) => q.well).length;
     const fits = O.cellW >= 22 && O.cellL >= 14;
     check((nW > 0 || !fits) && wellsOk, `${tag}pozo para el dedo libre y pestaña en ${nW}/${O.panels.length} tapas interiores${fits ? '' : ' (celdas demasiado pequeñas para un dedo)'}`);
@@ -265,6 +273,12 @@ function checkSide(P, r, rs, side, both) {
     check(ribB > 0.05 && ribC > 0.05, `${tag}nervios de aplastamiento en los dos (${ribB.toFixed(2)} / ${ribC.toFixed(2)} mm³)`);
     check(wallB > 0.72 && skin > 0.99 && zc - Mg.pd - O.zp0 >= MAG.skin - 1e-6, `${tag}pilar con pared alrededor del imán (${(wallB * 100).toFixed(0)} %) y piel de ${(zc - Mg.pd - O.zp0).toFixed(2)} mm bajo el de la tapa interior`);
     check(Math.abs(MAG.air + 2 * MAG.recess - 0.4) < 1e-9 && O.depth >= Mg.hb + MAG.air + Mg.pd + 0.8, `${tag}imanes cara con cara a ${(MAG.air + 2 * MAG.recess).toFixed(1)} mm; celda de ${O.depth} mm ≥ ${(Mg.hb + MAG.air + Mg.pd + 0.8).toFixed(1)}`);
+    {
+      // Cantidad: la sugerida (carga estimada / fuerza de una pareja) o la elegida.
+      const mi = O.magnetInfo, asked = Number(P.magnetCount) || 0;
+      const okCount = O.panels.every((q) => (asked ? q.magnets.length === asked || (q.magnets.length < asked && !!mi.note) || q.magnets.length === asked + 1 : q.magnets.length >= Math.min(q.magnetPlan.suggested, 2)));
+      check(mi && mi.pull > 0 && mi.suggested >= 1 && okCount, `${tag}imanes por tapa: ${asked ? `pedidos ${asked}` : 'automático'}, puestos ${mi.placed.join('+')} (sugeridos ${mi.suggested}: ${mi.pull} g por pareja, carga ${mi.load} g)${mi.note ? ' — ' + mi.note : ''}`);
+    }
     check(sym < 0.05, `${tag}imanes repartidos simétricos respecto a la pestaña (${sym.toFixed(3)} mm)`);
   } else {
     check(want !== 'magnet' || !!O.magnetWarn, `${tag}traba de clic${want === 'magnet' ? ' (el imán no cabía: aviso)' : ''}`);
@@ -272,6 +286,21 @@ function checkSide(P, r, rs, side, both) {
     const extra = vol(r) - vol(rs);
     check(extra > 0.5 * O.panels.reduce((acc, q) => acc + q.snapCells.length, 0), `${tag}resaltes de clic presentes (${extra.toFixed(1)} mm³ en ${O.panels.reduce((acc, q) => acc + q.snapCells.length, 0)} celdas)`);
     check(Math.abs(O.sealClr - D.sealClr) < 1e-6 && O.snap - O.sealClr >= 0.15, `${tag}faldón con holgura ${O.sealClr} y resalte de ${(O.snap - O.sealClr).toFixed(2)} de interferencia`);
+    // Retén del borde libre (tapas interiores que dan a la pared exterior):
+    // el resalte entra `detI` en una muesca de la pared y, encajado, no
+    // aprieta (sin tensión permanente); para salir tiene que vencer el labio.
+    {
+      const real = M().union(r.parts.filter(mine).flatMap((pp) => pp.instances.map((inst) => toMan(pp.mesh, mulM(toFrame, inst)))));
+      const wallP = O.panels.filter((q) => q.y1 >= D.Wi / 2 - 0.31);
+      const slab = (z0, z1) => M().cube([D.Li + 20, 0.3, z1 - z0]).translate([-D.Li / 2 - 10, D.Wi / 2 + 0.03, z0]);
+      const zc = O.zp1 + ORG.skirtH - (O.detK + 0.05) - 0.05;
+      const bump = slab(zc - 0.3, zc + 0.3).intersect(real).volume();           // resalte más allá de la cara de la pared
+      const seated = slab(O.zp1, O.zp1 + ORG.skirtH).intersect(real).intersect(lid).volume();
+      const lip = slab(O.zp1 + 0.05, zc - O.detI - 0.3).intersect(lid);         // labio macizo bajo la muesca
+      const lipOk = lip.volume() > 0.95 * (D.Li - 2 * Math.max(D.ri, D.cham || 0) - 4) * 0.3 * (zc - O.detI - 0.35 - O.zp1);
+      check(!wallP.length || (bump > 0.3 * wallP.length && seated < 0.02 && lipOk && Math.abs(O.detK - O.sealClr - O.detI) < 1e-6),
+        `${tag}retén del borde libre en ${wallP.length} tapa(s): resalte de ${O.detI} mm en su muesca (${bump.toFixed(1)} mm³), encajado sin apretar (${seated.toFixed(3)} mm³) y labio entero`);
+    }
   }
   const ov = panelsP.map(steepOverhang);
   check(ov.every((v) => v < 0.5), `${tag}tapas interiores sin voladizos > 50° (${ov.map((v) => v.toFixed(1)).join(', ')} mm²)`);

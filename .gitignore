@@ -1,8 +1,32 @@
+# Dependencias y compilación intermedia
 node_modules/
-scratch/
 .vite/
+
+# Trabajo temporal, perfiles y registros
+scratch/
+.scratch/
+prof/
 *.log
 logs/*
 !logs/README.md
+*.cpuprofile
+*.heapprofile
+*.heapsnapshot
+.sync-*.tgz
+*.tgz
+
+# Secretos y entorno (nunca al repositorio)
+.env
+.env.*
+*.pem
+*.key
+.npmrc
+
+# Editor y sistema
+.vscode/
+.idea/
+.claude/
+*.swp
 .DS_Store
 Thumbs.db
+desktop.ini

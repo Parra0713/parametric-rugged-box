@@ -20,7 +20,7 @@ import { orgBase, orgLayout, contentModes } from './orgLayout.js';
 export { contentModes };
 
 /** Versión de la aplicación (la misma que package.json; va en el LEEME y en el registro). */
-export const VERSION = '7.3.0';
+export const VERSION = '7.3.1';
 
 /* ------------------------------------------------------------------------ */
 /*  Valores por defecto                                                     */
@@ -131,7 +131,7 @@ export const DEFAULTS = {
   // --- Traba de las tapas interiores ---
   orgLatch: 'snap',     // 'snap' (mecánica, clic) | 'magnet' (imanes de disco)
   magnetD: 6,           // diámetro del imán
-  magnetH: 2,           // altura del imán
+  magnetH: 2, magnetCount: 0,           // altura del imán
 
   // --- Insertos interiores ---
   insertH: 0,           // altura del inserto de la base (0 = auto: profundidad de la base − 0.5)
@@ -342,6 +342,9 @@ export const SCHEMA = [
       hint: 'La medida nominal del imán de disco (p. ej. 6 × 2): el alojamiento ya lleva su ajuste a presión' },
     { k: 'magnetH', label: 'Altura del imán', type: 'range', min: 0.5, max: 6, step: 0.5, unit: 'mm', when: (P) => P.orgLatch === 'magnet',
       hint: 'Si la tapa va a cargar tornillería pesada, mejor imanes de 8 × 3 o mayores' },
+    { k: 'magnetCount', label: 'Imanes por tapa interior', type: 'select', when: (P) => P.orgLatch === 'magnet',
+      options: [[0, 'Automático (los sugeridos)'], [1, '1'], [2, '2'], [3, '3'], [4, '4'], [5, '5'], [6, '6']],
+      hint: 'Son parejas: cada punto lleva un imán en la caja y otro en la tapa interior. El resumen dice cuántos se sugieren y por qué' },
   ]},
   { tab: 'contenido', group: 'Insertos', when: (P) => anyInsert(P), items: [
     { k: 'fingerCount', label: 'Huecos para los dedos', type: 'select', options: [
@@ -1005,6 +1008,7 @@ export function derive(P) {
       O = null;
     }
     if (O && O.magnetWarn) warn.push(`Traba magnética en ${where}: ${O.magnetWarn}. Se usa la traba mecánica (clic).`);
+    if (O && O.magnetInfo && O.magnetInfo.note) warn.push(`Imanes en ${where}: ${O.magnetInfo.note}.`);
     D[key] = O;
     if (!O && D.content[side] === 'org') D.content = { ...D.content, [side]: 'off' };
   }

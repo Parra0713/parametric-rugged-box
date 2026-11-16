@@ -400,6 +400,20 @@ quedan justo encima de los de la base (alojan lo que sobresale).
   caja avisa y usa el clic. El resumen y el LEEME dicen cuántos imanes
   comprar y cómo comprobar la polaridad antes de meterlos.
 
+### v7.3.1: cantidad de imanes, retén de clic y tapas interiores con ayudas
+
+* **Imanes por tapa interior**: «Automático» pone los sugeridos; también se
+  puede elegir de 1 a 6. La sugerencia es una estimación (fuerza de una
+  pareja N35 a 0,4 mm frente a una tapa con las celdas medio llenas de
+  tornillería) y el resumen la explica. Si los pedidos no caben, lo avisa.
+* **Traba mecánica más firme**: además de los resaltes de fricción, el borde
+  libre lleva un retén que salta a una muesca de la pared exterior (0,4 mm)
+  y queda sin tensión. Solo en las tapas interiores que dan a la pared
+  exterior; las de filas intermedias siguen con fricción.
+* **Apertura**: nervio de agarre bajo la pestaña, dentro del pozo.
+* **Ayudas de cama en las tapas interiores**: orejas si son grandes y, si no
+  caben planas, inclinadas con aletas y soportes embebidos.
+
 ### Junta de cordón (lo más útil de otras cajas)
 
 Se revisaron los generadores de cajas más usados (ver *Fuentes*) y sus
