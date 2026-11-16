@@ -360,7 +360,8 @@ ajuste nuevo debe pasar ambos.
 ## Repositorio
 
 Git, rama `main`, remoto `origin` en GitHub
-(`Parra0713/parametric-rugged-box`). Mensajes de commit en español. No se
+(`Parra0713/parametric-rugged-box`). Mensajes de commit en español, de una línea, cortos y en tono
+natural, sin líneas Co-Authored-By ni enlaces a sesiones. No se
 suben `node_modules/`, `scratch/`, `logs/` ni archivos de entorno o claves
 (ver `.gitignore`). `dist/rugged-box.html` SÍ se sube (es la app lista para
 usar): compílala (`npm run build`) en el mismo commit que cambie `src/`.
