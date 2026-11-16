@@ -15,7 +15,12 @@
  * Unidades: milímetros y grados.
  */
 
-import { orgBase, orgLayout } from './orgLayout.js';
+import { orgBase, orgLayout, contentModes } from './orgLayout.js';
+
+export { contentModes };
+
+/** Versión de la aplicación (la misma que package.json; va en el LEEME y en el registro). */
+export const VERSION = '7.3.0';
 
 /* ------------------------------------------------------------------------ */
 /*  Valores por defecto                                                     */
@@ -58,7 +63,7 @@ export const DEFAULTS = {
   latchCount: 0,        // 0 = automático
 
   // --- Cierre hermético ---
-  sealMode: 'tpu',      // 'tpu' | 'labyrinth' | 'simple'
+  sealMode: 'tpu',      // 'tpu' (junta impresa) | 'cord' (cordón de filamento TPU 1.75) | 'labyrinth' | 'simple'
   gasketCompression: 0.25,
 
   // --- Anti línea de contracción ---
@@ -99,8 +104,13 @@ export const DEFAULTS = {
   toothPitch: 6,        // paso de los dientes de contacto
   finGap: 0,            // holgura aleta‑pieza (0 = 1.5 capas)
 
-  // --- Organizador en la tapa ---
-  lidOrg: false,        // cuadrícula de compartimentos en la tapa
+  // --- Contenido de cada mitad: 'off' | 'blank' | 'pockets' | 'org' ---
+  // (cualquier combinación: inserto en la base y compartimentos en la tapa,
+  //  compartimentos en las dos, inserto con huecos en la tapa…)
+  insertMode: 'off',    // BASE: nada | inserto en blanco | inserto con huecos (contenido SVG) | compartimentos
+  lidMode: 'off',       // TAPA: ídem
+
+  // --- Compartimentos de la tapa ---
   orgCols: 6,           // columnas (a lo largo del lado largo)
   orgRows: 3,           // filas (lado corto)
   orgMinL: 0,           // largo mínimo de celda (0 = repartir el interior); la caja crece si hace falta
@@ -109,10 +119,22 @@ export const DEFAULTS = {
   orgCover: 'single',   // 'single' | 'row' | 'cell' | 'none': tapas interiores
   orgScoop: true,       // fondo con chaflán para recoger piezas pequeñas
 
+  // --- Compartimentos de la base (mismos ajustes, independientes) ---
+  orgBCols: 3,
+  orgBRows: 2,
+  orgBMinL: 0,
+  orgBMinW: 0,
+  orgBDepth: 0,         // 0 = la que dé la base; la base crece si hace falta
+  orgBCover: 'single',
+  orgBScoop: true,
+
+  // --- Traba de las tapas interiores ---
+  orgLatch: 'snap',     // 'snap' (mecánica, clic) | 'magnet' (imanes de disco)
+  magnetD: 6,           // diámetro del imán
+  magnetH: 2,           // altura del imán
+
   // --- Insertos interiores ---
-  insertMode: 'off',    // 'off' | 'blank' | 'pockets' (alojamientos del contenido SVG)
-  insertLid: false,     // inserto en blanco para la tapa
-  insertH: 0,           // altura del inserto (0 = auto: profundidad de la base − 0.5)
+  insertH: 0,           // altura del inserto de la base (0 = auto: profundidad de la base − 0.5)
   insertTol: 0.3,       // holgura inserto ↔ caja
   pocketTol: 0.6,       // holgura objeto ↔ alojamiento
   insertDeck: 1.6,      // espesor de la cubierta
@@ -181,7 +203,10 @@ export function ecoParams(P) {
   // deja toda la cara colgando sobre los nervios) pero con piel mínima bajo
   // las celdas (ver derive).
   if (Q.relief === 'engrave' && Q.pattern !== 'smooth' && !Q.stackable) Q._ecoEngrave = true;
-  if (Q.insertMode && Q.insertMode !== 'off') lower('insertDeck', Math.max(5 * lh, 1.0), 'cubierta del inserto');
+  {
+    const cm = contentModes(Q);
+    if ([cm.base, cm.lid].some((m) => m === 'blank' || m === 'pockets')) lower('insertDeck', Math.max(5 * lh, 1.0), 'cubierta del inserto');
+  }
   Q._ecoChanges = ch;
   return Q;
 }
@@ -197,6 +222,9 @@ export function migrate(saved) {
   if (s.gridfinity === true) s.gridfinity = 'feet';
   if (s.gridfinity === false) s.gridfinity = 'off';
   if (s.patternSize === 12) s.patternSize = 11.5;   // antiguo valor por defecto (celda > 10 mm)
+  // v7.3: un selector por mitad en vez de `lidOrg` / `insertLid`.
+  if (s.lidMode === undefined && (s.lidOrg || s.insertLid)) s.lidMode = s.lidOrg ? 'org' : 'blank';
+  delete s.lidOrg; delete s.insertLid;
   delete s.innerH; delete s.lidFrac;
   return s;
 }
@@ -230,8 +258,17 @@ export const TABS = [
 
 /**
  * Cada grupo pertenece a una pestaña. Los controles con `adv: true` solo se
- * muestran en "Modo experto"; `hint` es una ayuda de una línea.
+ * muestran en "Modo experto"; `hint` es una ayuda de una línea; `when(P)`
+ * (en un control o en un grupo) lo oculta cuando no aplica.
  */
+const FILL_OPTIONS = [['off', 'Nada'], ['blank', 'Inserto en blanco'], ['pockets', 'Inserto con huecos para los objetos'], ['org', 'Compartimentos']];
+const COVER_OPTIONS = [['single', 'Una para todos los compartimentos'], ['row', 'Una por fila'], ['cell', 'Una por compartimento'], ['none', 'Sin tapa interior']];
+const orgOn = (side) => (P) => contentModes(P)[side] === 'org';
+const insOn = (side) => (P) => ['blank', 'pockets'].includes(contentModes(P)[side]);
+const anyInsert = (P) => insOn('base')(P) || insOn('lid')(P);
+const anyPockets = (P) => { const m = contentModes(P); return m.base === 'pockets' || m.lid === 'pockets'; };
+const anyOrgCover = (P) => { const m = contentModes(P); return (m.base === 'org' && P.orgBCover !== 'none') || (m.lid === 'org' && P.orgCover !== 'none'); };
+
 export const SCHEMA = [
   /* ---------------- Caja ---------------- */
   { tab: 'caja', group: 'Medidas interiores', items: [
@@ -249,9 +286,9 @@ export const SCHEMA = [
   { tab: 'caja', group: 'Paredes', items: [
     { k: 'eco', label: 'Modo ahorro de material', type: 'toggle',
       hint: 'Mínimo filamento con la misma mecánica y cierre: paredes y fondos mínimos seguros, banda estrecha, grabado con piel mínima…' },
-    { k: 'ecoDesign', label: 'Diseño del modo ahorro', type: 'select', options: [
+    { k: 'ecoDesign', label: 'Diseño del modo ahorro', type: 'select', when: (P) => !!P.eco, options: [
       ['min', 'Mínimos (mismo diseño)'], ['rib', 'Nervado ligero (máximo ahorro)'], ['ribStiff', 'Nervado rígido (como la caja normal)']],
-      hint: 'Solo con el modo ahorro. Nervado: pared de 3 líneas con nervios verticales dentro del vuelo de la banda. Ligero: tan rígida como la de mínimos con menos material; rígido: tan rígida como la caja normal' },
+      hint: 'Nervado: pared de 3 líneas con nervios verticales. Ligero ahorra más; rígido iguala a la caja normal' },
     { k: 'wall', label: 'Pared', type: 'range', min: 1.2, max: 5, step: 0.05, unit: 'mm' },
     { k: 'floor', label: 'Fondo', type: 'range', min: 1.2, max: 5, step: 0.1, unit: 'mm', adv: true },
     { k: 'top', label: 'Techo de la tapa', type: 'range', min: 1.2, max: 5, step: 0.1, unit: 'mm', adv: true },
@@ -272,46 +309,63 @@ export const SCHEMA = [
     { k: 'objRotateAllow', label: 'Permitir girar objetos', type: 'toggle', hint: 'Giros de 90° y 180° para encajarlos mejor' },
     { k: 'objClearance', label: 'Margen hasta la pared', type: 'range', min: 0, max: 10, step: 0.5, unit: 'mm', adv: true },
   ]},
-  { tab: 'contenido', group: 'Inserto', items: [
-    { k: 'insertMode', label: 'Inserto de la base', type: 'select', options: [
-      ['off', 'Sin inserto'], ['blank', 'En blanco'], ['pockets', 'Con huecos para los objetos']] },
+  // Qué lleva cada mitad. Los ajustes de cada opción solo aparecen cuando
+  // esa opción está elegida (`when`): la interfaz enseña lo que aplica.
+  { tab: 'contenido', group: 'En la base', items: [
+    { k: 'insertMode', label: 'La base lleva', type: 'select', options: FILL_OPTIONS },
+    { k: 'orgBCols', label: 'Columnas (lado largo)', type: 'range', min: 1, max: 20, step: 1, unit: '', when: orgOn('base') },
+    { k: 'orgBRows', label: 'Filas (lado corto)', type: 'range', min: 1, max: 12, step: 1, unit: '', when: orgOn('base') },
+    { k: 'orgBCover', label: 'Tapa interior', type: 'select', options: COVER_OPTIONS, when: orgOn('base'),
+      hint: 'Con bisagra de pivotes: sin piezas sueltas' },
+    { k: 'orgBMinL', label: 'Largo mínimo de cada celda (0 = repartir)', type: 'range', min: 0, max: 150, step: 0.5, unit: 'mm', when: orgOn('base'), hint: 'Si no caben, la caja crece' },
+    { k: 'orgBMinW', label: 'Ancho mínimo de cada celda (0 = repartir)', type: 'range', min: 0, max: 150, step: 0.5, unit: 'mm', when: orgOn('base') },
+    { k: 'orgBDepth', label: 'Altura de las celdas (0 = la de la base)', type: 'range', min: 0, max: 200, step: 0.5, unit: 'mm', when: orgOn('base'), hint: 'Si no caben, la base crece' },
+    { k: 'orgBScoop', label: 'Fondo inclinado para recoger piezas', type: 'toggle', adv: true, when: orgOn('base') },
+    { k: 'insertH', label: 'Altura del inserto (0 = auto)', type: 'range', min: 0, max: 200, step: 0.5, unit: 'mm', adv: true, when: insOn('base') },
+  ]},
+  { tab: 'contenido', group: 'En la tapa', items: [
+    { k: 'lidMode', label: 'La tapa lleva', type: 'select', options: FILL_OPTIONS },
+    { k: 'orgCols', label: 'Columnas (lado largo)', type: 'range', min: 1, max: 20, step: 1, unit: '', when: orgOn('lid') },
+    { k: 'orgRows', label: 'Filas (lado corto)', type: 'range', min: 1, max: 12, step: 1, unit: '', when: orgOn('lid') },
+    { k: 'orgCover', label: 'Tapa interior', type: 'select', options: COVER_OPTIONS, when: orgOn('lid'),
+      hint: 'Con bisagra de pivotes: sin piezas sueltas' },
+    { k: 'orgMinL', label: 'Largo mínimo de cada celda (0 = repartir)', type: 'range', min: 0, max: 150, step: 0.5, unit: 'mm', when: orgOn('lid'), hint: 'Si no caben, la caja crece' },
+    { k: 'orgMinW', label: 'Ancho mínimo de cada celda (0 = repartir)', type: 'range', min: 0, max: 150, step: 0.5, unit: 'mm', when: orgOn('lid') },
+    { k: 'orgDepth', label: 'Altura de las celdas (0 = la de la tapa)', type: 'range', min: 0, max: 120, step: 0.5, unit: 'mm', when: orgOn('lid'), hint: 'Si no caben, la tapa crece' },
+    { k: 'orgScoop', label: 'Fondo inclinado para recoger piezas', type: 'toggle', adv: true, when: orgOn('lid') },
+  ]},
+  { tab: 'contenido', group: 'Traba de las tapas interiores', when: (P) => anyOrgCover(P), items: [
+    { k: 'orgLatch', label: 'Traba', type: 'select', options: [
+      ['snap', 'Mecánica (clic)'], ['magnet', 'Magnética (imanes)']],
+      hint: 'Mecánica: sin piezas extra. Magnética: una pareja de imanes de disco por punto de cierre, a presión' },
+    { k: 'magnetD', label: 'Diámetro del imán', type: 'range', min: 2, max: 20, step: 0.5, unit: 'mm', when: (P) => P.orgLatch === 'magnet',
+      hint: 'La medida nominal del imán de disco (p. ej. 6 × 2): el alojamiento ya lleva su ajuste a presión' },
+    { k: 'magnetH', label: 'Altura del imán', type: 'range', min: 0.5, max: 6, step: 0.5, unit: 'mm', when: (P) => P.orgLatch === 'magnet',
+      hint: 'Si la tapa va a cargar tornillería pesada, mejor imanes de 8 × 3 o mayores' },
+  ]},
+  { tab: 'contenido', group: 'Insertos', when: (P) => anyInsert(P), items: [
     { k: 'fingerCount', label: 'Huecos para los dedos', type: 'select', options: [
-      ['auto', 'Automático (2)'], ['0', 'Ninguno'], ['1', 'Uno'], ['2', 'Dos']] },
-    { k: 'fingerD', label: 'Tamaño del hueco para dedo', type: 'range', min: 10, max: 40, step: 1, unit: 'mm' },
-    { k: 'pocketTol', label: 'Holgura del objeto', type: 'range', min: 0, max: 3, step: 0.05, unit: 'mm', cal: true, hint: 'Juego entre el objeto y su hueco' },
-    { k: 'insertLid', label: 'Inserto en blanco para la tapa', type: 'toggle' },
-    { k: 'insertH', label: 'Altura (0 = auto)', type: 'range', min: 0, max: 200, step: 0.5, unit: 'mm', adv: true },
+      ['auto', 'Automático (2)'], ['0', 'Ninguno'], ['1', 'Uno'], ['2', 'Dos']], when: (P) => anyPockets(P) },
+    { k: 'fingerD', label: 'Tamaño del hueco para dedo', type: 'range', min: 10, max: 40, step: 1, unit: 'mm', when: (P) => anyPockets(P) },
+    { k: 'pocketTol', label: 'Holgura del objeto', type: 'range', min: 0, max: 3, step: 0.05, unit: 'mm', cal: true, hint: 'Juego entre el objeto y su hueco', when: (P) => anyPockets(P) },
     { k: 'insertTol', label: 'Holgura con la caja', type: 'range', min: 0, max: 1.5, step: 0.025, unit: 'mm', cal: true, adv: true },
     { k: 'insertDeck', label: 'Espesor de la cubierta', type: 'range', min: 0.8, max: 4, step: 0.2, unit: 'mm', adv: true },
-    { k: 'fingerPos', label: 'Posición de los huecos', type: 'range', min: -100, max: 100, step: 5, unit: '%', adv: true },
+    { k: 'fingerPos', label: 'Posición de los huecos', type: 'range', min: -100, max: 100, step: 5, unit: '%', adv: true, when: (P) => anyPockets(P) },
   ]},
 
   /* ---------------- Tapa ---------------- */
-  { tab: 'contenido', group: 'Organizador en la tapa', items: [
-    { k: 'lidOrg', label: 'Compartimentos en la tapa', type: 'toggle', hint: 'Cuadrícula para piezas pequeñas (terminales, tornillos…) con tapa interior' },
-    { k: 'orgCols', label: 'Columnas (lado largo)', type: 'range', min: 1, max: 20, step: 1, unit: '' },
-    { k: 'orgRows', label: 'Filas (lado corto)', type: 'range', min: 1, max: 12, step: 1, unit: '' },
-    { k: 'orgCover', label: 'Tapa interior', type: 'select', options: [
-      ['single', 'Una para todos los compartimentos'], ['row', 'Una por fila'], ['cell', 'Una por compartimento'], ['none', 'Sin tapa interior']],
-      hint: 'Con bisagra a presión y cierre de clic: sin piezas sueltas' },
-    { k: 'orgMinL', label: 'Largo mínimo de cada celda (0 = repartir)', type: 'range', min: 0, max: 150, step: 0.5, unit: 'mm', hint: 'Si no caben, la caja crece' },
-    { k: 'orgMinW', label: 'Ancho mínimo de cada celda (0 = repartir)', type: 'range', min: 0, max: 150, step: 0.5, unit: 'mm' },
-    { k: 'orgDepth', label: 'Altura de las celdas (0 = la de la tapa)', type: 'range', min: 0, max: 120, step: 0.5, unit: 'mm', hint: 'Si no caben, la tapa crece' },
-    { k: 'orgScoop', label: 'Fondo inclinado para recoger piezas', type: 'toggle', adv: true },
-  ]},
-
   { tab: 'tapa', group: 'Diseño de la tapa', items: [
     { k: 'pattern', label: 'Patrón', type: 'select', options: [
       ['smooth', 'Liso'], ['hex', 'Hexagonal'], ['stripes', 'Estriado'], ['cross', 'Reforzado cruzado'],
       ['circuit', 'Sci‑fi: circuito'], ['radial', 'Sci‑fi: radial']] },
     { k: 'relief', label: 'Acabado', type: 'select', options: [
       ['engrave', 'Grabado (recomendado)'], ['emboss', 'En relieve']] },
-    { k: 'patternSize', label: 'Tamaño del patrón', type: 'range', min: 4, max: 40, step: 0.5, unit: 'mm' },
+    { k: 'patternSize', when: (P) => P.pattern !== 'smooth', label: 'Tamaño del patrón', type: 'range', min: 4, max: 40, step: 0.5, unit: 'mm' },
     { k: 'patternDepth', label: 'Profundidad', type: 'range', min: 0.4, max: 2, step: 0.1, unit: 'mm', adv: true },
-    { k: 'patternRib', label: 'Grosor de línea', type: 'range', min: 0.8, max: 5, step: 0.1, unit: 'mm', adv: true },
-    { k: 'patternMargin', label: 'Margen al borde', type: 'range', min: 2, max: 20, step: 0.5, unit: 'mm', adv: true },
-    { k: 'stripeAngle', label: 'Ángulo (estriado)', type: 'range', min: 0, max: 180, step: 5, unit: '°', adv: true },
-    { k: 'patternSeed', label: 'Variante (circuito)', type: 'range', min: 1, max: 999, step: 1, unit: '', adv: true },
+    { k: 'patternRib', when: (P) => P.pattern !== 'smooth', label: 'Grosor de línea', type: 'range', min: 0.8, max: 5, step: 0.1, unit: 'mm', adv: true },
+    { k: 'patternMargin', when: (P) => P.pattern !== 'smooth', label: 'Margen al borde', type: 'range', min: 2, max: 20, step: 0.5, unit: 'mm', adv: true },
+    { k: 'stripeAngle', label: 'Ángulo', type: 'range', min: 0, max: 180, step: 5, unit: '°', adv: true, when: (P) => P.pattern === 'stripes' },
+    { k: 'patternSeed', label: 'Variante', type: 'range', min: 1, max: 999, step: 1, unit: '', adv: true, when: (P) => P.pattern === 'circuit' },
   ]},
   { tab: 'tapa', group: 'Logo', svg: true, items: [
     { k: 'svgSize', label: 'Tamaño', type: 'range', min: 5, max: 100, step: 1, unit: '%' },
@@ -334,9 +388,12 @@ export const SCHEMA = [
     { k: 'axialGap', label: 'Holgura entre nudillos', type: 'range', min: 0.2, max: 0.8, step: 0.05, unit: 'mm', cal: true, adv: true },
   ]},
   { tab: 'mecanica', group: 'Sellado', items: [
-    { k: 'sealMode', label: 'Cierre tapa‑base', type: 'select', options: [
-      ['tpu', 'Junta de TPU (hermético)'], ['labyrinth', 'Laberinto doble'], ['simple', 'Lengüeta simple']] },
-    { k: 'gasketCompression', label: 'Compresión de la junta', type: 'range', min: 0.15, max: 0.35, step: 0.01, unit: '', adv: true },
+    { k: 'sealMode', label: 'Junta entre tapa y base', type: 'select', options: [
+      ['tpu', 'Junta de TPU impresa (hermético)'], ['cord', 'Cordón de filamento TPU 1,75 (hermético, sin imprimir)'],
+      ['labyrinth', 'Laberinto doble'], ['simple', 'Lengüeta simple']],
+      hint: 'Cordón: se corta un trozo de filamento TPU y se mete en la ranura; no hay que imprimir la junta' },
+    { k: 'gasketCompression', label: 'Compresión de la junta', type: 'range', min: 0.15, max: 0.35, step: 0.01, unit: '', adv: true,
+      when: (P) => P.sealMode === 'tpu' || P.sealMode === 'cord' },
     { k: 'sealClr', label: 'Holgura de la lengüeta', type: 'range', min: 0.05, max: 0.6, step: 0.025, unit: 'mm', cal: true, adv: true },
   ]},
 
@@ -381,10 +438,10 @@ export const SCHEMA = [
     { k: 'overhangAngle', label: 'Voladizo máximo sin soporte', type: 'range', min: 40, max: 65, step: 1, unit: '°', adv: true },
     { k: 'maxBridge', label: 'Puente máximo sin soporte', type: 'range', min: 5, max: 20, step: 0.5, unit: 'mm', adv: true, hint: 'Orca/Bambu soportan puentes > 10 mm: el diseño se mantiene por debajo' },
     { k: 'supportPitch', label: 'Densidad de soportes (paso)', type: 'range', min: 2, max: 8, step: 0.5, unit: 'mm', adv: true },
-    { k: 'finSpacing', label: 'Separación de aletas (0 = auto)', type: 'range', min: 0, max: 80, step: 1, unit: 'mm', adv: true },
-    { k: 'finReach', label: 'Alcance de aletas (0 = auto)', type: 'range', min: 0, max: 100, step: 5, unit: '%', adv: true },
-    { k: 'toothPitch', label: 'Paso de dientes de aleta', type: 'range', min: 3, max: 15, step: 0.5, unit: 'mm', adv: true },
-    { k: 'finGap', label: 'Holgura de aleta (0 = auto)', type: 'range', min: 0, max: 1, step: 0.05, unit: 'mm', adv: true },
+    { k: 'finSpacing', when: (P) => P.printAids === 'auto', label: 'Separación de aletas (0 = auto)', type: 'range', min: 0, max: 80, step: 1, unit: 'mm', adv: true },
+    { k: 'finReach', when: (P) => P.printAids === 'auto', label: 'Alcance de aletas (0 = auto)', type: 'range', min: 0, max: 100, step: 5, unit: '%', adv: true },
+    { k: 'toothPitch', when: (P) => P.printAids === 'auto', label: 'Paso de dientes de aleta', type: 'range', min: 3, max: 15, step: 0.5, unit: 'mm', adv: true },
+    { k: 'finGap', when: (P) => P.printAids === 'auto', label: 'Holgura de aleta (0 = auto)', type: 'range', min: 0, max: 1, step: 0.05, unit: 'mm', adv: true },
   ]},
   { tab: 'impresion', group: 'Acabado (línea de contracción)', items: [
     { k: 'shadowLine', label: 'Ranuras que ocultan la línea', type: 'toggle' },
@@ -452,11 +509,19 @@ export function derive(P) {
   D.rot90 = P.innerW > P.innerL;
   D.Li = D.rot90 ? P.innerW : P.innerL;
   D.Wi = D.rot90 ? P.innerL : P.innerW;
-  // Organizador en la tapa: si las celdas mínimas no caben, la caja crece.
-  const OB = orgBase(P, lw);
-  if (OB) {
-    if (OB.needL > D.Li + 1e-6) { D.snapped.push(`interior ${r2(D.Li)} → ${OB.needL} mm de largo para ${OB.cols} celdas del organizador`); D.Li = OB.needL; }
-    if (OB.needW > D.Wi + 1e-6) { D.snapped.push(`interior ${r2(D.Wi)} → ${OB.needW} mm de ancho para ${OB.rows} filas del organizador`); D.Wi = OB.needW; }
+  // Qué lleva cada mitad (inserto, compartimentos o nada).
+  D.content = contentModes(P);
+  // Compartimentos (tapa y/o base): si las celdas mínimas no caben, la caja crece.
+  const OB = orgBase(P, lw, 'lid');
+  let OBb = orgBase(P, lw, 'base');
+  if (OBb && P.gridfinity === 'baseplate') {
+    warn.push('Compartimentos en la base y placa Gridfinity interior no caben a la vez: se omiten los compartimentos de la base.');
+    OBb = null; D.content = { ...D.content, base: 'off' };
+  }
+  for (const [O1, where] of [[OB, 'la tapa'], [OBb, 'la base']]) {
+    if (!O1) continue;
+    if (O1.needL > D.Li + 1e-6) { D.snapped.push(`interior ${r2(D.Li)} → ${O1.needL} mm de largo para ${O1.cols} celdas en ${where}`); D.Li = O1.needL; }
+    if (O1.needW > D.Wi + 1e-6) { D.snapped.push(`interior ${r2(D.Wi)} → ${O1.needW} mm de ancho para ${O1.rows} filas en ${where}`); D.Wi = O1.needW; }
   }
 
   D.t = r2(snapW(P.wall)); note('Pared', P.wall, D.t);
@@ -535,7 +600,7 @@ export function derive(P) {
     // cada lado de la ranura de la junta/lengüeta: si no, crece la banda
     // (más barato que engrosar toda la pared).
     const bo0 = P.bandProud > 0 ? P.bandProud : Mx.bo;
-    const Fmin = r2((P.sealMode === 'tpu' ? 2.4 : 2.0) + 2 * Math.max(0.9, 2 * lw) + 0.05);
+    const Fmin = r2((P.sealMode === 'tpu' ? 2.4 : P.sealMode === 'cord' ? 2.2 : 2.0) + 2 * Math.max(0.9, 2 * lw) + 0.05);
     if (D.t + D.bo < Fmin) D.bo = r2(Fmin - D.t);
     if (D.bo !== bo0) D.ecoChanges.push(`banda ${bo0} → ${D.bo} mm${D.bo > bo0 ? ' (ranura con 2 líneas por lado)' : ''}`);
   }
@@ -554,6 +619,19 @@ export function derive(P) {
     D.gap = r2(D.gkh * (1 - D.c));
     D.gd = r2(D.tl + D.gap);
     D.fill = r2((D.gkw * D.gkh) / (D.gw * D.gap));
+    D.grooves = [{ off: D.F / 2, w: D.gw }];
+  } else if (D.sealMode === 'cord') {
+    // Junta de CORDÓN: un trozo de filamento TPU de 1.75 mm sin imprimir
+    // (como el cordón tórico de las cajas comerciales). Mismas reglas que la
+    // junta impresa: compresión 20–30 % (la fija el tope duro cara con cara)
+    // y llenado del alojamiento ≤ 85 %.
+    D.c = clamp(P.gasketCompression, 0.15, 0.35);
+    D.cordD = 1.75;
+    const area = (Math.PI * D.cordD ** 2) / 4;
+    D.gap = r2(D.cordD * (1 - D.c));
+    D.gw = r2(clamp(area / (0.85 * D.gap), 2.0, 3.0));
+    D.gd = r2(D.tl + D.gap);
+    D.fill = r2(area / (D.gw * D.gap));
     D.grooves = [{ off: D.F / 2, w: D.gw }];
   } else if (D.sealMode === 'labyrinth') {
     // Doble ranura solo si cabe sin bajar de 2 líneas: paredes entre ranuras
@@ -726,6 +804,11 @@ export function derive(P) {
   const DbMin = r2(Math.max(latchNeed - D.floorTop, D.fc + 2, 5));
   let Db = P.baseDepth;
   if (Db < DbMin) { warn.push(`Base demasiado baja para los cierres: profundidad ajustada a ${DbMin} mm.`); Db = DbMin; }
+  if (OBb) {
+    // Celdas + tapa interior + holgura hasta el borde.
+    const need = Math.max(OBb.needDl, r2(OBb.g0 + OBb.ct + 5));
+    if (need > Db + 1e-6) { D.snapped.push(`base ${r2(Db)} → ${need} mm de profundidad para los compartimentos`); Db = need; }
+  }
   D.Hb = r2(snapH(D.floorTop + Db));
   D.Db = r2(D.Hb - D.floorTop);
 
@@ -741,7 +824,7 @@ export function derive(P) {
   if (OB) {
     // Celdas + tapa interior + holgura hasta el borde.
     const need = Math.max(OB.needDl, r2(OB.g0 + OB.ct + 5));
-    if (need > Dl + 1e-6) { D.snapped.push(`tapa ${r2(Dl)} → ${need} mm de profundidad para el organizador`); Dl = need; }
+    if (need > Dl + 1e-6) { D.snapped.push(`tapa ${r2(Dl)} → ${need} mm de profundidad para los compartimentos`); Dl = need; }
   }
   D.Hl = r2(snapH(D.topT + Dl));
   D.Dl = r2(D.Hl - D.topT);
@@ -913,10 +996,17 @@ export function derive(P) {
   // completo) y 'final' para exportar.
   D.draft = P.quality === 'draft';
   D.seg = P.quality === 'final' ? 96 : D.draft ? 20 : 40;
-  D.org = orgLayout(D, P);
-  if (D.org && (D.org.cellL < 5 || D.org.cellW < 5 || D.org.depth < 3)) {
-    warn.push(`Organizador: celdas demasiado pequeñas (${D.org.cellL}×${D.org.cellW}×${D.org.depth} mm). Reduce filas/columnas o agranda la caja.`);
-    D.org = null;
+  // Compartimentos: D.org (tapa) y D.orgB (base, misma distribución en el
+  // "marco de tapa"; el motor la gira 180° — ver orgLayout.js).
+  for (const [key, side, where, OBx] of [['org', 'lid', 'la tapa', OB], ['orgB', 'base', 'la base', OBb]]) {
+    let O = OBx ? orgLayout(D, P, side) : null;
+    if (O && (O.cellL < 5 || O.cellW < 5 || O.depth < 3)) {
+      warn.push(`Compartimentos de ${where}: celdas demasiado pequeñas (${O.cellL}×${O.cellW}×${O.depth} mm). Reduce filas/columnas o agranda la caja.`);
+      O = null;
+    }
+    if (O && O.magnetWarn) warn.push(`Traba magnética en ${where}: ${O.magnetWarn}. Se usa la traba mecánica (clic).`);
+    D[key] = O;
+    if (!O && D.content[side] === 'org') D.content = { ...D.content, [side]: 'off' };
   }
   return D;
 }

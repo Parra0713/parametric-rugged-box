@@ -164,6 +164,23 @@ export function thicknessChecks(D, base, lid, minW = 0.9) {
   };
   const xs = [...D.latch.xs.flatMap((x) => [x, x - D.latchW / 2 - D.ag - D.cheekW / 2, x + D.latchW / 2 + D.ag + D.cheekW / 2]), ...D.hinge.xs];
   const res = [];
+  // Bloques de pivote de las tapas interiores: la ranura de montaje tiene el
+  // techo a 45° (para imprimirse sin soporte), así que sobre ella queda una
+  // cuña que nace con 0.3 mm en la cara del bloque y llega a 1.2 mm al fondo.
+  // Es una piel horizontal en chaflán (capas macizas), no una pared fina;
+  // un corte YZ que pase justo por la ranura la ve "delgada" y no lo es.
+  const grooveWedge = (name, x, zr, yr) => {
+    const O = name === 'base' ? D.orgB : D.org;
+    if (!O || !O.has) return false;
+    const fz = (z) => (name === 'base' ? 2 * D.Hb - z : z), fy = (y) => (name === 'base' ? -y : y);
+    const z = [fz(zr[0]), fz(zr[1])].sort((u, v) => u - v), y = [fy(yr[0]), fy(yr[1])].sort((u, v) => u - v);
+    const gd = 1.2 - O.lip + 0.05;                      // ORG.pinE − lip
+    return O.blocks.some((b) => {
+      const inX = b.mid ? (x >= b.x0 - 0.01 && x <= b.x0 + gd) || (x <= b.x1 + 0.01 && x >= b.x1 - gd)
+        : b.s > 0 ? x >= b.x0 - 0.01 && x <= b.x0 + gd : x <= b.x0 + 0.01 && x >= b.x0 - gd;
+      return inX && z[0] >= O.zb - 0.05 && z[1] <= b.axis.z + 0.05 && y[0] >= b.axis.y - 0.3 && y[1] <= b.axis.y + O.blockR + 0.3;
+    });
+  };
   // La tapa incluye sus lengüetas (bajo la cara de unión). En la placa
   // Gridfinity interior el borde superior entre celdas es una arista viva por
   // norma del estándar: se excluye ese último medio milímetro.
@@ -180,6 +197,7 @@ export function thicknessChecks(D, base, lid, minW = 0.9) {
       const b = p.bounds();
       const zr = [-b.max[0], -b.min[0]];        // vuelve a z de mundo
       if (name === 'base' ? zr[1] > D.Hb - 0.6 : Math.abs((zr[0] + zr[1]) / 2 - D.Hb) < 0.6) continue;   // cara de unión
+      if (grooveWedge(name, x, zr, [b.min[1], b.max[1]])) continue;
       found.push(`x=${x.toFixed(1)} z ${zr[0].toFixed(1)}–${zr[1].toFixed(1)} y ${b.min[1].toFixed(1)}…${b.max[1].toFixed(1)}`);
     }
     // Cortes longitudinales (plano XZ) por la zona del cierre y de la

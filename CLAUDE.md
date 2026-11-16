@@ -10,9 +10,11 @@ español**. Unidades: milímetros y grados.
 npm run dev          # servidor Vite con recarga (http://localhost:5173)
 npm run build        # dist/rugged-box.html: UN archivo autocontenido (doble clic)
 npm test             # geometría + cama + montaje real (~2 min)
-npm run test:org     # organizador en la tapa: cierra, abre 0–95°, sin soportes
+npm run test:org     # compartimentos (tapa y base, clic o imanes): cierra, abre 0–95°, sin soportes
+npm run test:guide   # guía de interfaz: contraste AA, textos, sin alert/confirm, recursos liberados
+npm run test:ui      # interfaz en Chromium (tras `npm run build`; se omite si no hay Playwright)
 npm run test:calib   # test de holguras: plan adaptativo, probetas imprimibles, resultados y perfiles
-npm run test:perf    # memoria WASM, reparto A/B, vista rápida y cachés (~1 min)
+npm run test:perf    # memoria WASM (fugas y pico por construcción), reparto A/B, vista rápida y cachés (~3 min)
 npm run test:budget  # presupuestos de tiempo por función + línea base (~2 min)
 npm run eco:compare  # comparativa del modo ahorro: gramos de laminador, rigidez y tiempo
 node tests/budget.test.mjs --update      # guardar la línea base (tests/perf-baseline.json)
@@ -36,14 +38,15 @@ registro interno del motor) y `logs/sweep-latest.json` (resumen). **Ejecuta
 | `src/engine/seal.js` | `rrOffset(D, d)`: contorno interior desplazado (rectángulo u octógono). Ranuras, lengüetas, junta, `stackLines`. |
 | `src/engine/hinge.js`, `latch.js`, `pins.js` | Mecánica. Lado de montaje de cada pasador: `D.hinge.headSide`, `D.latch.headSide` (params.js). |
 | `src/engine/pattern.js` | Patrones de tapa, logo SVG, interfaz de apilado. |
-| `src/engine/insert.js` | Insertos interiores (en blanco / con alojamientos + huecos para dedos). |
+| `src/engine/insert.js` | Insertos de la base y de la tapa (`baseInsert`, `lidInsert`: en blanco / con alojamientos + huecos para dedos; mismo núcleo `insertCore`). |
 | `src/engine/tilt.js` | Impresión inclinada: bisel de contacto, aletas, detector de voladizos y soportes. |
 | `src/engine/engine.js` | Orquestador `build(P, svg, opt)`; ayudas de impresión (`addAids`); registro `D.log`. |
 | `src/bedfit.js`, `src/optimizer.js` | Cama: rotación/diagonal/inclinación; optimizador "imprimir plana". |
 | `src/content.js` | SVG calcado del contenido (unidades reales, recorte máx. de esquina). |
 | `src/packer.js` | Acomodo automático de varios objetos (gravedad sobre rejilla de 1 mm, giros 90/180/270°, huecos para dedos compartibles, prefiere cajas que quepan planas). Pura JS. |
 | `src/main.js`, `viewer.js`, `worker.js` | UI, vista three.js (render bajo demanda), hilo de geometría. |
-| `src/engine/orgLayout.js`, `organizer.js` | Organizador en la tapa: `orgBase` (dimensionado, en `derive`), `orgLayout` → `D.org` (celdas, ejes, tapas interiores), geometría de celdas/grapas (`orgLidGeometry`) y de cada tapa interior (`orgPanel`). |
+| `src/style.css`, `docs/GUIA-INTERFAZ.md` | Variables de diseño y componentes; la guía de interfaz (obligatoria, ver abajo). |
+| `src/engine/orgLayout.js`, `organizer.js` | Compartimentos en tapa y base: `contentModes(P)` (qué lleva cada mitad), `orgBase(P, lw, side)` (dimensionado, en `derive`), `orgLayout(D, P, side)` → `D.org` (tapa) / `D.orgB` (base): celdas, ejes, tapas interiores, pozos, imanes. Geometría: `orgCavity(D, O, zB)`, `orgMech(D, O)` (bloques, pilares, cortes) y `orgPanel(D, O, p)`. |
 | `src/engine/calib.js`, `src/calibProfile.js` | Test de holguras: `calibPlan` (puro), `buildCalibration` (probetas, hilo R), `applyResults` (puro); perfiles persistentes. |
 | `src/engineClient.js`, `src/engine/merge.js` | Tres hilos: A + B (vista rápida `draft`, cada uno media caja: `build(P, svg, { only })`) y R (modelo completo `preview` y exportación `final`). `mergeResults` une A y B. |
 
@@ -64,27 +67,54 @@ registro interno del motor) y `logs/sweep-latest.json` (resumen). **Ejecuta
 - Las cotas derivadas que dependan de la impresora se ajustan a líneas/capas
   (`snapW`, `snapH`).
 - `baseCache` reutiliza la base: añade a `LID_ONLY` cualquier parámetro nuevo
-  que NO afecte a la base (si afecta, no lo añadas).
+  que NO afecte a la base (si afecta, no lo añadas). Lo que solo afecta a
+  veces va aparte en la clave (`holeComp` con imanes en la base en
+  `baseKey`; los `orgB*` que agrandan la caja en `lidKey`). El logo entra
+  en `lidKey` con su contenido (`svgSig`).
 - El contenido viaja dentro de `P` hacia el worker: `P.contentObjects =
   [{ polys, notches }]` (acomodado por `packer.js`, marco interno). El motor
   no acomoda: solo recorta huecos y huecos para dedos donde le dicen.
   `P.contentPolys` (un objeto) se mantiene por compatibilidad y pruebas.
-- La UI se genera de `SCHEMA` (pestaña `tab`, `adv` = solo modo experto,
-  `hint` = ayuda de una línea). No añadas controles a mano en `main.js`.
+- La UI se genera de `SCHEMA` (pestaña `tab`, `adv` = solo con «Ajustes
+  avanzados», `hint` = ayuda de una línea sin punto final, `when: (P) =>
+  bool` en un ajuste o en un grupo = solo se muestra cuando aplica). No
+  añadas controles a mano en `main.js`. `SCHEMA` lleva funciones: no viaja
+  a los hilos (solo `P`).
 - Las ayudas de impresión (`addAids`) se aplican a base, tapa e insertos; el
   parámetro `G` describe el contorno y si hay mecánica que proteger.
 - Memoria WASM: todo objeto creado se libera en `cleanup()` al final de
-  `build`; no guardes `Manifold`/`CrossSection` entre llamadas. `installGC`
+  `build`; no guardes `Manifold`/`CrossSection` entre llamadas. En las
+  pruebas, un `build()` extra va ANTES de crear tus propios `Manifold`: al
+  terminar libera también los tuyos (uso tras liberar = el proceso muere). `installGC`
   envuelve el prototipo REAL de las instancias (no `W.Manifold.prototype`,
   que es otro objeto): si no, nada encadenado se libera (~30 MB por
   reconstrucción, el hilo acaba en "memory access out of bounds").
   `CrossSection.extrude/revolve` se reemplazan porque manifold‑3d no libera
   su vector de polígonos. `tests/perf.test.mjs` vigila la memoria.
+- **Pico de memoria** (la memoria WASM nunca se devuelve: cada hilo se queda
+  con su máximo): `mark()` / `release(m, keep)` de geo.js liberan antes de
+  tiempo lo creado desde una marca. `build` lo hace al acabar cada pieza
+  (malla + ayudas hechas) y `addAidsRaw`/tilt.js en cada etapa y en cada
+  capa de sus bucles. Reglas: (1) todo lo que se use DESPUÉS de un
+  `release` va en `keep` o se creó antes de la marca (H y L se crean antes
+  de todas); (2) una caché de geometría que viva toda la construcción se
+  marca con `pin()` (p. ej. la forma del octógono en `rrOffset`); (3) usar
+  un objeto liberado lanza "Cannot pass deleted object": ejecuta el barrido
+  completo tras tocar esto. `tests/mempeak.test.mjs` mide el pico de cada
+  caja en un proceso nuevo y tiene presupuesto (herramienta por celda
+  inclinada: 375 → 145 MB).
+- Soportes de voladizos (`overhangSupports`): la holgura con la pieza se
+  resta en seis pasos evaluados (no la unión de seis copias casi iguales) y
+  el aligerado es UN hueco (el soporte bajado 2 capas ∩ celdas de la
+  rejilla), no rejilla + piel + pie unidos: mismas caras coincidentes =
+  doble de tiempo y +95 MB.
 - Calidades: `draft` (vista rápida: `D.seg` 20, sin `criticalLayers` ni
   `addAids`), `preview` (40) y `final` (96). Lo que se omita en `draft` debe
   ser un detalle que llega con el modelo completo, nunca mecánica.
-- Grupos de `build(…, { only })`: A = base, junta, inserto de la base;
-  B = tapa, cierre, pasadores, tapones, inserto de la tapa. Una pieza nueva
+- Grupos de `build(…, { only })`: A = base, junta, inserto de la base,
+  tapas interiores de la TAPA; B = tapa, cierre, pasadores, tapones, inserto
+  de la tapa, tapas interiores de la BASE (cada hilo lleva una mitad y las
+  tapas interiores de la otra: van parejos). Una pieza nueva
   va en uno de los dos (si no, la vista rápida no la muestra) y la prueba de
   reparto de `perf.test.mjs` comprueba que A + B = completo.
 - Cachés en engine.js: `baseCache` (LID_ONLY), `lidCache` (todo salvo
@@ -131,8 +161,39 @@ registro interno del motor) y `logs/sweep-latest.json` (resumen). **Ejecuta
   medir, a `calibPlan`/`applyResults`. Usa `D.filClr` (filamento), `D.clr`
   (pasador impreso), `D.sealClr` (lengüeta), `D.sclr` (apilado): no
   reutilices una para otra cosa.
+- **Contenido de cada mitad**: `D.content = { base, lid }` con 'off' |
+  'blank' | 'pockets' | 'org' (de `insertMode` y `lidMode`; los antiguos
+  `lidOrg`/`insertLid` se siguen aceptando y `migrate` los convierte). OJO:
+  `D.fill` es el llenado de la junta, no esto.
+- **Compartimentos en la base** (`D.orgB`): es el organizador de la tapa
+  calculado en el "marco de tapa" y girado 180° sobre el eje X del plano de
+  unión (`orgFlip(D)`: y → −y, z → 2·Hb − z). TODO lo de organizer.js y
+  orgLayout.js se escribe una sola vez en el marco de tapa; nunca dupliques
+  código "para la base". Sus tapas interiores usan la misma malla e
+  impresión, con `side: 'base'`, clave `orgPanelB{k}`, instancias
+  `T(z0)·orgFlip·T(dx,dy)` y eje reflejado; el visor no les aplica el giro
+  de la tapa. Las pruebas llevan la base al marco de tapa con el mismo giro.
+  Con placa Gridfinity en la base no hay compartimentos (aviso).
+- **Traba magnética** (`orgLatch: 'magnet'`, `magnetD`, `magnetH`; cotas en
+  `MAG`): parejas de imanes cara con cara a 0.4 mm, uno en un pilar del
+  cuerpo (`O.magnets`, sobre un divisor o en la esquina junto al borde
+  libre, tras la ranura de desacople) y otro en un resalte de la tapa
+  interior (`p.magnets`). Alojamiento ciego con 6 nervios y chaflán
+  (`magnetPocket`, se construye una vez y se copia; en `draft`, cilindro
+  liso). El resalte y su hueco no pasan de la cara del carril ni del divisor
+  vecino (`m.yc`, `m.xa/xb`): si no, adelgazan la pared de al lado. Reparto
+  simétrico respecto a la pestaña. Sin sitio → `O.magnetWarn` y clic.
+- **Junta de cordón** (`sealMode: 'cord'`): filamento TPU Ø1.75 crudo;
+  `D.gap` = Ø·(1 − c), `D.gw` para llenar ≤ 85 %, sin pieza `gasket`;
+  `D.cord.length` (grupo A) = perímetro del eje de la ranura + 1 %.
+- La cuadrícula de celdas va sobre una rejilla de 0.01 mm desde la misma
+  esquina (orgLayout): así las tapas interiores iguales tienen la MISMA
+  firma y se agrupan. No metas medias centésimas (p. ej. `wd / 2` sin
+  redondear) en posiciones de tapas, bloques o pozos.
+- En `D` solo van datos (se serializa a JSON): nada de objetos WASM. Las
+  celdas guardan `c.wells`/`c.mags` (índices y posiciones), no secciones.
 - **Organizador**: con la caja cerrada las celdas se abren hacia la base y
-  las tapas interiores (`orgPanel`, grupo A) van entre `D.org.zp0` y `zp1`,
+  las tapas interiores (`orgPanel`) van entre `D.org.zp0` y `zp1`,
   por encima del borde (`g0`). Bisagra de PIVOTES: eje Ø3 (holgura P3) en el
   borde de la tapa interior, cuyos extremos (`p.ax0/ax1`, caras `p.pivots`)
   entran `ORG.pinE` en agujeros cerrados en gota de bloques de pivote
@@ -141,7 +202,8 @@ registro interno del motor) y `logs/sweep-latest.json` (resumen). **Ejecuta
   eje en el carril está abierto hacia +Y (la tapa interior se desliza). Los
   agujeros y ranuras se restan a toda la tapa (el pivote sobresale de zp1).
   Pozos para el dedo (`D.org.wells`) dentro de la huella de cada tapa
-  interior; las celdas que pisan (`c.cut`) se recortan con un divisor
+  interior y del interior (en octógono se corren hacia el centro); las
+  celdas que pisan (`c.wells`) se recortan con un divisor
   alrededor y su fondo inclinado se hace sin la muesca y luego se resta.
   Ranura de desacople `O.gap` (1 línea) entre divisores/carriles y la pared,
   de zp1 a zi − 0.6; las esquinas de celda contra la pared, en ángulo recto.
@@ -193,6 +255,49 @@ registro interno del motor) y `logs/sweep-latest.json` (resumen). **Ejecuta
 - Evita importaciones circulares (p. ej. `pattern.js` ↔ `engine.js`): las
   utilidades compartidas van en `seal.js` o `geo.js`.
 
+## Guía de interfaz (obligatoria): los diez mandamientos
+
+Texto completo, variables y lista de comprobación en
+`docs/GUIA-INTERFAZ.md` (estilo de las *Human Interface Guidelines* de
+Apple). Todo cambio de `index.html`, `style.css`, `main.js`, `viewer.js` o
+de los textos del `SCHEMA` debe cumplirlos:
+
+1. **La caja es la protagonista**: el visor manda; paneles neutros; lo que
+   flota sobre el visor es translúcido.
+2. **Claro antes que denso**: tipografía del sistema, 13 px (mín. 12),
+   frase normal, jerarquía por tamaño y peso; nunca MAYÚSCULAS ni
+   monoespaciada (salvo el registro); palabras del usuario, no del motor.
+3. **Un solo acento** (naranja: lo interactivo y la acción principal);
+   verde/ámbar/rojo solo para estado y siempre con texto; contraste AA;
+   colores solo como variables de `:root`.
+4. **Solo lo que aplica**: buen valor por defecto, `when` para lo que
+   depende de otra opción (se oculta, no se pone en gris), `adv` para lo
+   avanzado.
+5. **Se toca y se ve**: sin botón «Aplicar»; deslizador + campo son el
+   mismo valor; la interfaz nunca se bloquea.
+6. **El usuario manda**: deshacer/rehacer siempre (`remember()` ANTES de
+   cambiar `state.P`); lo reversible no pregunta (se hace + «Deshacer» en
+   la notificación); lo irreversible se confirma con `sheet()` y el verbo
+   en el botón. **Prohibido `alert`/`confirm`/`prompt`**.
+7. **Lo de siempre, donde siempre**: interruptor = sí/no, menú = una entre
+   varias, deslizador + campo = número, botón con verbo («…» si pide algo
+   más); mismo nombre para lo mismo en panel, avisos, LEEME y archivos.
+8. **Informar sin interrumpir**: `toast()` para lo puntual, avisos junto al
+   resultado, mensajes que dicen qué pasa y qué hacer; lo que hay que
+   comprar o cortar, con cantidades, en el resumen y el LEEME.
+9. **Para todo el mundo**: teclado completo con foco visible, nombre
+   accesible en cada control, 44 px con el dedo, claro/oscuro, movimiento
+   reducido, sin desplazamiento horizontal en 390 px.
+10. **Oficio y rendimiento**: rejilla de 4 px, radios 6/10/14, animaciones
+    de 150–250 ms que expliquen un cambio; render bajo demanda; **todo lo
+    que se crea se libera** (diálogos al cerrarse, temporizadores, URLs,
+    geometrías; historial con tope).
+
+Cifras en los textos: `fmtN`/`mm()`/`dims()` de main.js (coma decimal y
+espacio duro antes de la unidad). `tests/ui-guide.test.mjs` y
+`tests/ui.e2e.mjs` (asidero `window.__rugged`) comprueban estos puntos; un
+ajuste nuevo debe pasar ambos.
+
 ## Criterios de validación (los comprueba el barrido)
 
 1. Piezas con malla válida y un solo sólido (la junta dividida admite 2 tiras).
@@ -211,8 +316,9 @@ registro interno del motor) y `logs/sweep-latest.json` (resumen). **Ejecuta
    (`thicknessChecks`: cortes XY, YZ por la mecánica y XZ por la banda).
 10. Piezas sueltas: agujero del cierre con holgura + `holeComp` y chaflán en
    las dos caras; tapón tipo pinza (`printFitChecks`).
-11. Rendimiento (`perf.test.mjs` + `budget.test.mjs`): la memoria WASM no
-   crece al reconstruir, A + B = build completo, la vista rápida da piezas
+11. Rendimiento (`perf.test.mjs` + `mempeak.test.mjs` + `budget.test.mjs`):
+   la memoria WASM no crece al reconstruir y su pico por construcción cumple
+   su presupuesto, A + B = build completo, la vista rápida da piezas
    válidas, las cachés (base, tapa, ayudas) devuelven lo mismo que
    recalcular y cada función cumple su presupuesto de tiempo.
 12. Test de holguras (`calib.test.mjs`): universal = siempre 8 probetas;
@@ -221,12 +327,21 @@ registro interno del motor) y `logs/sweep-latest.json` (resumen). **Ejecuta
    resultados (B/F conservan el diámetro medido, P desplaza Ø3/Ø5) se
    aplican y persisten. El barrido incluye perfiles extremos, también en
    cajas inclinadas.
-13. Organizador (`organizer.test.mjs` + casos del barrido): celdas ≥ lo
-   pedido, cerrada sin solapes con tapa/base/inserto, cada tapa interior
-   abre 0–95° sin chocar, clic del eje y del faldón, sin voladizos > 50°,
-   cabe en la cama, sin piezas sueltas.
+13. Compartimentos, en la tapa, en la base o en las dos
+   (`organizer.test.mjs` + casos del barrido): celdas ≥ lo pedido, cerrada
+   sin solapes con tapa/base/inserto/otras tapas interiores, cada tapa
+   interior abre 0–95° sin chocar, clic del eje y del faldón, pozos dentro
+   del interior, sin voladizos > 50°, cabe en la cama, sin piezas sueltas.
 14. Modo ahorro (casos "ahorro" y "nervado" del barrido): mismos criterios
    1–13 con pared, fondo y techo mínimos o piel nervada.
+15. Traba magnética: alojamientos del diámetro y alto pedidos en cuerpo y
+   tapa interior, libres para el imán, con nervios, pared ≥ 2 líneas y piel
+   bajo el imán; caras a 0.4 mm; reparto simétrico; sin resaltes de clic.
+16. Junta de cordón: sin pieza de junta, compresión 10–40 %, llenado
+   ≤ 95 %, longitud a cortar coherente con el perímetro.
+17. Interfaz (`ui-guide.test.mjs`, `ui.e2e.mjs`): los diez mandamientos
+   medibles, y ni el visor, ni el documento, ni la memoria de JS crecen
+   tras 24 cambios completos.
 
 ## Flujo con el PC del usuario
 

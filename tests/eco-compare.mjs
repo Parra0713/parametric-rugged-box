@@ -20,7 +20,7 @@ for (let i = 0; i <= 120; i++) { const t = i / 120, x = -95 + 190 * t; crimpPoly
 for (let i = 120; i >= 0; i--) { const t = i / 120, x = -95 + 190 * t; crimpPoly.push([x, -(x > 40 ? 27 : 12 + 4 * Math.sin(t * 20))]); }
 const BOXES = [
   ['Caja M 120×80', {}],
-  ['Herramienta + organizador 6×3 + inserto', { innerL: 200, innerW: 100, baseDepth: 30, bandProud: 2.4, lidOrg: true, orgCols: 6, orgRows: 3, orgMinL: 33, orgMinW: 32, orgDepth: 26,
+  ['Herramienta + organizador 6×3 + inserto', { innerL: 200, innerW: 100, baseDepth: 30, bandProud: 2.4, lidMode: 'org', orgCols: 6, orgRows: 3, orgMinL: 33, orgMinW: 32, orgDepth: 26,
     insertMode: 'pockets', contentObjects: [{ polys: [crimpPoly], notches: [[0, 30, 10]] }] }],
   ['Caja L 260×180', { innerL: 260, innerW: 180, baseDepth: 50, lidDepth: 20 }],
 ];

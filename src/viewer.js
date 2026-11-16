@@ -48,7 +48,8 @@ export class Viewer {
     rim.position.set(1.5, 1, 0.5);
     this.scene.add(rim);
 
-    this.grid = new THREE.GridHelper(600, 60, 0x555a60, 0x2c3034);
+    // Rejilla discreta: su color lo pone el tema (setTheme).
+    this.grid = new THREE.GridHelper(600, 60, 0xffffff, 0xffffff);
     this.grid.rotation.x = Math.PI / 2;
     this.scene.add(this.grid);
 
@@ -68,10 +69,13 @@ export class Viewer {
     this.resize();
   }
 
+  /** Claro u oscuro, con los mismos tonos que la hoja de estilos (--stage). */
   setTheme(dark) {
-    this.scene.background = new THREE.Color(dark ? 0x17191b : 0xe9ebed);
-    this.grid.material.color = new THREE.Color(dark ? 0x2c3034 : 0xc9cdd1);
-    this.requestRender();
+    this.dark = dark;
+    if (!this.scene.background) this.scene.background = new THREE.Color();
+    this.scene.background.set(dark ? 0x161617 : 0xfbfbfd);
+    this.grid.material.color.set(dark ? 0x38383a : 0xd9d9de);
+    if (this.data && this.mode === 'print') this.rebuild(); else this.requestRender();
   }
 
   resize() {
@@ -176,7 +180,8 @@ export class Viewer {
 
     const ex = this.mode === 'exploded';
     // Secuencia de apertura: 0–0.3 cierres (0→80°), 0.3–1 tapa (0→110°).
-    // Con organizador: la tapa hasta 0.75 y de 0.75 a 1 las tapas interiores.
+    // Con compartimentos (en la tapa o en la base): la tapa hasta 0.75 y de
+    // 0.75 a 1 las tapas interiores.
     const hasOrg = parts.some((p) => p.id === 'orgPanel');
     const tLatch = Math.min(1, this.open / 0.3);
     const tLid = Math.min(1, Math.max(0, (this.open - 0.3) / (hasOrg ? 0.45 : 0.7)));
@@ -203,8 +208,13 @@ export class Viewer {
           // Tapas interiores: giran sobre su eje (al final de la apertura) y
           // van con la tapa.
           if (p.axis && orgAng > 0) m = about(p.axis.y + inst[13], p.axis.z, -orgAng).multiply(m);
-          m = about(assembly.hinge.y, assembly.hinge.z, -lidAng).multiply(m);
-          m = exOff(0, 0, D.Hl + 35 - 18).multiply(m);
+          if (p.side === 'base') {
+            // Las de la base se quedan en la base (se abren hacia arriba).
+            m = exOff(0, 0, 16).multiply(m);
+          } else {
+            m = about(assembly.hinge.y, assembly.hinge.z, -lidAng).multiply(m);
+            m = exOff(0, 0, D.Hl + 35 - 18).multiply(m);
+          }
         } else if (p.id === 'insertLid') {
           m = about(assembly.hinge.y, assembly.hinge.z, -lidAng).multiply(m);
           m = exOff(0, 0, D.Hl + 35 + 25).multiply(m);
@@ -277,7 +287,7 @@ export class Viewer {
       const ox = k * (bx + 40);
       // Contorno de la cama.
       const bedG = new THREE.PlaneGeometry(bx, by);
-      const bedM = new THREE.Mesh(bedG, new THREE.MeshStandardMaterial({ color: 0x24292d, roughness: 0.9 }));
+      const bedM = new THREE.Mesh(bedG, new THREE.MeshStandardMaterial({ color: this.dark ? 0x2c2c2e : 0xe6e6eb, roughness: 0.9 }));
       bedM.position.set(ox + bx / 2, by / 2, -0.05);
       bedM.userData.own = true;
       this.root.add(bedM);

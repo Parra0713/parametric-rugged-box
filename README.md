@@ -218,7 +218,12 @@ y la memoria WASM se libera de verdad en cada ciclo.
   profundidades exactas y holguras recomendadas para insertos (botón *Copiar
   JSON*, y `interior.json` dentro del ZIP).
 * Bisagras y cierres adaptativos (clase XS/S/M/L automática o forzada).
-* Junta TPU / laberinto / lengüeta simple.
+* Junta TPU impresa / **cordón de filamento TPU de 1,75 mm** (v7.3: sin
+  imprimir la junta) / laberinto / lengüeta simple.
+* **Contenido en cualquier mitad** (v7.3): la base y la tapa llevan, cada
+  una, nada, un inserto en blanco, un inserto con huecos a medida o
+  compartimentos con tapas interiores (traba de clic o **magnética**).
+* **Deshacer / rehacer** de cualquier cambio (Ctrl/⌘+Z).
 * Tapa: liso, hexagonal, estriado, reforzado cruzado, **sci‑fi circuito**
   (semilla editable) y **sci‑fi radial** + **SVG propio**, en grabado o
   relieve.
@@ -254,7 +259,8 @@ Requiere Node.js ≥ 20 (en Windows: `winget install OpenJS.NodeJS.LTS`).
 ```bash
 npm install
 npm run dev      # servidor local con recarga en caliente → http://localhost:5173
-npm test         # pruebas geométricas, cama y montaje real
+npm test         # geometría, cama, montaje real, rendimiento y guía de interfaz
+npm run test:ui  # interfaz en un navegador real (tras npm run build; necesita Playwright)
 npm run test:assembly  # mecánica completa, espesor ≥ 2 líneas, pasadores montables, puentes ≤ 10 mm, apilado
 npm run test:sweep   # barrido de 20 a 380 mm con registro en logs/
 npm run build    # regenera dist/rugged-box.html
@@ -267,8 +273,9 @@ npm run build    # regenera dist/rugged-box.html
    junta y orientación en la cama (elige tu impresora en *Impresora*).
 3. Personaliza la tapa o importa un SVG (formas con relleno; los trazos se
    convierten con su grosor).
-4. **Exportar todo (.zip)** → abre las placas en tu slicer. Las piezas ya
-   vienen orientadas para imprimir sin soportes.
+4. **Exportar todo** → abre las placas en tu laminador. Las piezas ya
+   vienen orientadas para imprimir sin soportes, y el `LEEME.txt` dice qué
+   más hace falta (imanes, cordón de TPU, filamento para pasadores).
 
 ### Impresión recomendada
 
@@ -277,7 +284,8 @@ npm run build    # regenera dist/rugged-box.html
 | Base / tapa | PETG, ASA o PLA | 0.2 mm, 4–6 perímetros, 15–25 % gyroid (modo ahorro: ver su ficha). La tapa, con la cara decorada sobre la cama. |
 | Cierres | PETG (mejor que PLA: más elástico) | Acostados, como se exportan. 5+ perímetros. |
 | Pasadores | PETG / PLA | Acostados sobre la cara plana, 100 % de relleno. |
-| Junta | TPU 95A | Lenta, 100 % de relleno. |
+| Junta | TPU 95A | Lenta, 100 % de relleno. Con «cordón» no se imprime: se corta filamento TPU. |
+| Tapas interiores | PETG / PLA | Cara exterior sobre la cama, 3+ paredes. |
 
 ---
 
@@ -353,13 +361,119 @@ la cara de trabajo.
   máquina y falla si se pasa de su presupuesto o empeora frente a la línea
   base guardada. Cada función nueva añade su caso.
 
-## Organizador en la tapa (v6.8 – v7.2)
+## Novedades de la v7.3
 
-**Contenido → Organizador en la tapa**: cuadrícula de compartimentos
-integrada en la tapa (terminales, tornillos, fusibles…) con **tapas
+![Compartimentos con traba magnética en la base y en la tapa](docs/compartimentos-imanes.png)
+
+### Contenido en cualquier mitad
+
+En **Contenido** cada mitad se elige por separado:
+
+| | Nada | Inserto en blanco | Inserto con huecos | Compartimentos |
+|---|---|---|---|---|
+| **La base lleva** | ✔ | ✔ | ✔ | ✔ (nuevo) |
+| **La tapa lleva** | ✔ | ✔ | ✔ (nuevo) | ✔ |
+
+Las 16 combinaciones valen: compartimentos arriba y abajo, huecos para una
+herramienta en la tapa y tornillería en la base, etc. Los compartimentos de
+la base son **el mismo diseño** que los de la tapa girado 180° sobre el
+plano de unión: celdas que nacen del suelo, tapas interiores bajo el borde
+con el eje en el lado de las bisagras (abren hacia el fondo) y el pozo para
+el dedo delante. Al compartir geometría comparten también pruebas: lo que
+se verifica para una mitad se verifica para la otra. Los huecos de la tapa
+quedan justo encima de los de la base (alojan lo que sobresale).
+
+### Traba de las tapas interiores: clic o imanes
+
+* **Mecánica (clic)**: la de siempre (faldón + resalte con precarga).
+* **Magnética**: se indica el **diámetro y la altura del imán** de disco
+  (2–20 mm × 0,5–8 mm). Cada punto de cierre lleva dos imanes cara con cara
+  a 0,4 mm: uno en un **pilar** del cuerpo junto al borde libre (sobre un
+  divisor, o en la esquina si la tapa interior cubre una sola celda) y otro
+  en un **resalte** de la tapa interior. Los alojamientos son ciegos, a
+  presión, con **6 nervios de aplastamiento** y chaflán de entrada (el
+  patrón de los agujeros de imán de Gridfinity): absorben la tolerancia de
+  la impresora sin pegamento. Reparto simétrico respecto a la pestaña
+  (2–4 por tapa interior según su ancho); el pilar nunca toca la pared
+  exterior (queda tras la ranura de desacople) y el pozo para el dedo se
+  estrecha lo justo si hace falta. Si el imán no cabe en las celdas, la
+  caja avisa y usa el clic. El resumen y el LEEME dicen cuántos imanes
+  comprar y cómo comprobar la polaridad antes de meterlos.
+
+### Junta de cordón (lo más útil de otras cajas)
+
+Se revisaron los generadores de cajas más usados (ver *Fuentes*) y sus
+funciones, comparadas con las de este proyecto:
+
+| Función de otras cajas | Aquí | Decisión |
+|---|---|---|
+| **Junta con filamento TPU de 1,75 mm** en la ranura (Rugged Storage Box de Whity, Parametric Tough Box) | No existía | **Implementada**: ahorra imprimir TPU (lo más delicado de la caja) y sella mejor que un anillo impreso por capas. |
+| Asa | No | Descartada: necesita ~25 mm de alto libre en la base y rompe la impresión sin soportes en cajas bajas (la herramienta usa 30 mm). |
+| Tope de apertura de la tapa a 90–110° | No | Descartada: los compartimentos de la tapa piden abrirla 180° para apoyarla plana. |
+| Tercera bisagra / más cierres | Sí (automático por tamaño) | Ya estaba. |
+| Apilado con enclavamiento, Gridfinity, etiquetas | Sí / sí / no | Etiquetas: ya descartadas antes. |
+| Ojal para candado | No | Poco valor frente a su coste en la banda. |
+
+**Cómo se dimensiona** (reglas de junta tórica estática): cordón Ø1,75,
+compresión 15–35 % (25 % por defecto) y llenado ≤ 85 % del alojamiento; con
+eso la ranura sale de ~2,2 mm de ancho (2–3) y la lengüeta de la tapa
+aprieta el cordón contra el fondo. No hay pieza de junta: el resumen y el
+LEEME dan la **longitud a cortar** (perímetro del eje de la ranura + 1 %,
+para que las puntas queden a tope y comprimidas).
+
+### Interfaz al estilo Apple
+
+Nueva guía obligatoria, **`docs/GUIA-INTERFAZ.md`** («los diez
+mandamientos»), basada en las *Human Interface Guidelines*, y la interfaz
+rehecha para cumplirla: el visor es el protagonista, tipografía del sistema
+en frase normal, un solo acento, **revelación progresiva** (cada ajuste
+aparece cuando aplica), **deshacer / rehacer**, notificaciones que no
+interrumpen y hojas propias en vez de `alert`/`confirm`, foco visible,
+contraste AA en claro y oscuro, objetivos táctiles de 44 px y «reducir
+movimiento». `tests/ui-guide.test.mjs` mide lo medible (contraste, textos,
+ausencia de diálogos del navegador, liberación de recursos) y
+`npm run test:ui` lo comprueba en un navegador real, fugas incluidas.
+
+### Revisión general (fallos encontrados y corregidos)
+
+* **Octógono + una tapa interior por celda**: el pozo para el dedo de las
+  celdas de las esquinas mordía la pared en diagonal (dejaba ~0,9 mm). Ahora
+  se corre hacia el centro lo justo para quedar dentro.
+* **Logo**: cambiar de logo con los mismos parámetros devolvía la tapa del
+  logo anterior (la caché de la tapa no miraba su contenido).
+* **Tapas interiores casi iguales**: por redondeos de una centésima cada una
+  salía como pieza distinta. La cuadrícula va ahora sobre una rejilla de
+  0,01 mm y las iguales se agrupan (18 tapas → 9 piezas en la herramienta:
+  menos STL que imprimir y menos que calcular).
+* **Chaflán interior** con compartimentos: las ayudas de impresión quitaban
+  una tira que ya no existía.
+* **Memoria, fugas**: 480 reconstrucciones seguidas con todo lo nuevo sin
+  crecimiento sostenido; el visor, el documento y el montón de JS quedan
+  igual tras 24 cambios completos (se comprueba en cada `test:ui`).
+* **Memoria, pico**: no había fugas, pero la memoria de WebAssembly nunca se
+  devuelve y cada hilo se quedaba con todo lo intermedio de la caja más
+  pesada. Ahora cada pieza y cada etapa liberan lo suyo en cuanto acaban:
+
+  | Modelo completo (un hilo) | v7.2 | v7.3 |
+  |---|---|---|
+  | Herramienta, tapa interior por celda, inclinada | 375 MB | **145 MB** |
+  | La misma con traba magnética | — (453 MB sin optimizar) | **179 MB** |
+  | Caja de 205 mm sin compartimentos, inclinada | 90 MB | **21 MB** |
+  | Grande inclinada (260 × 180) | 114 MB | **28 MB** |
+
+  `tests/mempeak.test.mjs` lo mide en un proceso nuevo por caja y falla si
+  se pasa de su presupuesto.
+* **Soportes de voladizos** (cajas inclinadas): mismos soportes, mismo
+  volumen, calculados con la mitad de operaciones: de ~2,7 s a ~1,2 s en la
+  tapa de la herramienta.
+
+## Compartimentos en la tapa y en la base (v6.8 – v7.3)
+
+**Contenido → La tapa lleva / La base lleva → Compartimentos**: cuadrícula
+de compartimentos integrada (terminales, tornillos, fusibles…) con **tapas
 interiores** para que, con la caja cerrada (tapa boca abajo), nada se caiga
-ni se mezcle. La base sigue alojando lo que quieras (p. ej. la herramienta,
-con el inserto a medida del calco SVG).
+ni se mezcle. La otra mitad sigue alojando lo que quieras (p. ej. la
+herramienta, con el inserto a medida del calco SVG).
 
 * **Columnas × filas**, **tamaño mínimo de celda** y **altura de celda**: si
   no caben, la caja y la tapa crecen solas (se avisa en el registro). Con 0
@@ -390,8 +504,9 @@ con el inserto a medida del calco SVG).
   con su número de copias.
 * Se adapta a todo: octógono (las esquinas fuera del giro se rellenan),
   apilable, girada, XS a L e impresión inclinada. `tests/organizer.test.mjs`
-  comprueba que todo cierra, que cada tapa interior abre 0–95° sin chocar y
-  que nada necesita soportes.
+  comprueba, en la tapa, en la base y en las dos, con clic y con imanes, que
+  todo cierra, que cada tapa interior abre 0–95° sin chocar y que nada
+  necesita soportes; y construye las 16 combinaciones de contenido.
 
 ## Mejoras de impresión (v7.2)
 
@@ -471,13 +586,16 @@ de elastómero al 20–30 % de compresión. Fuentes:
 
 ```
 index.html              interfaz
-src/main.js             parámetros, panel de medidas, exportación
+docs/GUIA-INTERFAZ.md   guía de diseño de la interfaz (los diez mandamientos)
+src/style.css           variables de diseño y componentes (claro / oscuro)
+src/main.js             ajustes, resumen, deshacer/rehacer, exportación
 src/viewer.js           vista 3D (three.js, render bajo demanda)
 src/engineClient.js     tres hilos de geometría: vista rápida (A + B) y modelo completo (R)
 src/worker.js           hilo de geometría
 src/engine/merge.js     une las mitades A y B de la vista rápida
-src/engine/orgLayout.js organizador en la tapa: distribución (pura)
-src/engine/organizer.js organizador en la tapa: celdas, grapas y tapas interiores
+src/engine/orgLayout.js compartimentos (tapa y base): distribución, imanes (pura)
+src/engine/organizer.js compartimentos: celdas, bloques de pivote, pilares de imán y tapas interiores
+src/engine/insert.js    insertos de base y tapa (en blanco o con huecos)
 src/engine/calib.js     test de holguras: plan adaptativo, probetas y aplicación de resultados
 src/calibProfile.js     perfiles de calibración persistentes (localStorage)
 src/engine/params.js    parámetros, esquema de UI y derivación de cotas
@@ -492,12 +610,19 @@ src/engine/engine.js    orquestador
 src/bedfit.js           optimizador de cama y empaquetado
 src/svg.js              lectura de SVG
 src/export.js           STL y ZIP sin dependencias
-tests/                  pruebas geométricas en Node
+tests/                  pruebas en Node (geometría, montaje, rendimiento, memoria, guía de interfaz)
+tests/ui.e2e.mjs        interfaz en un navegador real (opcional: necesita Playwright)
 ```
 
 Licencia MIT.
 
 ## Fuentes de la investigación
+
+* [Rugged Storage Box, Parametric and Customizable (Whity) — Printables](https://printables.com/model/637028-rugged-storage-box-parametric-and-customizable): junta para filamento de 1,75 mm, asa, topes de bisagra.
+* [Gridfinity Rugged Storage Box (Pred) — Printables](https://www.printables.com/model/757297-gridfinity-rugged-storage-box-parametric-and-custo): cierres de apilado, tercera bisagra, asa.
+* [Parametric Tough Box — Printables](https://www.printables.com/model/731210-parametric-tough-box): ranura para cordón de TPU.
+* [gridfinity-rebuilt-openscad, `gridfinity-rebuilt-holes.scad`](https://git.distrilab.fr/Charavane/gridfinity-rebuilt-openscad/src/commit/f222c262fc06a7adb6b1c7a4ff90869b1d5f79f5/gridfinity-rebuilt-holes.scad): agujeros de imán a presión con nervios de aplastamiento y chaflán.
+* [Apple — Human Interface Guidelines: principios de diseño](https://developer.apple.com/design/human-interface-guidelines/design-principles.md).
 
 * [The Benchy hull line — Prusa Knowledge Base](https://help.prusa3d.com/en/article/the-benchy-hull-line_124745/)
 * [Layer line at transition between floor and wall — Bambu Lab Forum](https://forum.bambulab.com/t/layer-line-at-transition-between-floor-and-wall/40994)

@@ -26,7 +26,7 @@
  *    - Pie ensanchado de 2 capas en la base de cada aleta (adherencia).
  *    Resultado típico: 5–15 % del material de una cuña de soporte.
  */
-import { CS, M, prism } from './geo.js';
+import { CS, M, prism, mark, release } from './geo.js';
 
 /* ---------- Matrices ---------- */
 export function mul4(a, b) {
@@ -78,11 +78,17 @@ function bigHoleArea(cs, minArea) {
  */
 export function contactCut(R, zmin, axisLen, t, lh) {
   const target = Math.min(15, Math.max(6, 0.06 * axisLen));
-  const width = (h) => R.slice(zmin + h).area() / axisLen;
+  // (Cada corte se libera en cuanto se mide: son decenas de secciones.)
+  const m0 = mark();
+  const width = (h) => { const w = R.slice(zmin + h).area() / axisLen; release(m0); return w; };
   // Altura a la que el corte alcanzaría la cavidad (aparece un agujero).
   const minA = 2 * axisLen;
   let hBreach = 30;
-  for (let h = 0.4; h < 30; h += 0.4) { if (bigHoleArea(R.slice(zmin + h), minA) > 0) { hBreach = h; break; } }
+  for (let h = 0.4; h < 30; h += 0.4) {
+    const breach = bigHoleArea(R.slice(zmin + h), minA) > 0;
+    release(m0);
+    if (breach) { hBreach = h; break; }
+  }
   const hMax = Math.max(0, hBreach - t * 1.2);               // deja ≥ 1 pared bajo el corte
   let lo = 0, hi = hMax;
   if (width(hi) < target) lo = hi;                           // no llega: corta lo máximo seguro
@@ -143,7 +149,11 @@ export function supportFins(R, axis, lw, lh, opt = {}) {
   const Rs = R.transform(toSlice);
   const fins = [];
   let vol = 0;
+  let m0 = mark();
   for (let i = 0; i < n; i++) {
+    // Lo de la aleta anterior (secciones, celosía, dientes) ya no hace falta.
+    release(m0, fins);
+    m0 = mark();
     const pos = a0 + 3 + ((len - 6) * i) / (n - 1);
     const h = axis === 'X' ? pos : -pos;
     const P = Rs.slice(h);
@@ -201,6 +211,7 @@ export function supportFins(R, axis, lw, lh, opt = {}) {
     vol += s.volume();
     fins.push(s.transform(back));
   }
+  release(m0, fins);
   if (!fins.length) return null;
   return { solid: M().union(fins), volume: Math.round(vol), count: fins.length };
 }
@@ -211,10 +222,11 @@ export function wedgeVolume(R, lh) {
   let v = 0;
   // Volumen bajo la envolvente inferior ≈ Σ capas del área de la sombra.
   const step = Math.max(lh * 5, (bb.max[2] - bb.min[2]) / 60);
+  const m0 = mark();
   for (let z = step / 2; z < bb.max[2]; z += step) {
     const s = R.slice(z);
-    if (s.isEmpty()) continue;
-    v += s.hull().area() * step;
+    if (!s.isEmpty()) v += s.hull().area() * step;
+    release(m0);
   }
   return Math.round(Math.max(0, v - R.volume()));
 }
@@ -241,7 +253,12 @@ export function overhangRegions(R, helper, opt = {}) {
   const bb = R.boundingBox();
   const all = helper ? R.add(helper) : R;
   const out = [];
+  // Cientos de capas, cada una con sus cortes y desplazamientos: se libera
+  // lo de cada capa al acabarla (solo siguen vivos el corte anterior y las
+  // zonas encontradas). Era el mayor consumo de memoria de toda la caja.
+  const regions = [];
   let prev = all.slice(Math.min(0.1, step / 2));
+  const m0 = mark();
   for (let z = step; z < bb.max[2] - 0.05; z += step) {
     const cur = R.slice(z);
     if (!cur.isEmpty()) {
@@ -250,10 +267,11 @@ export function overhangRegions(R, helper, opt = {}) {
       U = U.offset(-0.3, 'Square').offset(0.3, 'Square');
       for (const piece of U.decompose()) {
         const a = piece.area();
-        if (a >= minA) out.push({ z, region: piece, area: a });
+        if (a >= minA) { out.push({ z, region: piece, area: a }); regions.push(piece); }
       }
     }
     prev = all.slice(z);
+    release(m0, [prev, ...regions]);
   }
   return out;
 }
@@ -284,25 +302,28 @@ export function overhangSupports(R, regions, lw, lh, opt = {}) {
     cols.push(prism(region.offset(0.3, 'Square'), 0, top));
   }
   if (!cols.length) return null;
+  const m0 = mark();
   let S = M().union(cols);
   // Holgura con la pieza: solo el trozo de pieza que rodea las columnas
   // (las columnas engordadas 1 mm), así las uniones son pequeñas y rápidas.
   const near = R.intersect(M().union(regions.filter((r) => r.z - gapZ >= lh * 0.99)
     .map((r) => prism(r.region.offset(1.5, 'Square'), -1, r.z + 2))));
   if (!near.isEmpty()) {
-    const clear = M().union([
-      near, near.translate([0, 0, gapZ]),
-      near.translate([gapXY, 0, 0]), near.translate([-gapXY, 0, 0]),
-      near.translate([0, gapXY, 0]), near.translate([0, -gapXY, 0]),
-    ]);
-    S = S.subtract(clear);
+    // Holgura con la pieza (encima y a los cuatro lados): seis restas
+    // pequeñas, una tras otra y evaluando cada una. Unir antes las seis
+    // copias casi coincidentes de la pieza era lo más lento de los soportes.
+    for (const d of [[0, 0, 0], [0, 0, gapZ], [gapXY, 0, 0], [-gapXY, 0, 0], [0, gapXY, 0], [0, -gapXY, 0]]) {
+      S = S.subtract(near.translate(d));
+      S.numTri();
+    }
   }
   if (S.isEmpty()) return null;
   // Descarta restos sueltos minúsculos.
   const parts = S.decompose().filter((p) => p.volume() > 2);
   if (!parts.length) return null;
-  S = M().union(parts);
+  S = M().compose(parts);                 // ya son disjuntas: sin booleana
   const b = S.boundingBox();
+  release(m0, [S]);                       // el trozo de pieza y las restas, fuera
   // Rejilla de paredes de 2 líneas.
   const t = 2 * lw;
   const strips = [];
@@ -310,11 +331,14 @@ export function overhangSupports(R, regions, lw, lh, opt = {}) {
     strips.push(CS().square([t, b.max[1] - b.min[1] + 2], false).translate([x - t / 2, b.min[1] - 1]));
   for (let y = Math.floor(b.min[1] / pitch) * pitch; y <= b.max[1]; y += pitch)
     strips.push(CS().square([b.max[0] - b.min[0] + 2, t], false).translate([b.min[0] - 1, y - t / 2]));
-  // La rejilla se recorta a la planta real de los soportes: con la rejilla de
-  // toda la caja (cientos de tiras) la intersección 3D tardaba segundos.
-  const grid = prism(CS().union(strips).intersect(S.project().offset(0.5, 'Square')), -1, b.max[2] + 1);
-  const topSkin = S.subtract(S.translate([0, 0, -2 * lh]));          // 2 capas superiores
-  const foot = S.intersect(M().cube([b.max[0] - b.min[0] + 2, b.max[1] - b.min[1] + 2, 2 * lh]).translate([b.min[0] - 1, b.min[1] - 1, 0]));
-  const solid = M().union([S.intersect(grid), topSkin, foot]);
+  // Aligerado: se vacía cada celda de la rejilla dejando el pie (2 capas) y
+  // la piel de arriba (2 capas, siguiendo la pieza). El hueco es el propio
+  // soporte bajado 2 capas, dentro de las celdas y por encima del pie: una
+  // intersección y una resta. (Antes: rejilla ∩ S, piel y pie por separado y
+  // su unión, llena de caras coincidentes: +95 MB de pico y el doble de
+  // tiempo para el mismo sólido.)
+  const plan = S.project().offset(0.5, 'Square');
+  const voids = prism(plan.subtract(CS().union(strips)), 2 * lh, b.max[2] + 1);
+  const solid = S.subtract(S.translate([0, 0, -2 * lh]).intersect(voids));
   return { solid, volume: Math.round(solid.volume()), count: parts.length, fullVolume: Math.round(S.volume()) };
 }

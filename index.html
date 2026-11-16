@@ -3,6 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="color-scheme" content="light dark" />
   <title>Rugged Box</title>
   <meta name="description" content="Generador paramétrico de cajas de alta resistencia imprimibles en 3D (FDM)." />
   <link rel="stylesheet" href="./src/style.css" />
@@ -11,48 +12,56 @@
   <header class="top">
     <div class="brand">
       <svg viewBox="0 0 32 32" class="mark" aria-hidden="true">
-        <rect x="3" y="9" width="26" height="18" rx="3" fill="none" stroke="currentColor" stroke-width="2.4"/>
+        <rect x="3" y="9" width="26" height="18" rx="4" fill="none" stroke="currentColor" stroke-width="2.4"/>
         <path d="M3 15h26" stroke="currentColor" stroke-width="2.4"/>
-        <rect x="11" y="12.5" width="4" height="6" rx="1" fill="currentColor"/>
-        <rect x="17" y="12.5" width="4" height="6" rx="1" fill="currentColor"/>
-        <path d="M11 9V6h10v3" fill="none" stroke="currentColor" stroke-width="2.4"/>
+        <rect x="11" y="12.5" width="4" height="6" rx="1.2" fill="currentColor"/>
+        <rect x="17" y="12.5" width="4" height="6" rx="1.2" fill="currentColor"/>
+        <path d="M11 9V6h10v3" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linejoin="round"/>
       </svg>
-      <div>
-        <h1>Rugged Box</h1>
-        <p>Generador paramétrico · FDM</p>
-      </div>
+      <h1>Rugged Box</h1>
     </div>
-    <div class="status" id="status"><span class="dot"></span><span id="statusText">Cargando motor…</span></div>
+    <div class="status" id="status" role="status" aria-live="polite"><span class="dot" aria-hidden="true"></span><span id="statusText">Preparando el motor…</span></div>
     <div class="actions">
-      <button id="btnReset" class="ghost" title="Restaurar valores por defecto">Restablecer</button>
-      <button id="btnStl" class="ghost">STL por pieza</button>
-      <button id="btnZip" class="primary">Exportar todo (.zip)</button>
+      <div class="pair" role="group" aria-label="Historial">
+        <button id="btnUndo" class="icon" title="Deshacer (Ctrl+Z)" aria-label="Deshacer" disabled>
+          <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M7.5 4.5 3.5 8.5l4 4M4 8.5h7.5a4.5 4.5 0 0 1 0 9H9" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        </button>
+        <button id="btnRedo" class="icon" title="Rehacer (Ctrl+Mayús+Z)" aria-label="Rehacer" disabled>
+          <svg viewBox="0 0 20 20" aria-hidden="true"><path d="m12.5 4.5 4 4-4 4M16 8.5H8.5a4.5 4.5 0 0 0 0 9H11" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        </button>
+      </div>
+      <button id="btnReset" class="plain" title="Volver a los valores iniciales (se puede deshacer)">Restablecer</button>
+      <button id="btnStl">STL por pieza</button>
+      <button id="btnZip" class="primary">Exportar todo</button>
     </div>
   </header>
 
   <main class="layout">
-    <aside class="panel params" id="params" aria-label="Parámetros"></aside>
+    <aside class="panel params" id="params" aria-label="Ajustes de la caja"></aside>
 
-    <section class="stage">
+    <section class="stage" aria-label="Vista 3D">
       <div class="viewport" id="viewport"></div>
-      <div class="toolbar">
-        <div class="seg" role="tablist" id="modeSeg">
-          <button data-mode="assembled" class="on">Montada</button>
-          <button data-mode="exploded">Explosionada</button>
-          <button data-mode="print">Placas</button>
-        </div>
-        <label class="mini">Apertura <input type="range" id="open" min="0" max="1" step="0.01" value="0" /></label>
-        <label class="chk"><input type="checkbox" id="inner" /> Volumen interior</label>
-        <label class="chk"><input type="checkbox" id="section" /> Corte</label>
-        <input type="range" id="sectionPos" class="mini-range" min="-150" max="150" step="0.5" value="0" title="Posición del corte (X)" />
-        <button id="btnFit" class="ghost sm" title="Encuadrar">Encuadrar</button>
+      <div class="hud" id="hud">
+        <div class="calbar material" id="calbar" hidden><span id="calbarText">Test de holguras</span>
+          <button id="calDl" class="sm">Descargar test</button><button id="calBack" class="sm primary">Volver a la caja</button></div>
+        <div class="toasts" id="toasts"></div>
       </div>
-      <div class="busy" id="busy" hidden>Recalculando…</div>
-      <div class="calbar" id="calbar" hidden><span id="calbarText">Test de holguras</span>
-        <button id="calDl" class="sm">Descargar test</button><button id="calBack" class="sm primary">Volver a la caja</button></div>
+      <div class="busy material" id="busy" hidden>Calculando…</div>
+      <div class="toolbar material" role="toolbar" aria-label="Vista">
+        <div class="seg" role="radiogroup" aria-label="Modo de vista" id="modeSeg">
+          <button data-mode="assembled" class="on" role="radio" aria-checked="true">Montada</button>
+          <button data-mode="exploded" role="radio" aria-checked="false">Despiece</button>
+          <button data-mode="print" role="radio" aria-checked="false">Placas</button>
+        </div>
+        <label class="mini" id="openWrap">Abrir <input type="range" id="open" min="0" max="1" step="0.01" value="0" aria-label="Abrir la caja" /></label>
+        <label class="tgl"><input type="checkbox" id="inner" /><span>Espacio útil</span></label>
+        <label class="tgl"><input type="checkbox" id="section" /><span>Corte</span></label>
+        <input type="range" id="sectionPos" class="mini-range" min="-150" max="150" step="0.5" value="0" aria-label="Posición del corte" hidden />
+        <button id="btnFit" class="sm" title="Encuadrar la caja en la vista">Encuadrar</button>
+      </div>
     </section>
 
-    <aside class="panel info" id="info" aria-label="Medidas y resultados"></aside>
+    <aside class="panel info" id="info" aria-label="Resultado"></aside>
   </main>
 
   <script type="module" src="./src/main.js"></script>

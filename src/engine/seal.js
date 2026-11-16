@@ -15,7 +15,7 @@
  * que fija la compresión de la junta exactamente al valor calculado, sin
  * depender de la fuerza del cierre.
  */
-import { roundRect, prism, frustum, CS } from './geo.js';
+import { roundRect, prism, frustum, CS, pin } from './geo.js';
 import { octagonPts } from './params.js';
 
 /**
@@ -31,7 +31,9 @@ export function rrOffset(D, d) {
   let base = shapeCache.get(D);
   if (!base) {
     const oct = CS().ofPolygons([octagonPts(D.Li, D.Wi, D.cham)], 'NonZero');
-    base = oct.offset(-D.ri, 'Miter', 4).offset(D.ri, 'Round', 2, D.seg);
+    // Se reutiliza en toda la construcción: fuera de las liberaciones
+    // anticipadas (si no, la tapa usaría una forma ya liberada por la base).
+    base = pin(oct.offset(-D.ri, 'Miter', 4).offset(D.ri, 'Round', 2, D.seg));
     shapeCache.set(D, base);
   }
   return Math.abs(d) < 1e-9 ? base.translate([0, 0]) : base.offset(d, 'Round', 2, D.seg);

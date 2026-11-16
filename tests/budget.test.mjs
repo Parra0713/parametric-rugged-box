@@ -69,7 +69,7 @@ console.log(`Carga de referencia: ${refs[3].toFixed(1)} ms → factor de máquin
 const crimpPoly = [];
 for (let i = 0; i <= 120; i++) { const t = i / 120, x = -95 + 190 * t; crimpPoly.push([x, x > 40 ? 27 : 12 + 4 * Math.sin(t * 20)]); }
 for (let i = 120; i >= 0; i--) { const t = i / 120, x = -95 + 190 * t; crimpPoly.push([x, -(x > 40 ? 27 : 12 + 4 * Math.sin(t * 20))]); }
-const CRIMP = { innerL: 200, innerW: 100, baseDepth: 30, bandProud: 2.4, lidOrg: true, orgCols: 6, orgRows: 3, orgMinL: 33, orgMinW: 32, orgDepth: 26,
+const CRIMP = { innerL: 200, innerW: 100, baseDepth: 30, bandProud: 2.4, lidMode: 'org', orgCols: 6, orgRows: 3, orgMinL: 33, orgMinW: 32, orgDepth: 26,
   insertMode: 'pockets', contentObjects: [{ polys: [crimpPoly], notches: [[0, 30, 10]] }] };
 
 // [nombre, parámetros, presupuesto { draft, lid, preview } en ms de referencia]
@@ -84,16 +84,23 @@ const FEATURES = [
   ['laberinto + tapa mínima', { sealMode: 'labyrinth', lidMin: true }, { draft: 150, lid: 120, preview: 700 }],
   ['pasadores impresos', { pinMode: 'printed', latchPinMode: 'printed' }, { draft: 180, lid: 150, preview: 800 }],
   ['Gridfinity', { gridfinity: 'baseplate', innerL: 168.5, innerW: 84.5 }, { draft: 250, lid: 150, preview: 1000 }],
-  ['inserto en blanco + tapa', { insertMode: 'blank', insertLid: true }, { draft: 200, lid: 160, preview: 900 }],
-  ['inserto con alojamiento', { ...CRIMP, lidOrg: false }, { draft: 250, lid: 160, preview: 1500 }],
-  ['organizador tapa única', { lidOrg: true, orgCols: 4, orgRows: 2 }, { draft: 250, lid: 250, preview: 1200 }],
-  ['organizador por celda', { lidOrg: true, orgCols: 4, orgRows: 2, orgCover: 'cell' }, { draft: 300, lid: 300, preview: 1500 }],
+  ['inserto en blanco + tapa', { insertMode: 'blank', lidMode: 'blank' }, { draft: 200, lid: 160, preview: 900 }],
+  ['inserto con alojamiento', { ...CRIMP, lidMode: 'off' }, { draft: 250, lid: 160, preview: 1500 }],
+  ['organizador tapa única', { lidMode: 'org', orgCols: 4, orgRows: 2 }, { draft: 250, lid: 250, preview: 1200 }],
+  ['organizador por celda', { lidMode: 'org', orgCols: 4, orgRows: 2, orgCover: 'cell' }, { draft: 300, lid: 300, preview: 1500 }],
   ['herramienta completa', CRIMP, { draft: 350, lid: 300, preview: 2500 }],
   ['ahorro de material', { eco: true }, { draft: 150, lid: 120, preview: 700 }],
   ['ahorro + herramienta', { ...CRIMP, eco: true }, { draft: 350, lid: 300, preview: 2500 }],
   ['ahorro nervado', { eco: true, ecoDesign: 'rib' }, { draft: 170, lid: 140, preview: 800 }],
   ['nervado + herramienta', { ...CRIMP, eco: true, ecoDesign: 'rib' }, { draft: 380, lid: 330, preview: 2700 }],
   ['nervado rígido + herramienta', { ...CRIMP, eco: true, ecoDesign: 'ribStiff' }, { draft: 400, lid: 350, preview: 2800 }],
+  // v7.3 — contenido en cualquier mitad, traba magnética, junta de cordón.
+  ['compartimentos en la base', { innerL: 140, innerW: 90, baseDepth: 40, insertMode: 'org', orgBCols: 4, orgBRows: 2 }, { draft: 250, lid: 250, preview: 1200 }],
+  ['compartimentos base + tapa', { innerL: 150, innerW: 100, baseDepth: 40, lidDepth: 22, insertMode: 'org', orgBCols: 3, orgBRows: 2, orgBCover: 'row', lidMode: 'org', orgCols: 3, orgRows: 2, orgCover: 'row' }, { draft: 300, lid: 300, preview: 1800 }],
+  ['traba magnética por fila', { lidMode: 'org', orgCols: 4, orgRows: 2, orgCover: 'row', orgLatch: 'magnet' }, { draft: 300, lid: 300, preview: 1500 }],
+  ['herramienta + imanes por celda', { ...CRIMP, orgCover: 'cell', orgLatch: 'magnet' }, { draft: 650, lid: 650, preview: 4500 }],
+  ['huecos en la tapa', { ...CRIMP, lidMode: 'pockets', lidDepth: 20 }, { draft: 300, lid: 250, preview: 2000 }],
+  ['junta de cordón', { sealMode: 'cord' }, { draft: 150, lid: 120, preview: 700 }],
 ];
 
 /* Medición --------------------------------------------------------- */

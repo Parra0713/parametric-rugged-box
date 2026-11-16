@@ -3,7 +3,7 @@
  * objetos con acomodo automático), comunicación con el motor, panel de
  * resultados y exportación.
  */
-import { DEFAULTS, SCHEMA, TABS, BED_PRESETS, migrate } from './engine/params.js';
+import { DEFAULTS, SCHEMA, TABS, BED_PRESETS, VERSION, migrate, contentModes } from './engine/params.js';
 import { EngineClient } from './engineClient.js';
 import { Viewer } from './viewer.js';
 import { parseSVG, placeSVG } from './svg.js';
@@ -102,52 +102,182 @@ const el = (tag, attrs = {}, ...kids) => {
 };
 
 /* ------------------------------------------------------------------ */
-/*  Panel de parámetros: pestañas + grupos + modo experto             */
+/*  Respuesta sin interrumpir: notificaciones breves y hojas propias  */
+/*  (guía de interfaz: nunca alert / confirm / prompt del navegador)  */
+/* ------------------------------------------------------------------ */
+
+/**
+ * Notificación breve sobre el visor; se va sola. Con `action` ofrece un
+ * botón (p. ej. "Deshacer"). Como mucho tres a la vez.
+ */
+function toast(text, { action, onAction, kind = 'info', ms } = {}) {
+  const box = $('#toasts');
+  while (box.children.length >= 3) box.firstChild._close(true);
+  const t = el('div', { class: 'toast ' + kind, role: kind === 'err' ? 'alert' : 'status' }, el('span', { class: 'msg' }, text));
+  let timer = 0;
+  t._close = (now) => {
+    clearTimeout(timer);
+    if (now) { t.remove(); return; }
+    t.classList.add('out');
+    timer = setTimeout(() => t.remove(), 200);
+  };
+  if (action) t.append(el('button', { class: 'sm plain', onclick: () => { t._close(true); onAction?.(); } }, action));
+  box.append(t);
+  timer = setTimeout(() => t._close(), ms ?? (action ? 7000 : kind === 'err' ? 6000 : 3500));
+  return t;
+}
+
+/**
+ * Hoja de confirmación o de texto (diálogo propio, accesible con teclado:
+ * Esc cancela, Intro acepta). Devuelve una promesa: `true`/`false`, o el
+ * texto escrito (null si se cancela) cuando lleva `input`.
+ * Solo para lo que NO se puede deshacer; lo demás se hace y se ofrece
+ * "Deshacer".
+ */
+function sheet({ title, message, confirm = 'Aceptar', cancel = 'Cancelar', destructive = false, input = null }) {
+  return new Promise((resolve) => {
+    const field = input !== null ? el('input', { type: 'text', value: input, 'aria-label': title }) : null;
+    const bCancel = el('button', { type: 'button', value: 'cancel' }, cancel);
+    const bOk = el('button', { type: 'submit', value: 'ok', class: destructive ? 'danger' : 'primary' }, confirm);
+    const form = el('form', { method: 'dialog' }, el('h3', {}, title), message ? el('p', {}, message) : null, field,
+      el('div', { class: 'btns' }, bCancel, bOk));
+    const dlg = el('dialog', { class: 'sheet' }, form);
+    bCancel.addEventListener('click', () => dlg.close('cancel'));
+    dlg.addEventListener('close', () => {
+      const ok = dlg.returnValue === 'ok';
+      dlg.remove();
+      resolve(field ? (ok && field.value.trim() ? field.value.trim() : null) : ok);
+    });
+    document.body.append(dlg);
+    dlg.showModal();
+    // Lo seguro por defecto: en una acción destructiva el foco va a "Cancelar".
+    if (field) { field.focus(); field.select(); } else (destructive ? bCancel : bOk).focus();
+  });
+}
+
+/* ------------------------------------------------------------------ */
+/*  Deshacer / rehacer                                                */
+/* ------------------------------------------------------------------ */
+/*
+ * Historial de los parámetros de la caja (no de la calibración, que es de
+ * la impresora y tiene su propio perfil). Cada entrada es el JSON completo
+ * de los parámetros (~3 kB); se guardan como mucho 100. Los cambios
+ * seguidos del mismo control (arrastrar un deslizador) cuentan como uno.
+ */
+const hist = { undo: [], redo: [], key: null, t: 0 };
+const HIST_MAX = 100;
+function snapshot() {
+  const o = { ...state.P };
+  for (const k of CAL_KEYS) delete o[k];
+  return JSON.stringify(o);
+}
+/** Llamar ANTES de cambiar `state.P`. */
+function remember(key = null) {
+  const now = performance.now();
+  if (key && key === hist.key && now - hist.t < 1200) { hist.t = now; return; }
+  const s = snapshot();
+  if (hist.undo[hist.undo.length - 1] !== s) hist.undo.push(s);
+  if (hist.undo.length > HIST_MAX) hist.undo.shift();
+  hist.redo.length = 0;
+  hist.key = key; hist.t = now;
+  updateHist();
+}
+function restore(s) {
+  const o = JSON.parse(s);
+  const P = { ...DEFAULTS };
+  for (const k of Object.keys(DEFAULTS)) if (k in o) P[k] = o[k];
+  state.P = P;
+  applyProfile();
+  hist.key = null;
+  buildParams();
+  runPack(true);
+  schedule();
+  persistSoon();
+  updateHist();
+}
+function undo() {
+  if (!hist.undo.length) return;
+  hist.redo.push(snapshot());
+  restore(hist.undo.pop());
+}
+function redo() {
+  if (!hist.redo.length) return;
+  hist.undo.push(snapshot());
+  restore(hist.redo.pop());
+}
+function updateHist() {
+  $('#btnUndo').disabled = !hist.undo.length;
+  $('#btnRedo').disabled = !hist.redo.length;
+}
+
+/* ------------------------------------------------------------------ */
+/*  Panel de ajustes: pestañas + grupos + ajustes avanzados           */
 /* ------------------------------------------------------------------ */
 const controls = {};
 
+/** Pinta el tramo recorrido de un deslizador (variable CSS --p). */
+function paintRange(r) {
+  const min = Number(r.min || 0), max = Number(r.max || 100);
+  r.style.setProperty('--p', `${max > min ? Math.min(100, Math.max(0, ((Number(r.value) - min) / (max - min)) * 100)) : 0}%`);
+}
+document.addEventListener('input', (e) => { if (e.target.type === 'range') paintRange(e.target); });
+
+/** ¿Se muestra este ajuste (o grupo) con los parámetros actuales? */
+const applies = (x) => !x.when || x.when(state.P);
+const visibleItems = (g) => g.items.filter((it) => applies(it) && (ui.expert || !it.adv));
+/** Huella de lo visible en la pestaña actual: si cambia, se repinta el panel. */
+const visSig = () => SCHEMA.filter((g) => g.tab === ui.tab && applies(g)).map((g) => g.group + ':' + g.items.filter(applies).map((it) => it.k).join(',')).join('|');
+
 function buildParams() {
   const root = $('#params');
+  const scroll = root.scrollTop;
+  for (const k of Object.keys(controls)) delete controls[k];
   root.innerHTML = '';
-  // Barra de pestañas (flujo de trabajo) + interruptor de modo experto.
-  const bar = el('div', { class: 'tabs', role: 'tablist' }, TABS.map(([id, label, title]) =>
-    el('button', { class: 'tab' + (ui.tab === id ? ' on' : ''), role: 'tab', title, 'aria-selected': String(ui.tab === id),
-      onclick: () => { ui.tab = id; saveUi(); buildParams(); } }, label)));
-  const expert = el('label', { class: 'expert' },
-    el('input', { type: 'checkbox', ...(ui.expert ? { checked: '' } : {}), onchange: (e) => { ui.expert = e.target.checked; saveUi(); buildParams(); } }),
-    'Modo experto');
+  // Pestañas (el flujo de trabajo, de izquierda a derecha) como control
+  // segmentado + interruptor de ajustes avanzados.
+  const bar = el('div', { class: 'seg', role: 'tablist', 'aria-label': 'Secciones' }, TABS.map(([id, label, title]) =>
+    el('button', { class: ui.tab === id ? 'on' : '', role: 'tab', title, 'aria-selected': String(ui.tab === id), 'data-tab': id,
+      onclick: () => { ui.tab = id; saveUi(); buildParams(); $(`#params [data-tab="${id}"]`)?.focus(); } }, label)));
+  const expert = el('label', { class: 'expert' }, 'Ajustes avanzados',
+    el('input', { type: 'checkbox', class: 'switch', role: 'switch', ...(ui.expert ? { checked: '' } : {}), onchange: (e) => { ui.expert = e.target.checked; saveUi(); buildParams(); $('#params .expert input')?.focus(); } }));
   const [, , subtitle] = TABS.find(([id]) => id === ui.tab) || TABS[0];
   root.append(el('div', { class: 'tabhead' }, bar, el('div', { class: 'tabsub' }, el('span', {}, subtitle), expert)));
 
-  for (const g of SCHEMA.filter((x) => x.tab === ui.tab)) {
+  for (const g of SCHEMA.filter((x) => x.tab === ui.tab && applies(x))) {
     const body = el('div', { class: 'group-body' });
     if (g.content) body.append(contentControl());
     if (g.svg) body.append(svgControl());
     if (g.gridfinity) body.append(gridfinitySnap());
     if (g.calib) body.append(calibControl());
-    const items = g.items.filter((it) => ui.expert || !it.adv);
+    const items = visibleItems(g);
     for (const it of items) body.append(control(it));
-    const hidden = g.items.length - items.length;
+    // Ajustes avanzados que aplican ahora pero están ocultos: se dice cuántos.
+    const hidden = g.items.filter((it) => applies(it) && it.adv).length - items.filter((it) => it.adv).length;
     if (hidden) body.append(el('button', { class: 'linkbtn', onclick: () => { ui.expert = true; saveUi(); buildParams(); } },
-      `+ ${hidden} ajuste${hidden > 1 ? 's' : ''} avanzado${hidden > 1 ? 's' : ''}`));
+      `Mostrar ${hidden} ajuste${hidden > 1 ? 's' : ''} avanzado${hidden > 1 ? 's' : ''}`));
+    if (!body.children.length) continue;
     const key = g.group;
     const open = ui.open[key] !== false;
     const det = el('details', { class: 'group', ...(open ? { open: '' } : {}) }, el('summary', {}, g.group), body);
     det.addEventListener('toggle', () => { ui.open[key] = det.open; saveUi(); });
     root.append(det);
   }
+  root.scrollTop = scroll;
+  lastVis = visSig();
 }
+let lastVis = '';
 
 function control(it) {
   const v = state.P[it.k];
   const hint = it.hint ? el('div', { class: 'hint' }, it.hint) : null;
   if (it.type === 'range') {
     const range = el('input', { type: 'range', min: it.min, max: it.max, step: it.step, value: v, 'aria-label': it.label });
-    const num = el('input', { type: 'number', min: it.min, max: it.max, step: it.step, value: v, 'aria-label': it.label });
+    const num = el('input', { type: 'number', min: it.min, max: it.max, step: it.step, value: v, inputmode: 'decimal', 'aria-label': `${it.label}${it.unit ? ` (${it.unit})` : ''}` });
+    paintRange(range);
     const sync = (val, src) => {
       const x = Math.min(it.max * 4, Math.max(it.min, Number(val)));
       if (!Number.isFinite(x)) return;
-      if (src !== range) range.value = x;
+      if (src !== range) { range.value = x; paintRange(range); }
       if (src !== num) num.value = x;
       setParam(it.k, x);
     };
@@ -158,23 +288,24 @@ function control(it) {
     num.addEventListener('input', () => {
       const x = Number(num.value);
       if (num.value === '' || !Number.isFinite(x) || x < it.min || x > it.max * 4) return;
-      range.value = x;
+      range.value = x; paintRange(range);
       if (state.P[it.k] !== x) setParam(it.k, x);
     });
     num.addEventListener('change', () => sync(num.value, num));
-    controls[it.k] = { set: (x) => { range.value = x; num.value = x; } };
+    controls[it.k] = { el: range, set: (x) => { range.value = x; num.value = x; paintRange(range); } };
     return el('div', { class: 'field' },
-      el('div', { class: 'lbl' }, el('span', {}, it.label, it.cal ? calTag(it.k) : null), el('span', { class: 'unit' }, it.unit)), range, num, hint);
+      el('div', { class: 'lbl' }, it.label, it.cal ? calTag(it.k) : null),
+      el('span', { class: 'num' }, num, it.unit ? el('span', { class: 'unit', 'aria-hidden': 'true' }, it.unit) : null), range, hint);
   }
   if (it.type === 'select') {
     const sel = el('select', { 'aria-label': it.label }, it.options.map(([val, txt]) => el('option', { value: val, ...(String(val) === String(v) ? { selected: '' } : {}) }, txt)));
     sel.addEventListener('change', () => setParam(it.k, sel.value));
-    controls[it.k] = { set: (x) => { sel.value = x; } };
+    controls[it.k] = { el: sel, set: (x) => { sel.value = x; } };
     return el('div', { class: 'field sel' }, el('div', { class: 'lbl' }, it.label), sel, hint);
   }
-  const cb = el('input', { type: 'checkbox', ...(v ? { checked: '' } : {}) });
+  const cb = el('input', { type: 'checkbox', class: 'switch', role: 'switch', ...(v ? { checked: '' } : {}) });
   cb.addEventListener('change', () => setParam(it.k, cb.checked));
-  controls[it.k] = { set: (x) => { cb.checked = !!x; } };
+  controls[it.k] = { el: cb, set: (x) => { cb.checked = !!x; } };
   return el('label', { class: 'field tog' }, el('span', { class: 'lbl' }, it.label), cb, hint);
 }
 
@@ -183,7 +314,7 @@ function control(it) {
 /* ------------------------------------------------------------------ */
 function contentControl() {
   const file = el('input', { type: 'file', accept: '.svg,image/svg+xml', multiple: '', hidden: '' });
-  const add = el('button', { class: 'sm primary' }, '+ Añadir objetos (SVG)');
+  const add = el('button', { class: 'sm' }, 'Añadir objetos (SVG)…');
   add.addEventListener('click', () => file.click());
   file.addEventListener('change', async () => {
     const errs = [];
@@ -194,9 +325,14 @@ function contentControl() {
       } catch (e) { errs.push(`${f.name}: ${e.message}`); }
     }
     file.value = '';
-    if (errs.length) alert('No se pudieron leer:\n' + errs.join('\n'));
-    // Con objetos, lo natural es un inserto con sus huecos.
-    if (state.objects.length && state.P.insertMode === 'off') { state.P.insertMode = 'pockets'; controls.insertMode?.set('pockets'); }
+    if (errs.length) toast(`No se ${errs.length > 1 ? 'pudieron' : 'pudo'} leer:\n${errs.join('\n')}\nUsa un SVG con formas cerradas a escala 1:1 en mm.`, { kind: 'err', ms: 9000 });
+    // Con objetos, lo natural es un inserto con sus huecos: en la base si
+    // está libre; si no, en la tapa.
+    const cm = contentModes(state.P);
+    if (state.objects.length && cm.base !== 'pockets' && cm.lid !== 'pockets') {
+      const k = cm.base === 'off' ? 'insertMode' : cm.lid === 'off' ? 'lidMode' : null;
+      if (k) { remember(); state.P[k] = 'pockets'; }
+    }
     saveObjects();
     buildParams();
     contentChanged();
@@ -205,19 +341,23 @@ function contentControl() {
   const list = el('div', { class: 'objlist' });
   if (!state.objects.length) {
     list.append(el('div', { class: 'empty' },
-      el('b', {}, 'Sin objetos.'), ' Sube el calco de cada pieza (SVG a escala 1:1 en mm). ',
-      'Se acomodan solos para ocupar el mínimo espacio y el inserto les deja su hueco y huecos para los dedos.'));
+      el('b', {}, 'Todavía no hay objetos.'), ' Añade el calco de cada pieza (SVG a escala 1:1 en mm). ',
+      'Se acomodan solos en el mínimo espacio y el inserto les deja su hueco, con huecos para los dedos.'));
   }
   state.objects.forEach((o, i) => {
     const thumb = el('div', { class: 'thumb' }, el('img', { alt: '', src: 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(o.text) }));
     const qty = el('div', { class: 'qty' },
       el('span', { class: 'small' }, 'Cantidad'),
-      el('button', { class: 'ghost sm', 'aria-label': 'Menos', onclick: () => { o.qty = Math.max(1, o.qty - 1); saveObjects(); buildParams(); contentChanged(); } }, '−'),
-      el('span', {}, String(o.qty)),
-      el('button', { class: 'ghost sm', 'aria-label': 'Más', onclick: () => { o.qty = Math.min(50, o.qty + 1); saveObjects(); buildParams(); contentChanged(); } }, '+'));
-    const del = el('button', { class: 'ghost sm', title: 'Quitar', 'aria-label': 'Quitar', onclick: () => { state.objects.splice(i, 1); saveObjects(); buildParams(); contentChanged(); } }, '✕');
+      el('button', { class: 'sm', 'aria-label': `Una unidad menos de ${o.name}`, ...(o.qty <= 1 ? { disabled: '' } : {}), onclick: () => { o.qty = Math.max(1, o.qty - 1); saveObjects(); buildParams(); contentChanged(); } }, '−'),
+      el('span', { 'aria-live': 'polite' }, String(o.qty)),
+      el('button', { class: 'sm', 'aria-label': `Una unidad más de ${o.name}`, onclick: () => { o.qty = Math.min(50, o.qty + 1); saveObjects(); buildParams(); contentChanged(); } }, '+'));
+    // Quitar no pregunta: se hace y se ofrece deshacerlo.
+    const del = el('button', { class: 'plain sm', title: `Quitar ${o.name}`, 'aria-label': `Quitar ${o.name}`, onclick: () => {
+      state.objects.splice(i, 1); saveObjects(); buildParams(); contentChanged();
+      toast(`Se quitó «${o.name}»`, { action: 'Deshacer', onAction: () => { state.objects.splice(Math.min(i, state.objects.length), 0, o); saveObjects(); buildParams(); contentChanged(); } });
+    } }, 'Quitar');
     list.append(el('div', { class: 'obj' }, thumb,
-      el('div', { class: 'objinfo' }, el('div', { class: 'name' }, o.name), el('div', { class: 'small' }, `${o.raw.w.toFixed(1)} × ${o.raw.h.toFixed(1)} mm`)),
+      el('div', { class: 'objinfo' }, el('div', { class: 'name' }, o.name), el('div', { class: 'small' }, dims(o.raw.w.toFixed(1), o.raw.h.toFixed(1)))),
       qty, del));
   });
   const status = el('div', { class: 'small packinfo', id: 'packInfo' }, packText());
@@ -228,9 +368,9 @@ function contentControl() {
 function packText() {
   const k = state.packed;
   if (!state.objects.length) return '';
-  if (!k) return 'No caben con estas medidas: aumenta la caja o usa "Ajustarlo al contenido".';
+  if (!k) return 'No caben con estas medidas. Agranda la caja o elige «Ajustarlo al contenido».';
   const n = k.placed.length;
-  return `${n} pieza${n > 1 ? 's' : ''} acomodada${n > 1 ? 's' : ''} en ${k.w.toFixed(0)} × ${k.h.toFixed(0)} mm (${k.ms} ms).`;
+  return `${n} pieza${n > 1 ? 's' : ''} acomodada${n > 1 ? 's' : ''} en ${dims(Math.round(k.w), Math.round(k.h))}.`;
 }
 
 /** Margen entre la huella del contenido y la cara interior de la caja. */
@@ -251,7 +391,7 @@ function runPack(force) {
   const manual = P.contentFit === 'manual';
   const L = Math.max(P.innerL, P.innerW), W = Math.min(P.innerL, P.innerW);
   const opt = {
-    spacing: P.objSpacing, pocketTol: P.pocketTol, fingerCount: P.insertMode === 'pockets' ? P.fingerCount : '0',
+    spacing: P.objSpacing, pocketTol: P.pocketTol, fingerCount: Object.values(contentModes(P)).includes('pockets') ? P.fingerCount : '0',
     fingerD: P.fingerD, fingerPos: P.fingerPos, rotate: P.objRotateAllow,
     ...(manual ? { stripW: L - 2 * m, maxH: W - 2 * m } : {}),
   };
@@ -296,6 +436,7 @@ function contentChanged(force) {
 function gridfinitySnap() {
   const b = el('button', { class: 'sm' }, 'Ajustar el interior a celdas Gridfinity');
   b.addEventListener('click', () => {
+    remember();
     for (const k of ['innerL', 'innerW']) {
       const n = Math.max(1, Math.round((state.P[k] - 0.5) / 42));
       state.P[k] = n * 42 + 0.5;
@@ -331,25 +472,34 @@ function svgControl() {
       state.svgRaw = parseSVG(text); state.svgText = text; state.svgName = f.name;
       safeSet(STORE_SVG, JSON.stringify({ name: f.name, text }));
       refresh(); schedule();
-    } catch (e) { alert('No se pudo leer el SVG: ' + e.message); }
+    } catch (e) { toast(`No se pudo leer «${f.name}»: ${e.message}`, { kind: 'err' }); }
     file.value = '';
   });
   clear.addEventListener('click', () => {
+    const old = { raw: state.svgRaw, text: state.svgText, name: state.svgName };
     state.svgRaw = null; state.svgText = ''; state.svgName = '';
     safeDel(STORE_SVG); refresh(); schedule();
+    toast('Se quitó el logo', { action: 'Deshacer', onAction: () => {
+      state.svgRaw = old.raw; state.svgText = old.text; state.svgName = old.name;
+      safeSet(STORE_SVG, JSON.stringify({ name: old.name, text: old.text }));
+      if (ui.tab === 'tapa') buildParams();
+      schedule();
+    } });
   });
   refresh();
   return el('div', { class: 'svgbox' },
     el('div', { class: 'row' }, thumb, el('div', { style: 'min-width:0;flex:1' }, name), pick, clear, file),
-    el('div', { class: 'small' }, 'Se graba (o en relieve) en la tapa. Usa formas con relleno; los trazos se convierten con su grosor.'));
+    el('div', { class: 'small' }, 'Se graba (o va en relieve) en la tapa. Usa formas con relleno; los trazos se convierten con su grosor.'));
 }
 
 /* ------------------------------------------------------------------ */
 /*  Parámetros                                                        */
 /* ------------------------------------------------------------------ */
-const PACK_KEYS = new Set(['bedPreset', 'bedX', 'bedY', 'objSpacing', 'pocketTol', 'fingerCount', 'fingerD', 'fingerPos', 'objRotateAllow', 'contentFit', 'insertMode', 'objClearance', 'insertTol']);
+const PACK_KEYS = new Set(['bedPreset', 'bedX', 'bedY', 'objSpacing', 'pocketTol', 'fingerCount', 'fingerD', 'fingerPos', 'objRotateAllow', 'contentFit', 'insertMode', 'lidMode', 'objClearance', 'insertTol']);
 
 function setParam(k, v) {
+  // Historial: solo cambios reales de la caja (la calibración va en su perfil).
+  if (state.P[k] !== v && !CAL_KEYS.includes(k)) remember(k);
   state.P[k] = v;
   if (CAL_KEYS.includes(k)) { setManual(state.calib, k, v); refreshCalTags(); }
   if (k === 'bedPreset' && v !== 'custom') {
@@ -364,6 +514,12 @@ function setParam(k, v) {
     runPack();
     const pi = $('#packInfo');
     if (pi) pi.textContent = packText();
+  }
+  // Revelación progresiva: si este cambio enseña u oculta ajustes, se
+  // repinta el panel y el foco vuelve al control que se estaba usando.
+  if (visSig() !== lastVis) {
+    buildParams();
+    controls[k]?.el?.focus({ preventScroll: true });
   }
   schedule();
   persistSoon();
@@ -447,7 +603,7 @@ function apply(msg, r, full) {
   if (!msg.ok) {
     // Un error de la vista rápida se ignora si el modelo completo va a llegar.
     if (!full && r === rev) { updateBusy(); return; }
-    setStatus('err', 'Error: ' + msg.error.split('\n')[0]); console.error(msg.error);
+    setStatus('err', 'No se pudo generar la caja: ' + msg.error.split('\n')[0]); console.error(msg.error);
     shown = { rev: r, full };
     updateBusy();
     return;
@@ -466,16 +622,19 @@ function apply(msg, r, full) {
   }
   const sp = $('#sectionPos');
   sp.min = -Math.ceil(msg.r.D.Lband / 2); sp.max = Math.ceil(msg.r.D.Lband / 2);
-  const ui = Math.round(performance.now() - t0);
-  setStatus('ok', `${full ? 'Modelo completo' : 'Vista rápida'} · ${msg.r.ms} ms motor + ${ui} ms vista · ${tris.toLocaleString('es')} triángulos`);
+  paintRange(sp);
+  const uiMs = Math.round(performance.now() - t0);
+  // Estado discreto: qué se ve y cuánto tardó; el detalle, al pasar el ratón.
+  setStatus('ok', full ? `Al día (${((msg.r.ms + uiMs) / 1000).toFixed(1).replace('.', ',')} s)` : 'Vista rápida',
+    `${full ? 'Modelo completo' : 'Vista rápida'}: ${msg.r.ms} ms de geometría + ${uiMs} ms de vista, ${tris.toLocaleString('es')} triángulos`);
   updateBusy();
 }
 
-/** Indicador: "Calculando…" si lo visible está desfasado; "Refinando…" si es la vista rápida. */
+/** Indicador: "Calculando…" si lo visible está desfasado; "Afinando…" si es la vista rápida. */
 function updateBusy() {
   const busy = $('#busy');
   if (shown.rev < rev) { busy.textContent = 'Calculando…'; busy.hidden = false; busy.dataset.kind = 'calc'; }
-  else if (!shown.full) { busy.textContent = 'Vista rápida · refinando…'; busy.hidden = false; busy.dataset.kind = 'draft'; }
+  else if (!shown.full) { busy.textContent = 'Afinando el modelo…'; busy.hidden = false; busy.dataset.kind = 'draft'; }
   else busy.hidden = true;
 }
 
@@ -487,6 +646,7 @@ function contentPolys() {
 
 /** Aplica una opción del optimizador (solo cambia los parámetros implicados). */
 function applyOption(a) {
+  remember();
   for (const k of ['cornerCut', 'cornerRibs', 'bandProud', 'wall']) {
     if (state.P[k] !== a.P[k]) { state.P[k] = a.P[k]; controls[k]?.set(a.P[k]); }
   }
@@ -503,8 +663,10 @@ function updateContent() {
   state.opt = optimize(state.P, state.cmax);
 }
 
-function setStatus(kind, text) {
-  $('#status').className = 'status ' + kind;
+function setStatus(kind, text, detail = '') {
+  const s = $('#status');
+  s.className = 'status ' + kind;
+  s.title = detail;
   $('#statusText').textContent = text;
 }
 
@@ -550,16 +712,23 @@ function computeLayout(res) {
 /*  Panel de resultados                                               */
 /* ------------------------------------------------------------------ */
 const COLORS = { insert: '#7fb3d5', insertLid: '#a9cce3', orgPanel: '#9fd3c7', base: '#343a3f', lid: '#d9601a', latch: '#e8b10c', gasket: '#1fa596', hingePin: '#c8cbce', latchPin: '#c8cbce', cap: '#c8cbce' };
-const mm = (v) => `${Number(v).toFixed(2).replace(/\.?0+$/, '')} mm`;
+/** Cifras como se escriben en español: coma decimal, hasta 2 decimales. */
+const fmtN = (v) => Number(v).toLocaleString('es-ES', { maximumFractionDigits: 2, useGrouping: false });
+const NB = '\u00a0';                       // espacio duro: la unidad no se separa de su cifra
+const mm = (v) => `${fmtN(v)}${NB}mm`;
+/** «a × b × c mm» sin saltos de línea por dentro. */
+const dims = (...v) => `${v.map(fmtN).join(`${NB}×${NB}`)}${NB}mm`;
 
 function kv(rows) {
-  return el('dl', { class: 'kv' }, rows.flatMap(([k, v, hl]) => [el('dt', {}, k), el('dd', { class: hl ? 'hl' : '' }, v)]));
+  // Una fila por dato (cada una reparte su ancho: una etiqueta larga no
+  // estrecha los valores de las demás).
+  return el('dl', { class: 'kv' }, rows.map(([k, v, hl]) => el('div', {}, el('dt', {}, k), el('dd', { class: hl ? 'hl' : '' }, v))));
 }
 
 /** Tarjeta plegable con estado recordado. */
 function fold(id, title, ...body) {
   const open = ui.open['info:' + id] === true;
-  const d = el('details', { class: 'card fold', ...(open ? { open: '' } : {}) }, el('summary', {}, title), ...body);
+  const d = el('details', { class: 'fold', ...(open ? { open: '' } : {}) }, el('summary', {}, title), ...body);
   d.addEventListener('toggle', () => { ui.open['info:' + id] = d.open; saveUi(); });
   return d;
 }
@@ -608,141 +777,170 @@ function renderInfo() {
   const info = $('#info');
   info.innerHTML = '';
 
-  /* --- Resumen --- */
+  /* --- Resumen: lo primero que se lee es el espacio útil --- */
   const big = parts.filter((p) => ['base', 'lid', 'insert', 'insertLid'].includes(p.id));
   const tilted = parts.filter((p) => p.tilt);
   const diag = big.some((p) => !p.tilt && state.layout.fits[p.key]?.mode === 'diagonal');
-  const printChip = tilted.length ? ['warn', 'Impresión inclinada'] : diag ? ['ok', 'Cabe en diagonal'] : ['ok', 'Cabe plana'];
+  const printChip = tilted.length ? ['warn', 'Se imprime inclinada'] : diag ? ['ok', 'Cabe en diagonal'] : ['ok', 'Cabe plana'];
   const vol = parts.reduce((s, p) => s + p.volume * p.instances.length, 0);
-  info.append(el('section', { class: 'card summary' },
+  const nPl = state.layout.plates.length;
+  // Qué lleva cada mitad (en palabras del usuario, no del motor).
+  const halfText = (side) => {
+    const mode = D.content[side], O = side === 'base' ? D.orgB : D.org, ins = side === 'base' ? D.insert : D.insertLid;
+    if (mode === 'org' && O) return `${O.cols * O.rows} compartimentos de ${dims(O.cellL, O.cellW, O.depth)}`;
+    if (mode === 'pockets') return ins && ins.pockets ? `inserto con ${ins.pockets} hueco${ins.pockets > 1 ? 's' : ''}` : 'inserto (faltan los objetos)';
+    if (mode === 'blank') return 'inserto en blanco';
+    return null;
+  };
+  const coverText = (O) => ({ single: 'una para todos', row: `una por fila (${O.panels.length})`, cell: `una por compartimento (${O.panels.length})` }[O.cover]);
+  const covers = [['base', D.orgB], ['tapa', D.org]].filter(([, O]) => O && O.has);
+  info.append(el('section', {},
+    el('div', { class: 'headline' }, dims(I.L, I.W)),
+    el('div', { class: 'small' }, `de espacio útil, con ${mm(I.baseDepth)} de fondo en la base y ${mm(I.lidDepth)} en la tapa`),
     el('div', { class: 'chips' },
       el('span', { class: 'chip ' + printChip[0] }, printChip[1]),
-      el('span', { class: 'chip' }, `${state.layout.plates.length} placa${state.layout.plates.length > 1 ? 's' : ''}`),
-      D.warn.length ? el('span', { class: 'chip warn' }, `${D.warn.length} aviso${D.warn.length > 1 ? 's' : ''}`) : null,
+      el('span', { class: 'chip' }, `${nPl} placa${nPl > 1 ? 's' : ''}`),
       unmeasured().length
-        ? el('button', { class: 'chip warn chipbtn', title: 'Abrir la calibración de holguras', onclick: () => { ui.tab = 'impresion'; saveUi(); buildParams(); } }, 'Holguras sin medir')
+        ? el('button', { class: 'chip warn', title: 'Abrir la calibración de holguras', onclick: () => { ui.tab = 'impresion'; saveUi(); buildParams(); } }, 'Holguras sin medir')
         : el('span', { class: 'chip ok', title: activeProfile(state.calib).name }, 'Holguras medidas')),
     kv([
-      ['Interior', `${I.L} × ${I.W} mm`, true],
-      ['Profundidad', `${I.baseDepth} + ${I.lidDepth} mm`],
-      ['Exterior', `${D.outerL} × ${D.outerW} × ${D.outerH} mm`],
-      ['Material (aprox.)', `${(vol / 1000).toFixed(0)} cm³ · ${Math.round(vol / 1000 * 1.24)} g PLA`],
-      ...(D.org ? [['Organizador', `${D.org.cols}×${D.org.rows} celdas de ${D.org.cellL}×${D.org.cellW}×${D.org.depth} mm`, true],
-        ['Tapa interior', { single: 'una para todo', row: `una por fila (${D.org.panels.length})`, cell: `una por celda (${D.org.panels.length})`, none: 'sin tapa interior' }[D.org.cover]]] : []),
+      ['Por fuera', dims(D.outerL, D.outerW, D.outerH)],
+      ['Material', `unos ${Math.round(vol / 1000 * 1.24)}${NB}g de PLA`],
+      ...(halfText('base') ? [['En la base', halfText('base')]] : []),
+      ...(halfText('lid') ? [['En la tapa', halfText('lid')]] : []),
+      ...covers.map(([n, O]) => [`Tapas interiores (${n})`, coverText(O)]),
     ])));
+
+  /* --- Avisos y sugerencias: junto al resultado, sin interrumpir --- */
+  const notes = el('section', { class: 'plainwrap' });
+  if (D.warn.length) {
+    notes.append(el('div', { class: 'callout warn' }, el('h3', {}, D.warn.length > 1 ? `${D.warn.length} avisos` : 'Aviso'),
+      el('ul', {}, D.warn.map((w) => el('li', {}, w)))));
+  }
+  // Lo que hay que tener además de lo impreso (imanes, cordón, filamento).
+  const extra = [];
+  const fl0 = D.filament || {};
+  const mags = [D.org, D.orgB].filter((O) => O && O.latch === 'magnet');
+  if (mags.length) {
+    const n = 2 * mags.reduce((s, O) => s + O.magnets.length, 0);
+    extra.push(`${n} imanes de disco de ${dims(mags[0].magnet.d, mags[0].magnet.h)} (dos por punto de cierre)`);
+  }
+  if (D.cord) extra.push(`${mm(D.cord.length)} de filamento TPU de 1,75${NB}mm para la junta`);
+  if (fl0.hinge) extra.push(`${fl0.hingeQty} trozo${fl0.hingeQty > 1 ? 's' : ''} de ${mm(fl0.hinge)} de filamento de 1,75${NB}mm para las bisagras`);
+  if (fl0.latch) extra.push(`${fl0.latchQty} trozo${fl0.latchQty > 1 ? 's' : ''} de ${mm(fl0.latch)} de filamento de 1,75${NB}mm para los cierres`);
+  if (extra.length) notes.append(el('div', { class: 'callout' }, el('h3', {}, 'Además de lo impreso'), el('ul', {}, extra.map((x) => el('li', {}, x)))));
 
   /* --- Modo ahorro --- */
   if (D.eco) {
     const g = grams(parts);
     const ref = state.ecoRef && state.ecoRef.sig === ecoSig() ? state.ecoRef.g : null;
-    info.append(el('section', { class: 'card key' }, el('h3', {}, 'Modo ahorro de material'),
+    notes.append(el('div', { class: 'callout ok' }, el('h3', {}, ref ? `Ahorro de material: ${ref - g} g menos (−${Math.round(100 * (1 - g / ref))} %)` : 'Ahorro de material activo'),
       kv([
-        ...(ref ? [['Ahorro', `${ref - g} g (−${Math.round(100 * (1 - g / ref))} %) · ${ref} → ${g} g`, true]] : []),
-        ['Cambios', D.ecoChanges.length ? D.ecoChanges.join(' · ') : 'ya estaba en mínimos'],
-        ...(D.ecoStiff != null ? [['Rigidez de la pared', `${Math.round(100 * D.ecoStiff)} % de la caja normal${D.ecoStiff < 0.6 ? ' (el diseño "Nervado rígido" la recupera con menos material)' : ''}`, D.ecoStiff >= 0.95]] : []),
+        ...(ref ? [['Peso', `${ref} g → ${g} g`, true]] : []),
+        ['Cambios', D.ecoChanges.length ? D.ecoChanges.join(', ') : 'ya estaba en mínimos'],
+        ...(D.ecoStiff != null ? [['Rigidez de la pared', `${Math.round(100 * D.ecoStiff)} % de la caja normal${D.ecoStiff < 0.6 ? ' (el diseño «Nervado rígido» la recupera con menos material)' : ''}`, D.ecoStiff >= 0.95]] : []),
         ...ecoSlicer(D),
       ]),
-      el('p', { class: 'small' }, 'Bisagras, cierres, junta y holguras calibradas no cambian: cierra y sella igual.')));
-  }
-
-  /* --- Avisos --- */
-  if (D.warn.length) {
-    info.append(el('section', { class: 'card alert' }, el('h3', {}, 'Avisos'),
-      el('ul', { class: 'warn' }, D.warn.map((w) => el('li', {}, w)))));
+      el('p', { class: 'small', style: 'margin-top:6px' }, 'Bisagras, cierres, junta y holguras no cambian: cierra y sella igual.')));
   }
 
   /* --- Acciones sugeridas: imprimir plana --- */
   const o = state.opt;
   if (o && o.status === 'option') {
-    const box = el('section', { class: 'card key' }, el('h3', {}, 'Puede imprimirse plana'),
-      el('p', { class: 'small' }, 'Cambios mínimos para que quepa sin inclinar ni soportes:'));
+    const box = el('div', { class: 'callout' }, el('h3', {}, 'Puede imprimirse plana'),
+      el('p', { class: 'small' }, 'Con uno de estos cambios cabe sin inclinar ni soportes:'));
     o.alts.forEach((a, i) => {
       const btn = el('button', { class: i ? 'sm' : 'sm primary' }, 'Aplicar');
-      btn.addEventListener('click', () => applyOption(a));
+      btn.addEventListener('click', () => { applyOption(a); toast('Cambio aplicado', { action: 'Deshacer', onAction: undo }); });
       box.append(el('div', { class: 'opt' },
         el('div', { style: 'flex:1' }, a.changes.join(' + '),
-          el('div', { class: 'small' }, `→ ${a.fit.mode === 'diagonal' ? `diagonal ${Math.round(a.fit.angle)}°` : a.fit.mode}`)), btn));
+          el('div', { class: 'small' }, a.fit.mode === 'diagonal' ? `Cabe en diagonal (${Math.round(a.fit.angle)}°)` : `Cabe ${a.fit.mode}`)), btn));
     });
-    info.append(box);
+    notes.append(box);
   }
+  if (notes.children.length) info.append(notes);
 
   /* --- Contenido --- */
   if (state.objects.length) {
     const k = state.packed;
     const n = state.objects.reduce((s, x) => s + x.qty, 0);
-    info.append(el('section', { class: 'card' + (k ? '' : ' alert') }, el('h3', {}, 'Contenido'),
+    const where = ['base', 'lid'].filter((s) => D.content[s] === 'pockets').map((s) => (s === 'base' ? 'la base' : 'la tapa'));
+    const nNotch = (D.insert?.notches.length ?? 0) + (D.insertLid?.notches.length ?? 0);
+    info.append(el('section', {}, el('h3', {}, 'Contenido'),
       kv([
         ['Objetos', `${n} (${state.objects.length} tipo${state.objects.length > 1 ? 's' : ''})`],
-        ['Acomodo', k ? `${k.w.toFixed(0)} × ${k.h.toFixed(0)} mm` : 'no caben', !!k],
-        ['Inserto', state.P.insertMode === 'pockets' ? `${D.insert?.pockets ?? 0} huecos · ${D.insert?.notches.length ?? 0} para dedos` : state.P.insertMode === 'blank' ? 'en blanco' : 'sin inserto'],
-        ['Recorte máx. de esquina', state.cmax != null ? `${state.cmax} mm` : '—'],
+        ['Acomodo', k ? dims(Math.round(k.w), Math.round(k.h)) : 'no caben con estas medidas', !!k],
+        ['Huecos', where.length ? `en ${where.join(' y ')}${nNotch ? `, ${nNotch} para los dedos` : ''}` : 'ninguna mitad lleva inserto con huecos'],
+        ...(state.cmax != null ? [['Recorte máximo de esquina', mm(state.cmax)]] : []),
       ])));
   }
 
   /* --- Detalles plegables --- */
-  const copy = el('button', { class: 'ghost sm' }, 'Copiar JSON');
-  copy.addEventListener('click', (e) => {
+  const copy = el('button', { class: 'sm' }, 'Copiar medidas (JSON)');
+  copy.addEventListener('click', async (e) => {
     e.preventDefault();
-    navigator.clipboard?.writeText(JSON.stringify(I, null, 2));
-    copy.textContent = 'Copiado';
-    setTimeout(() => { copy.textContent = 'Copiar JSON'; }, 1200);
+    try { await navigator.clipboard.writeText(JSON.stringify(I, null, 2)); toast('Medidas copiadas'); }
+    catch { toast('El navegador no dejó copiar. Las medidas van también en interior.json al exportar.', { kind: 'err' }); }
   });
   info.append(fold('inner', 'Medidas para diseñar insertos',
     kv([
-      ['Largo × ancho', `${I.L} × ${I.W} mm`, true],
+      ['Largo × ancho', dims(I.L, I.W), true],
       ['Radio de esquina', mm(I.inner_corner_radius), true],
-      ['Profundidad base / tapa', `${I.baseDepth} / ${I.lidDepth} mm`],
+      ['Fondo de la base / de la tapa', `${fmtN(I.baseDepth)} / ${mm(I.lidDepth)}`],
       ['Alto total cerrada', mm(I.closedHeight), true],
-      ['Chaflán suelo / techo', `${I.floorChamfer} / ${I.lidChamfer} mm`],
+      ['Chaflán del suelo / del techo', `${fmtN(I.floorChamfer)} / ${mm(I.lidChamfer)}`],
       ...(I.cornerCut ? [['Esquinas recortadas', mm(I.cornerCut)]] : []),
-      ...(I.gridfinity ? [['Gridfinity', `${I.gridfinity.cells} celdas · bins hasta ${I.gridfinity.units}U`, true]] : []),
+      ...(I.gridfinity ? [['Gridfinity', `${I.gridfinity.cells} celdas, bins de hasta ${I.gridfinity.units}U`, true]] : []),
     ]),
-    el('p', { class: 'small' }, `Inserto propio: L ≤ ${I.L - 0.4}, W ≤ ${I.W - 0.4} mm, radio ≥ ${I.inner_corner_radius} mm y chaflán inferior ≥ ${I.floorChamfer} mm.`),
-    el('div', { style: 'text-align:right' }, copy)));
+    el('p', { class: 'small', style: 'margin-top:8px' }, `Para un inserto propio: largo ≤ ${mm(I.L - 0.4)}, ancho ≤ ${mm(I.W - 0.4)}, radio ≥ ${mm(I.inner_corner_radius)} y chaflán inferior ≥ ${mm(I.floorChamfer)}.`),
+    el('div', { class: 'right' }, copy)));
 
   const B = bed();
-  info.append(fold('bed', `Impresión · cama ${B.x}×${B.y}`,
+  info.append(fold('bed', `Impresión en cama de ${dims(B.x, B.y)}`,
     kv(parts.map((p) => [`${p.name}${p.instances.length > 1 ? ' ×' + p.instances.length : ''}`, orientShort(p) +
       ((state.layout.fits[p.key].aids || []).length ? ' + ayudas' : '')])),
     ...tilted.map((p) => el('p', { class: 'small' },
       `${p.name}: ${p.tilt.alpha}° sobre ${p.tilt.axis}, bisel ${p.tilt.cut} mm (franja ${p.tilt.contact} mm), ${p.tilt.finCount} aletas ` +
       `(${Math.round(100 * p.tilt.finVol / Math.max(1, p.tilt.wedgeVol))} % de una cuña)` + (p.tilt.ovCount ? `, soportes en ${p.tilt.ovCount} voladizos` : '') + '.')),
-    el('p', { class: 'small' }, `${state.layout.plates.length} placa(s): míralas en la vista "Placas".`)));
+    el('p', { class: 'small', style: 'margin-top:8px' }, `${nPl} placa${nPl > 1 ? 's' : ''}: se ven en la vista «Placas».`)));
 
   const fl = D.filament || {};
   info.append(fold('mech', 'Mecánica y sellado',
     kv([
-      ['Robustez', { XS: 'XS — ultrapequeña', S: 'S — pequeña', M: 'M — mediana', L: 'L — grande' }[D.cls] || D.cls],
-      ['Bisagras', `${D.hinge.n} × ${D.hinge.nk} nudillos (${D.hinge.len} mm)`],
-      ['Cierres', `${D.latch.n} empotrados, ${D.latchW} mm`],
-      ['Pasador bisagra', fl.hinge ? `filamento 1.75 · ${fl.hingeQty}× ${fl.hinge} mm` : `impreso Ø${D.pinD}`],
-      ['Pasador cierre', fl.latch ? `filamento 1.75 · ${fl.latchQty}× ${fl.latch} mm` : `impreso Ø${D.latchPinD}`],
-      ...(D.sealMode === 'tpu'
-        ? [['Junta TPU', `${D.gkw} × ${D.gkh} mm · ${Math.round(D.c * 100)} % compresión`]]
-        : [['Sellado', D.sealMode === 'labyrinth' ? 'laberinto doble' : 'lengüeta simple']]),
+      ['Robustez', { XS: 'XS, ultrapequeña', S: 'S, pequeña', M: 'M, mediana', L: 'L, grande' }[D.cls] || D.cls],
+      ['Bisagras', `${D.hinge.n} de ${D.hinge.nk} nudillos (${mm(D.hinge.len)})`],
+      ['Cierres', `${D.latch.n} empotrados de ${mm(D.latchW)}`],
+      ['Pasador de bisagra', fl.hinge ? `filamento de 1,75${NB}mm (${fl.hingeQty} de ${mm(fl.hinge)})` : `impreso, Ø${mm(D.pinD)}`],
+      ['Pasador de cierre', fl.latch ? `filamento de 1,75${NB}mm (${fl.latchQty} de ${mm(fl.latch)})` : `impreso, Ø${mm(D.latchPinD)}`],
+      ...(D.sealMode === 'tpu' ? [['Junta', `TPU impresa de ${dims(D.gkw, D.gkh)}, ${Math.round(D.c * 100)}${NB}% de compresión`]]
+        : D.sealMode === 'cord' ? [['Junta', `cordón de filamento TPU Ø${mm(D.cordD)}, ${Math.round(D.c * 100)}${NB}% de compresión`], ['Ranura', `${dims(D.gw, D.gd)} (el cordón llena el ${Math.round(D.fill * 100)}${NB}%)`]]
+          : [['Sellado', D.sealMode === 'labyrinth' ? 'laberinto doble' : 'lengüeta simple']]),
+      ...covers.map(([n, O]) => [`Traba de las tapas interiores (${n})`, O.latch === 'magnet'
+        ? `magnética, ${O.magnets.length} pareja${O.magnets.length > 1 ? 's' : ''} de imanes de ${dims(O.magnet.d, O.magnet.h)}` : 'mecánica (clic)']),
     ])));
 
   const hl = D.hullLine || [];
   info.append(fold('hull', 'Acabado (línea de contracción)',
-    hl.length ? kv(hl.map((h) => [`${h.part} z=${h.z} mm`, `−${h.drop}% · ${h.masked}`, h.masked !== 'no'])) : el('p', { class: 'small' }, 'Sin transiciones bruscas.'),
-    el('p', { class: 'small' }, (D.snapped.length ? 'Ajustes: ' + D.snapped.join(', ') + '. ' : '') + 'Recomendaciones de slicer en LEEME.txt.')));
+    hl.length ? kv(hl.map((h) => [`${h.part}, a ${mm(h.z)}`, `−${h.drop}${NB}%, ${h.masked === 'no' ? 'sin disimular' : h.masked}`, h.masked !== 'no'])) : el('p', { class: 'small' }, 'Sin transiciones bruscas.'),
+    el('p', { class: 'small', style: 'margin-top:8px' }, (D.snapped.length ? 'Ajustes: ' + D.snapped.join(', ') + '. ' : '') + 'Las recomendaciones para el laminador van en LEEME.txt.')));
 
   info.append(fold('parts', `Piezas (${parts.length})`,
     el('table', { class: 'parts' }, el('tbody', {}, parts.map((p) => el('tr', {},
-      el('td', {}, el('span', { class: 'sw', style: `background:${COLORS[p.id]}` }), `${p.name} × ${p.instances.length}`,
+      el('td', {}, el('span', { class: 'sw', style: `background:${COLORS[p.id]}` }), `${p.name}${p.instances.length > 1 ? ` × ${p.instances.length}` : ''}`,
         el('div', { class: 'small' }, p.material)),
-      el('td', {}, `${(p.volume / 1000).toFixed(1)} cm³`)))))));
+      el('td', {}, `${fmtN((p.volume / 1000).toFixed(1))}${NB}cm³`)))))));
 
   // Registro de la construcción (también descargable para depurar).
-  const logBtn = el('button', { class: 'ghost sm' }, 'Descargar registro');
+  const logBtn = el('button', { class: 'sm' }, 'Descargar registro');
   logBtn.addEventListener('click', () => download(JSON.stringify({
-    fecha: new Date().toISOString(), version: '6', parametros: state.P,
+    fecha: new Date().toISOString(), version: VERSION, parametros: state.P,
     objetos: state.objects.map((x) => ({ nombre: x.name, cantidad: x.qty, w: x.raw.w, h: x.raw.h })),
     logo: state.svgName || null, avisos: D.warn, registro: D.log,
     piezas: parts.map((p) => ({ id: p.key, nombre: p.name, tri: p.tris, comp: p.components, vol: p.volume, estado: p.status, inclinada: p.tilt || null })),
   }, null, 2), `rugged-box-registro_${Date.now()}.json`, 'application/json'));
-  info.append(fold('log', `Registro (${(D.log || []).length})`,
-    el('pre', { class: 'log' }, (D.log || []).join('\n')), el('div', { style: 'text-align:right' }, logBtn)));
+  info.append(fold('log', 'Registro de la construcción',
+    el('pre', { class: 'log' }, (D.log || []).join('\n')), el('div', { class: 'right', style: 'margin-top:8px' }, logBtn),
+    el('p', { class: 'small' }, `Rugged Box ${VERSION}`)));
 }
 
 /* ------------------------------------------------------------------ */
@@ -787,20 +985,20 @@ function calibControl() {
   const sel = el('select', { 'aria-label': 'Perfil de calibración' },
     Object.entries(st.profiles).map(([id, q]) => el('option', { value: id, ...(id === st.active ? { selected: '' } : {}) }, q.name)));
   sel.addEventListener('change', () => { st.active = sel.value; saveProfiles(st); applyProfile(); state.calibMsg = null; buildParams(); schedule(); });
-  const bNew = el('button', { class: 'ghost sm', title: 'Nuevo perfil (copia del actual)', onclick: () => {
-    const name = prompt('Nombre del perfil (impresora · material):', `${p.name} (copia)`);
+  const bNew = el('button', { class: 'sm', title: 'Crea un perfil nuevo a partir del actual', onclick: async () => {
+    const name = await sheet({ title: 'Nuevo perfil', message: 'Un perfil por impresora y material. Empieza con los valores del perfil actual.', input: `${p.name} (copia)`, confirm: 'Crear' });
     if (!name) return;
-    addProfile(st, name.trim(), p); applyProfile(); buildParams(); schedule();
-  } }, 'Nuevo');
-  const bRen = el('button', { class: 'ghost sm', onclick: () => {
-    const name = prompt('Nuevo nombre del perfil:', p.name);
+    addProfile(st, name, p); applyProfile(); buildParams(); schedule();
+  } }, 'Nuevo…');
+  const bRen = el('button', { class: 'sm', onclick: async () => {
+    const name = await sheet({ title: 'Renombrar el perfil', input: p.name, confirm: 'Renombrar' });
     if (!name) return;
-    p.name = name.trim(); saveProfiles(st); buildParams();
-  } }, 'Renombrar');
-  const bDel = Object.keys(st.profiles).length > 1 ? el('button', { class: 'ghost sm', onclick: () => {
-    if (!confirm(`¿Borrar el perfil "${p.name}"?`)) return;
+    p.name = name; saveProfiles(st); buildParams();
+  } }, 'Renombrar…');
+  const bDel = Object.keys(st.profiles).length > 1 ? el('button', { class: 'sm danger', onclick: async () => {
+    if (!await sheet({ title: `¿Borrar el perfil «${p.name}»?`, message: 'Se pierden sus holguras medidas. No se puede deshacer.', confirm: 'Borrar', destructive: true })) return;
     removeProfile(st, st.active); applyProfile(); buildParams(); schedule();
-  } }, 'Borrar') : null;
+  } }, 'Borrar…') : null;
   box.append(el('div', { class: 'row calrow' }, sel, bNew, bRen, bDel));
 
   const missing = unmeasured();
@@ -811,13 +1009,13 @@ function calibControl() {
   // --- Resultado de la última aplicación ---
   if (state.calibMsg) {
     const m = state.calibMsg;
-    box.append(el('div', { class: 'card key calmsg' },
+    box.append(el('div', { class: 'callout ok calmsg' },
       el('strong', {}, m.changes.length ? 'Holguras actualizadas' : 'Sin cambios: los valores actuales ya eran los mejores'),
       m.changes.length ? el('ul', {}, m.changes.map((c) => el('li', {}, `${CAL_NAMES[c.k]}: ${fmt(c.from)} → ${fmt(c.to)} (${c.why})`))) : null,
       m.retest ? el('div', { class: 'warnTxt' }, m.autoPlan
         ? `Fuera de rango: ${m.retestIds.join(', ')}. Ya está generado un test SOLO con ${m.retestIds.length > 1 ? 'esas probetas' : 'esa probeta'}, centrado en los nuevos valores: descárgalo abajo.`
         : 'Alguna probeta quedó fuera del rango: genera otro test (se centrará en los nuevos valores).') : null,
-      el('button', { class: 'ghost sm', onclick: () => { state.calibMsg = null; buildParams(); } }, 'Cerrar')));
+      el('div', { class: 'right' }, el('button', { class: 'sm', onclick: () => { state.calibMsg = null; buildParams(); } }, 'Entendido'))));
   }
 
   // --- Test ---
@@ -836,7 +1034,7 @@ function calibControl() {
     // Esta caja usa holguras que el perfil no ha medido: test solo de esas.
     const goMissing = missing.length && p.calibrated ? el('button', { class: 'sm', onclick: () => {
       const plan = calibPlan(state.P, { fine: fine.checked, mode: 'box', onlyKeys: missing });
-      if (!plan.tests.length) { alert('No hay probetas para esas holguras.'); return; }
+      if (!plan.tests.length) { toast('Esas holguras no tienen probeta propia: se deducen de las demás.'); return; }
       plan.P = { ...state.P };
       p.plan = plan; p.choices = {}; saveProfiles(st);
       state.calibMsg = null;
@@ -858,7 +1056,10 @@ function calibControl() {
     box.append(el('div', { class: 'row' },
       el('button', { class: 'sm', onclick: showCalib }, state.calibView ? 'Actualizar vista' : 'Ver en 3D'),
       el('button', { class: 'sm', onclick: downloadCalib }, 'Descargar test'),
-      el('button', { class: 'ghost sm', onclick: () => { if (confirm('¿Descartar este test?')) { p.plan = null; p.choices = {}; saveProfiles(st); hideCalib(); buildParams(); } } }, 'Descartar')));
+      el('button', { class: 'sm danger', onclick: async () => {
+        if (!await sheet({ title: '¿Descartar este test?', message: 'Se pierden las probetas marcadas. Las holguras del perfil no cambian.', confirm: 'Descartar', destructive: true })) return;
+        p.plan = null; p.choices = {}; saveProfiles(st); hideCalib(); buildParams();
+      } }, 'Descartar…')));
     box.append(el('div', { class: 'small' }, 'Impreso el test, marca en cada probeta el número que mejor funcionó:'));
     for (const t of plan.tests) {
       const name = 'cal_' + t.id;
@@ -874,8 +1075,8 @@ function calibControl() {
           opt('loose', t.key === 'latchPre' ? 'todos flojos' : 'todas flojas', t.key === 'latchPre' ? 'Hasta el de más precarga queda con juego' : 'Hasta la más justa quedó floja'))));
     }
     box.append(el('div', { class: 'row' }, el('button', { class: 'sm primary', onclick: () => {
+      if (!Object.values(p.choices).some((c) => c != null && c !== '')) { toast('Marca primero el mejor número de al menos una probeta.'); return; }
       const res = applyResults(plan, p.choices, p.values);
-      if (!Object.values(p.choices).some((c) => c != null && c !== '')) { alert('Marca al menos una probeta.'); return; }
       const choices = { ...p.choices };
       setFromTest(st, res, plan, choices);
       applyProfile();
@@ -896,10 +1097,10 @@ function calibControl() {
       schedule();
     } }, 'Aplicar resultados')));
   }
-  box.append(el('div', { class: 'row' }, el('button', { class: 'linkbtn', onclick: () => {
-    if (!confirm('¿Volver a los valores por defecto en este perfil? Se pierde la calibración.')) return;
+  box.append(el('div', { class: 'row' }, el('button', { class: 'linkbtn', onclick: async () => {
+    if (!await sheet({ title: '¿Restablecer las holguras de este perfil?', message: `«${p.name}» vuelve a los valores típicos y pierde lo medido con el test. No se puede deshacer.`, confirm: 'Restablecer', destructive: true })) return;
     resetProfile(st); applyProfile(); state.calibMsg = null; buildParams(); schedule();
-  } }, 'Restablecer valores por defecto')));
+  } }, 'Restablecer las holguras…')));
   return box;
 }
 
@@ -933,7 +1134,7 @@ async function downloadCalib() {
   const p = activeProfile(state.calib);
   if (!p.plan) return;
   const msg = await engine.calibration(p.plan.P || state.P, p.plan);
-  if (!msg.ok) { alert('No se pudo generar el test: ' + msg.error); return; }
+  if (!msg.ok) { toast('No se pudo generar el test: ' + String(msg.error).split('\n')[0], { kind: 'err' }); return; }
   const r = msg.r, B = bed();
   const meshes = r.parts.map((q) => {
     const xyz = transformVerts(q.mesh.vert, q.mesh.numProp, q.instances[0]);
@@ -1001,7 +1202,7 @@ function printMesh(p, angle) {
 }
 const IDENT = [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1];
 
-const fileName = (p) => FILE[p.id] + (p.key !== p.id ? '_' + (Number(p.key.replace(/\D/g, '')) + 1) : '');
+const fileName = (p) => FILE[p.id] + (p.id === 'orgPanel' && p.side === 'base' ? '_base' : '') + (p.key !== p.id ? '_' + (Number(p.key.replace(/\D/g, '')) + 1) : '');
 const FILE = { insert: 'inserto_base', insertLid: 'inserto_tapa', orgPanel: 'tapa_interior',  base: 'base', lid: 'tapa', latch: 'cierre', gasket: 'junta_TPU', hingePin: 'pasador_bisagra', latchPin: 'pasador_cierre', cap: 'tapon_pasador' };
 
 async function exportZip() {
@@ -1050,11 +1251,13 @@ async function exportZip() {
     files.push({ name: 'parametros.json', data: JSON.stringify(state.P, null, 2) });
     files.push({ name: 'interior.json', data: JSON.stringify(r.D.inner, null, 2) });
     const I = r.D.inner;
-    download(zipStore(files), `rugged-box_${I.L}x${I.W}x${I.closedHeight}.zip`);
+    const zipName = `rugged-box_${I.L}x${I.W}x${I.closedHeight}.zip`;
+    download(zipStore(files), zipName);
+    toast(`Exportado: ${zipName} (${r.parts.length} piezas y LEEME)`);
   } catch (e) {
-    alert('Error al exportar: ' + e.message);
+    toast('No se pudo exportar: ' + String(e.message).split('\n')[0], { kind: 'err' });
   } finally {
-    btn.disabled = false; btn.textContent = 'Exportar todo (.zip)';
+    btn.disabled = false; btn.textContent = 'Exportar todo';
   }
 }
 
@@ -1066,14 +1269,25 @@ function orientText(f, p) {
 
 function readme(r, layout) {
   const D = r.D;
+  const fl = D.filament || {};
+  const orgs = [['tapa', D.org], ['base', D.orgB]].filter(([, O]) => O && O.has);
+  const mags = orgs.filter(([, O]) => O.latch === 'magnet');
+  // Lo que hay que tener además de lo impreso.
+  const extra = [];
+  if (mags.length) extra.push(`  - ${2 * mags.reduce((s, [, O]) => s + O.magnets.length, 0)} imanes de disco de ${mags[0][1].magnet.d} × ${mags[0][1].magnet.h} mm (neodimio; dos por punto de cierre de las tapas interiores).`);
+  if (D.cord) extra.push(`  - ${D.cord.length} mm de filamento TPU de 1,75 mm (junta de cordón).`);
+  if (fl.hinge) extra.push(`  - ${fl.hingeQty} × ${fl.hinge} mm de filamento rígido de 1,75 mm (pasadores de bisagra).`);
+  if (fl.latch) extra.push(`  - ${fl.latchQty} × ${fl.latch} mm de filamento rígido de 1,75 mm (pasadores de cierre).`);
   const lines = [
     'RUGGED BOX — instrucciones de impresión y montaje',
     '='.repeat(50), '',
+    `Generado con Rugged Box ${VERSION}`,
     `Interior: ${D.inner.L} × ${D.inner.W} mm, alto cerrado ${D.inner.closedHeight} mm, inner_corner_radius ${D.inner.inner_corner_radius} mm`,
     `Exterior: ${D.outerL} × ${D.outerW} × ${D.outerH} mm`, '',
     'PIEZAS (ya orientadas para imprimir, sin soportes):',
     ...r.parts.map((p) => `  - ${p.name} × ${p.instances.length}  [${p.material}]  → ${orientText(layout.fits[p.key], p)}`),
     '',
+    ...(extra.length ? ['ADEMÁS DE LO IMPRESO:', ...extra, ''] : []),
     'AJUSTES RECOMENDADOS:',
     `  - Base/tapa: capa ${D.lh} mm, ancho de pared ${D.lw} mm (la pared mide ${D.t} mm = ${Math.round(D.t / D.lw)} líneas exactas), relleno gyroid 15–25 %.`,
     '  - Línea de contracción (además del diseño): perímetro exterior primero (outer/inner),',
@@ -1083,7 +1297,8 @@ function readme(r, layout) {
     '    Las aletas van en planos perpendiculares al eje de inclinación: imprímelas en el mismo objeto que la pieza.',
     '  - Cierres: imprimir acostados (como vienen), 100 % de perímetros o 5+ paredes, PETG preferible (más elástico).',
     '  - Pasadores: acostados sobre la cara plana, 100 % de relleno.',
-    '  - Junta: TPU 95A, 0.2 mm, velocidad baja, 100 % de relleno.',
+    ...(D.sealMode === 'tpu' ? ['  - Junta: TPU 95A, 0.2 mm, velocidad baja, 100 % de relleno.'] : []),
+    ...(orgs.length ? ['  - Tapas interiores: con la cara exterior sobre la cama (como vienen), 3+ paredes.'] : []),
     '  - Tapa: la cara decorada va contra la cama.',
     `  - Sin soportes: en las piezas planas ningún puente supera ${D.maxBridge ?? 10} mm (desactiva los soportes del laminador).`, '',
     ...(D.eco ? ['MODO AHORRO DE MATERIAL:',
@@ -1091,12 +1306,25 @@ function readme(r, layout) {
       ...ecoSlicer(D).map(([k, v]) => `  - ${k}: ${v}.`),
       '  - La mecánica (bisagras, cierres, junta, holguras) es la misma que sin ahorro.', ''] : []),
     'MONTAJE:',
-    '  1. Coloca la junta TPU en la ranura de la base (si aplica).',
+    ...(D.sealMode === 'tpu' ? ['  1. Coloca la junta de TPU en la ranura de la base.']
+      : D.cord ? [
+        `  1. Junta de cordón: corta ${D.cord.length} mm de filamento TPU de 1,75 mm con un corte recto y mételo en la ranura de la base (${D.gw} mm de ancho).`,
+        '     Empieza en el centro de un lado largo y deja las dos puntas a tope, sin montarlas; si sobra, recorta 1 mm cada vez.',
+        `     La lengüeta de la tapa lo aprieta un ${Math.round(D.c * 100)} % al cerrar. Si el cierre queda muy duro, baja «Compresión de la junta».`]
+        : ['  1. Esta caja no lleva junta: el sellado es la propia lengüeta.']),
     '  2. Alinea los nudillos de la tapa entre los de la base e inserta el pasador por el lado de la cabeza hasta que los dientes salten.',
     '     Bisagras: la cabeza de cada pasador va hacia el extremo de la caja más cercano.',
     '  3. Coloca cada cierre entre sus orejetas e inserta su pasador.',
   ];
-  const fl = D.filament || {};
+  if (orgs.length) {
+    lines.push(`  4. Tapas interiores (${orgs.map(([n]) => n).join(' y ')}): se montan abiertas a 90°, deslizándolas hacia el lado de su eje hasta que los dos pivotes salten a sus agujeros (clic).`,
+      '     Para sacarlas, tira en sentido contrario. Se abren metiendo la yema del dedo en el pozo, detrás de la pestaña.');
+    if (mags.length) lines.push(
+      `  5. Imanes (${mags[0][1].magnet.d} × ${mags[0][1].magnet.h} mm): van a presión, uno en cada pilar de la caja y otro en cada resalte de las tapas interiores, cara con cara.`,
+      '     Mete primero los de la caja, apretando con algo plano hasta el fondo. ANTES de meter cada imán de una tapa interior comprueba la polaridad:',
+      '     acércalo a su pareja ya puesta y márcalo por la cara que se atrae (esa cara es la que queda a la vista). Un imán al revés empuja la tapa en vez de cerrarla.',
+      '     Si alguno queda flojo, una gota de cianoacrilato. No los metas en caliente ni los calientes: el neodimio pierde fuerza por encima de 80 °C.');
+  }
   const sideTxt = (x, s) => (Math.abs(x) < 1e-6 ? (s < 0 ? 'por la izquierda' : 'por la derecha') : s * x < 0 ? 'desde el centro de la caja' : 'desde el extremo de la caja');
   if (!fl.latch && D.latch.headSide) lines.push(`     Cierres: mete cada pasador ${D.latch.xs.map((x, i) => sideTxt(x, D.latch.headSide[i])).filter((v, i, a) => a.indexOf(v) === i).join(' / ')} (ese lado del eje queda libre).`);
   if (fl.hinge) lines.push(`  * Bisagra: corta ${fl.hingeQty}× ${fl.hinge} mm de filamento 1.75 mm, mételo recto y fíjalo con un tapón en cada extremo.`);
@@ -1110,28 +1338,32 @@ function readme(r, layout) {
 }
 
 async function exportSingles() {
-  const dlg = document.getElementById('dlgStl') || document.body.appendChild(el('dialog', { id: 'dlgStl', class: 'card' }));
-  dlg.innerHTML = '';
-  dlg.append(el('h3', {}, 'Descargar STL por pieza'), el('p', { class: 'small' }, 'Generando a calidad final…'));
+  // Hoja propia: se crea al abrir y se elimina al cerrar (no deja nada en
+  // memoria: las mallas de calidad final solo viven mientras está abierta).
+  const dlg = document.body.appendChild(el('dialog', { class: 'sheet', 'aria-label': 'Descargar STL por pieza' }));
+  dlg.addEventListener('close', () => dlg.remove());
+  const close = () => el('div', { class: 'btns' }, el('button', { class: 'primary', onclick: () => dlg.close() }, 'Hecho'));
+  dlg.append(el('h3', {}, 'STL por pieza'), el('p', {}, 'Generando las piezas con la calidad final…'));
   dlg.showModal();
   try {
     const r = await finalBuild();
+    if (!dlg.isConnected) return;                 // se cerró mientras se generaba
     const layout = computeLayout(r);
     dlg.innerHTML = '';
-    dlg.append(el('h3', {}, 'Descargar STL por pieza'));
+    const list = el('div', { class: 'list' });
     for (const p of r.parts) {
-      dlg.append(el('div', { style: 'display:flex;justify-content:space-between;gap:16px;align-items:center;margin:6px 0' },
-        el('span', {}, `${p.name} × ${p.instances.length}`),
-        el('button', { class: 'sm', onclick: () => {
+      list.append(el('div', {},
+        el('span', {}, `${p.name}${p.instances.length > 1 ? ` × ${p.instances.length}` : ''}`),
+        el('button', { class: 'sm', 'aria-label': `Descargar ${p.name}`, onclick: () => {
           const m = printMesh(p, layout.fits[p.key].angle);
           const all = state.P.aidsInPart && m.aids.length ? mergeMeshes([{ xyz: m.xyz, tri: m.tri }, ...m.aids]) : m;
           download(stlBinary(all.xyz, all.tri, p.id), `${fileName(p)}.stl`, 'model/stl');
-        } }, 'STL')));
+        } }, 'Descargar')));
     }
-    dlg.append(el('div', { style: 'text-align:right;margin-top:10px' }, el('button', { class: 'ghost sm', onclick: () => dlg.close() }, 'Cerrar')));
+    dlg.append(el('h3', {}, 'STL por pieza'), el('p', {}, 'Cada pieza ya está orientada para imprimir.'), list, close());
   } catch (e) {
     dlg.innerHTML = '';
-    dlg.append(el('p', {}, 'Error: ' + e.message), el('button', { onclick: () => dlg.close() }, 'Cerrar'));
+    dlg.append(el('h3', {}, 'No se pudieron generar las piezas'), el('p', {}, String(e.message).split('\n')[0]), close());
   }
 }
 
@@ -1141,12 +1373,17 @@ async function exportSingles() {
 $('#modeSeg').addEventListener('click', (e) => {
   const b = e.target.closest('button');
   if (!b) return;
-  for (const x of $('#modeSeg').children) x.classList.toggle('on', x === b);
+  for (const x of $('#modeSeg').children) { x.classList.toggle('on', x === b); x.setAttribute('aria-checked', String(x === b)); }
   viewer.setMode(b.dataset.mode);
+  // "Abrir" solo tiene sentido con la caja montada: se muestra lo que aplica.
+  $('#openWrap').hidden = b.dataset.mode !== 'assembled';
 });
 $('#open').addEventListener('input', (e) => viewer.setOpen(Number(e.target.value)));
 $('#inner').addEventListener('change', (e) => viewer.setInterior(e.target.checked));
-const section = () => viewer.setSection($('#section').checked, Number($('#sectionPos').value));
+const section = () => {
+  $('#sectionPos').hidden = !$('#section').checked;
+  viewer.setSection($('#section').checked, Number($('#sectionPos').value));
+};
 $('#section').addEventListener('change', section);
 $('#sectionPos').addEventListener('input', section);
 $('#btnFit').addEventListener('click', () => viewer.fit());
@@ -1154,19 +1391,51 @@ $('#calBack').addEventListener('click', hideCalib);
 $('#calDl').addEventListener('click', downloadCalib);
 $('#btnZip').addEventListener('click', exportZip);
 $('#btnStl').addEventListener('click', exportSingles);
+// Restablecer no pregunta: se hace y se puede deshacer (historial).
 $('#btnReset').addEventListener('click', () => {
-  if (!confirm('¿Restablecer todos los parámetros?')) return;
+  if (snapshot() === JSON.stringify(Object.fromEntries(Object.entries(DEFAULTS).filter(([k]) => !CAL_KEYS.includes(k))))) { toast('La caja ya tiene los valores iniciales'); return; }
+  remember();
   state.P = { ...DEFAULTS };
   applyProfile();                     // la calibración de la impresora se conserva
   safeDel(STORE);
-  history.replaceState(null, '', location.pathname);
+  try { history.replaceState(null, '', location.pathname); } catch { /* límite del navegador */ }
   buildParams();
+  runPack(true);
   schedule();
+  toast('Caja restablecida a los valores iniciales', { action: 'Deshacer', onAction: undo });
 });
+$('#btnUndo').addEventListener('click', undo);
+$('#btnRedo').addEventListener('click', redo);
+// Ctrl/⌘+Z y Ctrl/⌘+Mayús+Z (o Ctrl+Y). En un campo de texto manda el
+// deshacer del propio campo.
+document.addEventListener('keydown', (e) => {
+  if (!(e.ctrlKey || e.metaKey) || e.altKey) return;
+  const key = e.key.toLowerCase();
+  if (key !== 'z' && key !== 'y') return;
+  const t = e.target;
+  if (t && (t.isContentEditable || t.tagName === 'TEXTAREA' || (t.tagName === 'INPUT' && ['text', 'number', 'search'].includes(t.type)))) return;
+  if (document.querySelector('dialog[open]')) return;
+  e.preventDefault();
+  if (key === 'y' || e.shiftKey) redo(); else undo();
+});
+for (const r of document.querySelectorAll('.toolbar input[type=range]')) paintRange(r);
+if (/Mac|iPhone|iPad/.test(navigator.platform || '')) { $('#btnUndo').title = 'Deshacer (⌘Z)'; $('#btnRedo').title = 'Rehacer (⇧⌘Z)'; }
 
 buildParams();
 if (state.objects.length) runPack(true);
 schedule();
 
 // Acceso para depuración y pruebas automatizadas.
-window.__rugged = { state, viewer, setParam, contentChanged, buildParams };
+// Asidero para las pruebas de interfaz (tests/ui.e2e.mjs): estado, visor e
+// historial, y un recuento de lo que debe mantenerse estable (fugas).
+window.__rugged = {
+  state, viewer, setParam, contentChanged, buildParams, hist, undo, redo, toast,
+  stats: () => ({
+    geometries: viewer.renderer.info.memory.geometries,
+    textures: viewer.renderer.info.memory.textures,
+    nodes: document.getElementsByTagName('*').length,
+    dialogs: document.querySelectorAll('dialog').length,
+    toasts: document.querySelectorAll('.toast').length,
+    undo: hist.undo.length,
+  }),
+};

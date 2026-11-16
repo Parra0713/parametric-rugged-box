@@ -16,6 +16,7 @@
 
 let W = null;          // módulo wasm inicializado
 const registry = [];   // objetos pendientes de liberar
+const pinned = [];     // los que viven toda la construcción (ver `pin`)
 
 const MANIFOLD_STATIC = ['cube', 'cylinder', 'sphere', 'tetrahedron', 'extrude', 'revolve',
   'compose', 'union', 'difference', 'intersection', 'levelSet', 'smooth', 'ofMesh', 'hull'];
@@ -92,7 +93,53 @@ function fixExtrude(p) {
 /** Libera todos los objetos WASM creados desde la última llamada. */
 export function cleanup() {
   for (const o of registry) { try { o.delete(); } catch { /* ya liberado */ } }
+  for (const o of pinned) { try { o.delete(); } catch { /* ya liberado */ } }
   registry.length = 0;
+  pinned.length = 0;
+}
+
+/**
+ * Liberación anticipada. La memoria de WASM no se devuelve nunca al sistema:
+ * lo que cuenta es el PICO de una construcción. Sin esto, todo lo intermedio
+ * de todas las piezas (y de cada capa analizada) seguía vivo hasta el final:
+ * una tapa con compartimentos impresa inclinada llegaba a ~380 MB.
+ *
+ *   const m = mark();          // antes de un bloque de trabajo
+ *   …                          // crea temporales
+ *   release(m, [resultado]);   // libera lo creado desde la marca, salvo eso
+ *
+ * Es seguro liberar un objeto del que derivan otros que se conservan:
+ * manifold comparte los datos por referencia (el derivado mantiene vivo lo
+ * que necesita). Lo que NO se puede es usar después un objeto ya liberado:
+ * pasa en `keep` todo lo que se vaya a tocar más adelante.
+ */
+export const mark = () => registry.length;
+/**
+ * Objeto que se reutiliza durante toda la construcción (una caché, como la
+ * forma interior del octógono): `release` no lo toca; se libera en `cleanup`.
+ */
+export function pin(o) {
+  const i = registry.lastIndexOf(o);
+  if (i >= 0) registry.splice(i, 1);
+  pinned.push(o);
+  return o;
+}
+export function release(m, keep = null) {
+  if (m >= registry.length) return;
+  const k = keep ? new Set(Array.isArray(keep) ? keep : [keep]) : null;
+  const kept = [];
+  for (let i = m; i < registry.length; i++) {
+    const o = registry[i];
+    if (k && k.has(o)) kept.push(o);
+    else { try { o.delete(); } catch { /* ya liberado */ } }
+  }
+  registry.length = m;
+  for (const o of kept) registry.push(o);
+}
+/** Ejecuta `fn` y libera todo lo que haya creado (su resultado no debe ser geometría). */
+export function scoped(fn) {
+  const m = mark();
+  try { return fn(); } finally { release(m); }
 }
 
 export const M = () => W.Manifold;

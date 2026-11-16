@@ -33,17 +33,31 @@ console.log('\nMemoria WASM');
   for (let i = 0; i < 25; i++) build({ ...P0, innerL: 104 + i * 0.5, stackable: i % 2 === 0, quality: i % 3 ? 'draft' : 'preview' }, null);
   const grow = ext() - a;
   check(grow < 40, `25 reconstrucciones: la memoria crece ${grow.toFixed(1)} MB (< 40; antes ~750 MB)`);
+  // Lo nuevo (compartimentos en las dos mitades, imanes, huecos en la tapa,
+  // junta de cordón) tampoco deja nada vivo en WASM.
+  const poly = [[[-40, -15], [40, -15], [40, 15], [-40, 15]]];
+  const mix = (i) => ({ ...DEFAULTS, innerL: 140 + (i % 5), innerW: 95, baseDepth: 38, lidDepth: 20,
+    insertMode: ['org', 'pockets', 'blank'][i % 3], lidMode: ['org', 'org', 'pockets'][i % 3], contentPolys: poly,
+    orgCols: 3, orgRows: 2, orgBCols: 3, orgBRows: 2, orgCover: ['row', 'cell', 'single'][i % 3], orgBCover: ['cell', 'row', 'single'][i % 3],
+    orgLatch: i % 2 ? 'magnet' : 'snap', sealMode: i % 4 === 0 ? 'cord' : 'tpu', quality: i % 3 ? 'draft' : 'preview' });
+  for (let i = 0; i < 6; i++) build(mix(i), null);
+  const b0 = ext();
+  for (let i = 6; i < 30; i++) build(mix(i), null);
+  const grow2 = ext() - b0;
+  check(grow2 < 40, `24 reconstrucciones con compartimentos, imanes, huecos y cordón: crece ${grow2.toFixed(1)} MB (< 40)`);
 }
 
 /* 2. Reparto A/B ---------------------------------------------------- */
 console.log('\nReparto en dos hilos (A + B = completo)');
 const splitCases = [
   ['normal', {}],
-  ['apilable + insertos', { stackable: true, insertMode: 'blank', insertLid: true }],
+  ['apilable + insertos', { stackable: true, insertMode: 'blank', lidMode: 'blank' }],
   ['pasadores impresos', { pinMode: 'printed', latchPinMode: 'printed' }],
   ['junta en tramos (cama pequeña)', { innerL: 200, innerW: 120, bedPreset: 'custom', bedX: 180, bedY: 180 }],
   ['grande inclinada', { innerL: 260, innerW: 180, baseDepth: 63, lidDepth: 27, pattern: 'cross' }],
-  ['organizador por celda', { lidOrg: true, orgCols: 4, orgRows: 2, orgCover: 'cell' }],
+  ['organizador por celda', { lidMode: 'org', orgCols: 4, orgRows: 2, orgCover: 'cell' }],
+  ['compartimentos en base y tapa + imanes', { innerL: 150, innerW: 100, baseDepth: 40, lidDepth: 22, insertMode: 'org', orgBCols: 3, orgBRows: 2, orgBCover: 'cell', lidMode: 'org', orgCols: 3, orgRows: 2, orgCover: 'row', orgLatch: 'magnet' }],
+  ['huecos en base y tapa + cordón', { innerL: 150, innerW: 90, lidDepth: 18, insertMode: 'pockets', lidMode: 'pockets', sealMode: 'cord', contentPolys: [[[-50, -20], [50, -20], [50, 20], [-50, 20]]] }],
 ];
 for (const [name, p] of splitCases) {
   for (const q of ['draft', 'preview']) {
@@ -51,7 +65,8 @@ for (const [name, p] of splitCases) {
     const full = build(P, null);
     const m = mergeResults(build(P, null, { only: 'A' }), build(P, null, { only: 'B' }));
     const sameWarn = JSON.stringify([...full.D.warn].sort()) === JSON.stringify([...m.D.warn].sort());
-    check(sig(full) === sig(m) && sameWarn && JSON.stringify(full.D.filament) === JSON.stringify(m.D.filament),
+    const extra = (r) => JSON.stringify([r.D.filament, r.D.cord || null, r.D.insert || null, r.D.insertLid || null, r.parts.map((x) => [x.key, x.side || '', x.axis || null])]);
+    check(sig(full) === sig(m) && sameWarn && extra(full) === extra(m),
       `${name} (${q}): ${m.parts.length} piezas iguales`);
   }
 }
@@ -74,7 +89,9 @@ console.log('\nCaché de la base (parámetros "solo tapa")');
 {
   const items = SCHEMA.flatMap((g) => g.items || []);
   const wrong = [];
-  for (const B of [{}, { stackable: true, lidMin: true }]) {
+  const ORG_B = { insertMode: 'org', orgBCols: 3, orgBRows: 2, baseDepth: 38 };
+  for (const B of [{}, { stackable: true, lidMin: true }, { lidMode: 'org', orgCols: 3, orgRows: 2 }, { stackable: true, lidMode: 'org', orgCols: 3, orgRows: 2, orgLatch: 'magnet' },
+    { ...ORG_B, orgBCover: 'cell', orgLatch: 'magnet' }]) {
     for (const k of _internal.LID_ONLY) {
       const it = items.find((i) => i.k === k);
       if (!it) continue;
@@ -88,7 +105,7 @@ console.log('\nCaché de la base (parámetros "solo tapa")');
       const cached = base(build(P2, null, { only: 'A' }));
       build({ ...P1, innerL: 77 }, null, { only: 'A' });
       const fresh = base(build(P2, null, { only: 'A' }));
-      if (cached !== fresh) wrong.push(`${k}=${alt}${B.stackable ? ' (apilable)' : ''}`);
+      if (cached !== fresh) wrong.push(`${k}=${alt}${B.stackable ? ' (apilable)' : ''}${B.lidMode ? ' (tapa con compartimentos)' : ''}${B.insertMode ? ' (base con compartimentos)' : ''}`);
     }
   }
   check(!wrong.length, `ningún parámetro "solo tapa" cambia la base${wrong.length ? ': ' + wrong.join(', ') : ''}`);
@@ -100,7 +117,9 @@ console.log('\nCaché de la tapa (parámetros que no la tocan)');
   const items = SCHEMA.flatMap((g) => g.items || []);
   const wrong = [];
   const crimp = [[[-60, -20], [60, -20], [60, 20], [-60, 20]]];
-  for (const B of [{}, { stackable: true }, { lidOrg: true, orgCols: 3, orgRows: 2 }, { insertMode: 'pockets', contentPolys: crimp }]) {
+  for (const B of [{}, { stackable: true }, { lidMode: 'org', orgCols: 3, orgRows: 2 }, { insertMode: 'pockets', contentPolys: crimp },
+    { insertMode: 'org', orgBCols: 3, orgBRows: 2, baseDepth: 38 }, { insertMode: 'org', orgBCols: 3, orgBRows: 2, baseDepth: 38, lidMode: 'org', orgLatch: 'magnet' },
+    { lidMode: 'pockets', contentPolys: crimp }]) {
     for (const k of _internal.NOT_LID) {
       const it = items.find((i) => i.k === k);
       let alt;
@@ -115,12 +134,29 @@ console.log('\nCaché de la tapa (parámetros que no la tocan)');
       const cached = lid(build(P2, null, { only: 'B' }));
       build({ ...P1, innerL: 77 }, null, { only: 'B' });
       const fresh = lid(build(P2, null, { only: 'B' }));
-      if (cached !== fresh) wrong.push(`${k}=${JSON.stringify(alt)}`);
+      if (cached !== fresh) wrong.push(`${k}=${JSON.stringify(alt)}${B.insertMode ? ` (base: ${B.insertMode})` : ''}`);
     }
+  }
+  // Los compartimentos de la base SÍ cambian la tapa cuando agrandan la caja
+  // o suben el plano de unión: ahí la caché no debe acertar.
+  {
+    const P1 = { ...DEFAULTS, insertMode: 'org', orgBCols: 3, orgBRows: 2, quality: 'draft' };
+    const lidOf = (P) => { const b = build(P, null, { only: 'B' }).parts.find((x) => x.id === 'lid'); return `${b.volume}/${b.tris}`; };
+    const a1 = lidOf(P1), a2 = lidOf({ ...P1, orgBMinL: 60 }), a3 = lidOf({ ...P1, orgBDepth: 50 });
+    check(a1 !== a2 && a1 !== a3, 'compartimentos de la base que agrandan la caja o la base: la tapa se recalcula');
+  }
+  // El logo forma parte de la clave de la tapa (antes cambiar de logo con
+  // los mismos parámetros devolvía la tapa del logo anterior).
+  {
+    const logo = (w) => ({ fills: [{ outer: [[-w, -8], [w, -8], [w, 8], [-w, 8]], holes: [] }], strokes: [] });
+    const P1 = { ...DEFAULTS, pattern: 'none', quality: 'draft' };
+    const lidOf = (svg) => { const b = build(P1, svg, { only: 'B' }).parts.find((x) => x.id === 'lid'); return `${b.volume}/${b.tris}`; };
+    const l1 = lidOf(logo(12)), l2 = lidOf(logo(22)), l1b = lidOf(logo(12)), l0 = lidOf(null);
+    check(l1 !== l2 && l1 === l1b && l0 !== l1, 'cambiar de logo rehace la tapa; volver al anterior da la misma');
   }
   check(!wrong.length, `ningún parámetro de contenido/inserto/ayudas cambia la tapa${wrong.length ? ': ' + wrong.join(', ') : ''}`);
   // Y la caché acelera de verdad el hilo B al tocar el inserto.
-  const P = { ...DEFAULTS, lidOrg: true, orgCols: 6, orgRows: 3, insertMode: 'blank', quality: 'draft' };
+  const P = { ...DEFAULTS, lidMode: 'org', orgCols: 6, orgRows: 3, insertMode: 'blank', quality: 'draft' };
   build(P, null, { only: 'B' });
   const t0 = performance.now(); build({ ...P, insertTol: 0.4 }, null, { only: 'B' }); const tHit = performance.now() - t0;
   const t1 = performance.now(); build({ ...P, innerW: 81 }, null, { only: 'B' }); const tMiss = performance.now() - t1;

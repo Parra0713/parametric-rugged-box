@@ -1,9 +1,13 @@
 /**
- * organizer.js — Geometría del organizador en la tapa (ver orgLayout.js).
+ * organizer.js — Geometría del organizador (ver orgLayout.js).
+ *
+ * Todo se construye en el "marco de tapa" a partir de una distribución `O`
+ * (D.org para la tapa, D.orgB para la base); el motor gira 180° la de la
+ * base. Ninguna función guarda objetos WASM en `O` (se serializa con D).
  */
-import { M, CS, prism, teardrop, poly, roundRect, unionAll, yzExtrude } from './geo.js';
+import { M, CS, prism, frustum, teardrop, poly, roundRect, unionAll, yzExtrude } from './geo.js';
 import { rrOffset } from './seal.js';
-import { ORG } from './orgLayout.js';
+import { ORG, MAG } from './orgLayout.js';
 
 /* ================================================================ */
 /*  Geometría                                                       */
@@ -18,31 +22,57 @@ const rrCS = (x0, x1, y0, y1, r, seg) => roundRect(x1 - x0, y1 - y0, r, seg).tra
 const wellCS = (w) => rectCS(w.x0, w.x1, w.y0, w.y1);
 const wellOpenCS = (w) => rectCS(w.x0, w.x1, w.yTab, w.y1 + 1);
 
-/** Celdas que tocan algún pozo: se recortan dejando un divisor alrededor. */
-function wellKeepOut(O) {
-  return O.wells.length ? CS().union(O.wells.map((w) => wellCS(w).offset(O.wd, 'Square'))) : null;
+/** Lo que una celda pierde por los pozos que pisa (pozo + pared alrededor). */
+function cellCut(O, c) {
+  return c.wells && c.wells.length ? CS().union(c.wells.map((i) => wellCS(O.wells[i]).offset(O.wd, 'Square'))) : null;
 }
 
 /** Contorno de una celda (recortado al interior de la caja: octógono, radios, pozos). */
-function cellCS(D, O, c, inset = 0) {
+function cellCS(D, O, c, inset = 0, cut = cellCut(O, c)) {
   let cs = rrCS(c.x0 + inset, c.x1 - inset, c.y0 + inset, c.y1 - inset, Math.max(0.3, O.rc - inset), D.seg);
   cs = cs.intersect(rrOffset(D, -inset));
   if (c.lim) cs = cs.intersect(rectCS(-c.lim + inset, c.lim - inset, -D.Wi, D.Wi));
-  if (c.cut) cs = cs.subtract(c.cut.offset(inset, 'Square'));
+  if (cut) cs = cs.subtract(cut.offset(inset, 'Square'));
   return cs;
 }
 
-/** Marca las celdas que pisan un pozo (en la propia distribución, una vez). */
-function markWellCells(D, O) {
-  if (O._wellsMarked) return;
-  O._wellsMarked = true;
-  const ko = wellKeepOut(O);
-  if (!ko) return;
-  for (const c of O.cells) {
-    const r = rectCS(c.x0, c.x1, c.y0, c.y1);
-    if (!r.intersect(ko).isEmpty()) c.cut = ko;
+/** Disco de un imán (pilar/resalte) de radio r. */
+const magDisc = (m, r, seg) => CS().circle(r, Math.min(36, Math.max(20, seg))).translate([m.x, m.y]);
+/**
+ * Zona del resalte de la tapa interior alrededor de un imán: el disco, sin
+ * pasar de la cara del carril del borde libre ni de la del divisor vecino
+ * (`grow`: holgura alrededor, para el hueco del cuerpo; `clr`: lo que el
+ * resalte se queda corto de esas caras).
+ */
+const magBoss = (m, r, grow, clr, seg) => magDisc(m, r + grow, seg)
+  .intersect(rectCS(m.xa + clr, m.xb - clr, -1e4, m.yc === null ? 1e4 : m.yc - clr));
+
+/**
+ * Alojamiento de imán a presión, centrado en el origen: cilindro de radio
+ * rOut con 6 nervios de aplastamiento redondeados que llegan a rIn, y chaflán
+ * de entrada. `z0` es el fondo y `z1` la boca (z1 > z0: boca hacia +Z; si no,
+ * hacia −Z). Se construye UNA vez y se copia a cada imán. En la vista rápida,
+ * un cilindro liso (los nervios y el chaflán son detalle).
+ */
+function magnetPocket(Mg, z0, z1, seg, draft) {
+  const up = z1 > z0, lo = Math.min(z0, z1), hi = Math.max(z0, z1);
+  const e = 0.02;
+  if (draft) return prism(CS().circle(Mg.rOut, 16), up ? lo : lo - e, up ? hi + e : hi);
+  const ribs = [];
+  for (let k = 0; k < MAG.ribs; k++) {
+    const a = ((k + 0.5) * 2 * Math.PI) / MAG.ribs;
+    ribs.push(CS().circle(0.5, 8).translate([(Mg.rIn + 0.5) * Math.cos(a), (Mg.rIn + 0.5) * Math.sin(a)]));
   }
+  const n = Math.min(36, Math.max(24, seg));
+  const hole = CS().circle(Mg.rOut, n);
+  const sec = hole.subtract(CS().union(ribs));
+  // Chaflán de entrada (también rebaja la punta de los nervios en la boca).
+  const wide = CS().circle(Mg.rOut + MAG.lead, n);
+  const lead = up ? frustum(hole, hi - MAG.lead, wide, hi + e) : frustum(wide, lo - e, hole, lo + MAG.lead);
+  return unionAll([prism(sec, up ? lo : lo - e, up ? hi + e : hi), lead]);
 }
+/** Copias del alojamiento en cada imán (disjuntas: compose, sin booleanos). */
+const pocketsAt = (pocket, mags) => M().compose(mags.map((m) => pocket.translate([m.x, m.y, 0])));
 
 /**
  * Sección superior del fondo inclinado: la celda reducida `s`, salvo en los
@@ -50,8 +80,8 @@ function markWellCells(D, O) {
  * y la ranura de desacople quedaba una cuña más fina que 2 líneas).
  */
 function scoopTop(D, O, c, s, nearWall) {
-  const top = cellCS(D, O, c, s);
-  return nearWall ? top.add(cellCS(D, O, c, 0).intersect(nearWall)) : top;
+  const top = cellCS(D, O, c, s, null);
+  return nearWall ? top.add(cellCS(D, O, c, 0, null).intersect(nearWall)) : top;
 }
 
 /** Cilindro de eje X. */
@@ -70,9 +100,7 @@ const xCyl = (x0, x1, y, z, r, seg) => M().cylinder(x1 - x0, r, r, seg).rotate([
  * cuelga del techo y la pared queda lisa. Abajo (franja de las tapas
  * interiores) los bloques de pivote siguen unidos a la pared.
  */
-export function orgCavity(D, zB) {
-  const O = D.org;
-  markWellCells(D, O);
+export function orgCavity(D, O, zB) {
   // Celdas iguales (lo normal) se construyen UNA vez y se copian: las copias
   // no se tocan entre sí, así que se juntan con compose (sin booleanos).
   // En la vista rápida se omite el fondo inclinado (detalle, no mecánica).
@@ -82,8 +110,9 @@ export function orgCavity(D, zB) {
   const nearWall = rrOffset(D, 0).subtract(rrOffset(D, -(O.scoop + O.gap + 0.3)));
   for (const c of O.cells) {
     const w = c.x1 - c.x0, h = c.y1 - c.y0;
-    c.atWall = !rectCS(c.x0, c.x1, c.y0, c.y1).intersect(nearWall).isEmpty();
-    const clipped = c.lim || D.cham > 0 || c.cut || c.atWall;
+    const atWall = !rectCS(c.x0, c.x1, c.y0, c.y1).intersect(nearWall).isEmpty();
+    const cut = cellCut(O, c);
+    const clipped = c.lim || D.cham > 0 || cut || atWall;
     const key = clipped ? null : `${w.toFixed(3)}x${h.toFixed(3)}`;
     let solid = key && shapes.get(key);
     if (!solid) {
@@ -92,11 +121,10 @@ export function orgCavity(D, zB) {
       // El fondo inclinado es la envolvente convexa entre dos secciones: se
       // hace con la celda sin muesca y luego se quita la muesca del pozo (la
       // envolvente de una celda con muesca la rellenaba).
-      const ccFull = { ...cc, cut: null };
-      const cs = cellCS(Dl, O, ccFull);
+      const cs = cellCS(Dl, O, cc, 0, null);
       const pr = prism(cs, O.zp1 - 0.5, O.zi - s + 0.01);
-      solid = s > 0.3 ? pr.add(M().hull([prism(cs, O.zi - s, O.zi - s + 0.01), prism(scoopTop(Dl, O, ccFull, s, c.atWall ? nearWall : null), O.zi - 0.01, O.zi)])) : pr;
-      if (c.cut) solid = solid.subtract(prism(c.cut, O.zp1 - 1, O.zi + 1));
+      solid = s > 0.3 ? pr.add(M().hull([prism(cs, O.zi - s, O.zi - s + 0.01), prism(scoopTop(Dl, O, cc, s, atWall ? nearWall : null), O.zi - 0.01, O.zi)])) : pr;
+      if (cut) solid = solid.subtract(prism(cut, O.zp1 - 1, O.zi + 1));
       if (key) shapes.set(key, solid);
       else { solids.push(solid); continue; }
     }
@@ -110,29 +138,10 @@ export function orgCavity(D, zB) {
   const sq = rrOffset(D, 0.01).subtract(rrOffset(D, -(O.rc + O.gap + 0.1)))
     .intersect(CS().union(O.cells.map((c) => {
       const r = rectCS(c.x0, c.x1, c.y0, c.y1);
-      return c.cut ? r.subtract(c.cut) : r;
+      const cut = cellCut(O, c);
+      return cut ? r.subtract(cut) : r;
     })));
   return unionAll([prism(rrOffset(D, 0), zB - 1, O.zp1), M().compose(solids), prism(band.add(sq), O.zp1 - 0.01, O.zi - 0.6)]);
-}
-
-export function orgLidGeometry(D, opt = {}) {
-  const O = D.org;
-  if (opt.mechOnly) return orgMech(D);
-  markWellCells(D, O);
-  // Bloque: todo el interior de la tapa entre zp1 y el techo, menos las celdas.
-  const block0 = prism(rrOffset(D, 0.01), O.zp1, O.zi + 0.01);
-  const cuts = [];
-  for (const c of O.cells) {
-    const cf = { ...c, cut: null };
-    const cs = cellCS(D, O, cf);
-    const s = O.scoop;
-    let cut = prism(cs, O.zp1 - 1, O.zi - s + 0.01);
-    if (s > 0.3) cut = cut.add(M().hull([prism(cs, O.zi - s, O.zi - s + 0.01), prism(scoopTop(D, O, cf, s, rrOffset(D, 0).subtract(rrOffset(D, -(s + O.gap + 0.3)))), O.zi - 0.01, O.zi)]));
-    cuts.push(c.cut ? cut.subtract(prism(c.cut, O.zp1 - 2, O.zi + 1)) : cut);
-  }
-  const block = block0.subtract(unionAll(cuts));
-  const m = orgMech(D);
-  return { add: m.add ? M().union([block, m.add]) : block, cut: m.cut };
 }
 
 /**
@@ -194,13 +203,14 @@ function pivotBlock(D, O, b, seg) {
   return { solid, cut: unionAll(cuts) };
 }
 
-/** Bloques de pivote (se añaden), canales del eje y pozos para el dedo (se quitan). */
-function orgMech(D) {
-  const O = D.org;
+/**
+ * Bloques de pivote y pilares de imán (se añaden); canales del eje, pozos
+ * para el dedo y alojamientos de imán (se quitan).
+ */
+export function orgMech(D, O) {
   const adds = [];
   const lidCuts = [];
   if (!O.has) return { add: null, cut: null };
-  markWellCells(D, O);
   // Canal del eje en el carril (el eje sobresale por encima de zp1), entre
   // las caras de los dos bloques de cada tapa interior (dentro de los bloques
   // el pivote va por su agujero cerrado y su ranura). Abierto hacia +Y
@@ -237,7 +247,20 @@ function orgMech(D) {
   adds.push(M().compose(solids));
   // Pozos para el dedo: bolsillo de la franja hasta zp1 + h.
   if (O.wells.length) lidCuts.push(M().compose(O.wells.map((w) => prism(wellCS(w), O.zp1 - 0.6, O.zp1 + w.h))));
-  return { add: M().compose(adds), cut: lidCuts.length ? unionAll(lidCuts) : null };
+  // Traba magnética: pilar del cuerpo (del fondo de la celda hasta 0.2 mm del
+  // resalte de la tapa interior) con el alojamiento del imán en su extremo.
+  let add = M().compose(adds);
+  if (O.latch === 'magnet') {
+    const Mg = O.magnet, zt = O.zp1 + Mg.hb + MAG.air;
+    const inner = rrOffset(D, -O.gap + 0.01);
+    add = add.add(prism(CS().union(O.magnets.map((m) => magDisc(m, Mg.Rp, D.seg))).intersect(inner), zt, O.zi + 0.01));
+    lidCuts.push(pocketsAt(magnetPocket(Mg, zt + Mg.pd, zt, D.seg, D.draft), O.magnets));
+    // Sitio para el resalte de la tapa interior (el pilar va sobre un divisor
+    // o pegado a él: de zp1 a zt se quita lo que pise el resalte + holgura).
+    // (También sin resalte: si no, el divisor taparía la boca del alojamiento.)
+    lidCuts.push(prism(CS().union(O.magnets.map((m) => magBoss(m, Mg.Rp, O.sealClr, 0, D.seg))), O.zp1 - 0.01, zt));
+  }
+  return { add, cut: lidCuts.length ? unionAll(lidCuts) : null };
 }
 
 /** Planta de los bloques de pivote (para recortar las tapas interiores). */
@@ -249,9 +272,7 @@ function blocksPlan(O, b, yGrow = 0) {
 }
 
 /** Una tapa interior en su posición cerrada (marco interno). */
-export function orgPanel(D, p) {
-  const O = D.org;
-  markWellCells(D, O);
+export function orgPanel(D, O, p) {
   const ax = p.axis;
   // Placa: del eje al borde libre, recortada al interior de la caja.
   let plate = rectCS(p.x0, p.x1, ax.y, p.y1).intersect(rrOffset(D, D.cham > 0 ? -1.0 : -0.3));
@@ -277,10 +298,17 @@ export function orgPanel(D, p) {
   // Faldones (uno por celda) con holgura deslizante y resaltes de clic.
   const skirts = [];
   const st = Math.max(0.9, 2 * D.lw);
+  const Mg = O.latch === 'magnet' ? O.magnet : null;
   for (const i of p.cells) {
     const c = O.cells[i];
-    const outer = cellCS(D, O, c, O.sealClr);
-    const ring2 = outer.subtract(cellCS(D, O, c, O.sealClr + st));
+    let outer = cellCS(D, O, c, O.sealClr);
+    let innerS = cellCS(D, O, c, O.sealClr + st);
+    // Con imanes, el faldón rodea el pilar (que llega casi hasta la tapa interior).
+    if (Mg && c.mags.length) {
+      outer = outer.subtract(CS().union(c.mags.map((k) => magDisc(O.magnets[k], Mg.Rp + O.sealClr, D.seg))));
+      innerS = innerS.subtract(CS().union(c.mags.map((k) => magDisc(O.magnets[k], Mg.Rp + O.sealClr + st, D.seg))));
+    }
+    const ring2 = outer.subtract(innerS);
     skirts.push(prism(ring2, O.zp1 - 0.01, O.zp1 + ORG.skirtH));
     if (p.snapCells.includes(i)) {
       // Resalte triangular (45°) a media altura, en las caras ±X; si una de
@@ -326,5 +354,13 @@ export function orgPanel(D, p) {
     }
   }
   m = m.add(unionAll(skirts));
+  // Traba magnética: resalte en la cara interior (frente a su pilar) con el
+  // alojamiento del imán abierto hacia el pilar. La cara exterior sigue plana
+  // (es la que va sobre la cama).
+  if (Mg && p.magnets && p.magnets.length) {
+    const zt = O.zp1 + Mg.hb;
+    if (Mg.hb > 0.01) m = m.add(prism(CS().union(p.magnets.map((q) => magBoss(q, Mg.Rp, 0, O.sealClr, D.seg))).intersect(plate), O.zp1 - 0.01, zt));
+    m = m.subtract(pocketsAt(magnetPocket(Mg, zt - Mg.pd, zt, D.seg, D.draft), p.magnets));
+  }
   return m;
 }

@@ -86,16 +86,18 @@ function fingerNotches(objCs, pts, P) {
 }
 
 /**
- * Inserto de la BASE.
- * @param contentPolys polígonos del contenido en el marco interno (o null)
- * @returns { solid (marco nativo, z = suelo útil), print, height, info }
+ * Núcleo común de los insertos, en coordenadas locales: z = 0 es el lado
+ * que apoya en el fondo de su mitad (suelo de la base / techo de la tapa) y
+ * z = H la cubierta (cara de trabajo, hacia los objetos).
+ * @param o { depth, fc, H, objs } profundidad y chaflán interior de esa
+ *   mitad, altura del inserto y objetos [{ polys, notches }] (o null)
  */
-export function baseInsert(D, P, contentPolys) {
+function insertCore(D, P, o) {
   const tol = P.insertTol ?? 0.3;
   const wallT = 2 * D.lw;
   const deck = Math.max(4 * D.lh, P.insertDeck || 1.6);
-  const H = P.insertH > 0 ? Math.min(P.insertH, D.Db) : Math.max(deck + 2, D.Db - 0.5);
-  const fcE = D.fc > 0 ? D.fc + tol : 0;
+  const H = o.H;
+  const fcE = o.fc > 0 ? o.fc + tol : 0;
   const rr = (d) => rrOffset(D, d);
 
   const outer = unionAll([
@@ -110,21 +112,17 @@ export function baseInsert(D, P, contentPolys) {
   const info = { height: Math.round(H * 100) / 100, pockets: 0, notches: [] };
 
   // Alojamientos del contenido (+ huecos para los dedos).
-  // `contentObjects` = [{ polys, notches }] ya acomodados (packer.js); si solo
-  // llega `contentPolys` (un objeto), los huecos se calculan aquí.
   let pocket = null;
-  const objsIn = P.contentObjects && P.contentObjects.length ? P.contentObjects
-    : contentPolys && contentPolys.length ? [{ polys: contentPolys, notches: null }] : null;
-  if (P.insertMode === 'pockets' && objsIn) {
+  if (o.objs) {
     const tolP = P.pocketTol ?? 0.6;
     const r = (P.fingerD || 20) / 2;
     const regions = [];
     const notchesAll = [];
-    for (const o of objsIn) {
-      const obj = CS().union(o.polys.map((p) => CS().ofPolygons([p], 'EvenOdd')));
+    for (const ob of o.objs) {
+      const obj = CS().union(ob.polys.map((p) => CS().ofPolygons([p], 'EvenOdd')));
       let reg = obj.offset(tolP, 'Round', 2, 24);
-      let centers = o.notches;
-      if (!centers) centers = fingerNotches(obj, o.polys.flat(), P).centers;
+      let centers = ob.notches;
+      if (!centers) centers = fingerNotches(obj, ob.polys.flat(), P).centers;
       for (const c of centers) { reg = reg.add(CS().circle(r, 40).translate(c)); notchesAll.push(c); }
       regions.push(reg);
     }
@@ -134,14 +132,14 @@ export function baseInsert(D, P, contentPolys) {
     // cientos de vértices y cada booleano 3D con él cuesta decenas de ms).
     if (D.draft) region = region.simplify(0.15);
     pocket = region;
-    info.pockets = objsIn.length;
+    info.pockets = o.objs.length;
     info.notches = notchesAll.map(([x, y]) => [Math.round(x * 10) / 10, Math.round(y * 10) / 10]);
     // Pared propia de cada alojamiento (cierra el hueco interior del inserto).
     const ring = region.offset(wallT, 'Round', 2, 24).subtract(region).intersect(rr(-tol - 0.01));
     solid = solid.add(prism(ring, 0, H));
   }
 
-  // Nervios bajo la cubierta (retícula ~40 mm): rigidez y apoyo en el suelo.
+  // Nervios bajo la cubierta (retícula ~40 mm): rigidez y apoyo en el fondo.
   const inner = rr(-tol - wallT);
   const b = inner.bounds();
   const pitch = P._eco ? 60 : 40, t = wallT;                 // modo ahorro: nervios más espaciados
@@ -162,7 +160,7 @@ export function baseInsert(D, P, contentPolys) {
   }
 
   // Paredes de huecos y nervios pegados al borde no pueden salirse de la
-  // envolvente achaflanada (pisarían el chaflán del suelo de la caja).
+  // envolvente achaflanada (pisarían el chaflán del fondo de la caja).
   solid = solid.intersect(outer);
   if (pocket) {
     solid = solid.subtract(prism(pocket, -1, H + 1));
@@ -172,42 +170,52 @@ export function baseInsert(D, P, contentPolys) {
     // Es un detalle: la vista rápida lo omite.
     if (!D.draft) solid = solid.subtract(steppedChamfer(pocket, H - 0.6, H + 0.01, 0.6, D.lh));
   }
-  solid = solid.translate([0, 0, D.floorTop]);
-  // Impresión: cubierta sobre la cama (voltear en Z e Y).
-  const zTop = D.floorTop + H;
-  const print = [1, 0, 0, 0, 0, -1, 0, 0, 0, 0, -1, 0, 0, 0, zTop, 1];
-  return { solid, print, info };
+  return { solid, info, deck };
+}
+
+/** Objetos del contenido para un inserto con huecos (o null si va en blanco). */
+function objectsOf(P, contentPolys, pockets) {
+  if (!pockets) return null;
+  return P.contentObjects && P.contentObjects.length ? P.contentObjects
+    : contentPolys && contentPolys.length ? [{ polys: contentPolys, notches: null }] : null;
 }
 
 /**
- * Inserto de la TAPA (en blanco): cubierta hacia los objetos (abajo con la caja
- * cerrada), paredes hacia el techo. Mantiene los objetos sujetos.
+ * Inserto de la BASE: apoya en el suelo, cubierta arriba.
+ * @param contentPolys polígonos del contenido en el marco interno (o null)
+ * @param pockets con alojamientos para el contenido (si no, en blanco)
+ * @returns { solid (marco nativo), print, info }
  */
-export function lidInsert(D, P) {
-  if (D.Dl < 3) return null;
-  const tol = P.insertTol ?? 0.3;
-  const wallT = 2 * D.lw;
+export function baseInsert(D, P, contentPolys, pockets = P.insertMode === 'pockets') {
   const deck = Math.max(4 * D.lh, P.insertDeck || 1.6);
-  const H = Math.max(deck + 1, D.Dl - 0.3);
-  const fcE = D.fcl > 0 ? D.fcl + tol : 0;
-  const rr = (d) => rrOffset(D, d);
-  const zi = D.Hb + D.Dl;                 // techo interior de la tapa
-  // En coordenadas locales: z = 0 cubierta (abajo), z = H contra el techo.
-  const outer = unionAll([prism(rr(-tol), 0, H - fcE), fcE > 0 ? frustum(rr(-tol), H - fcE, rr(-tol - fcE), H) : null]);
-  const hollow = unionAll([
-    prism(rr(-tol - wallT), deck, H - fcE + 0.01),
-    fcE > 0 ? frustum(rr(-tol - wallT), H - fcE, rr(-tol - fcE - wallT), H + 0.01) : null,
-  ]);
-  let solid = outer.subtract(hollow);
-  const inner = rr(-tol - wallT);
-  const b = inner.bounds();
-  const strips = [];
-  const nX = Math.floor((b.max[0] - b.min[0]) / 40), nY = Math.floor((b.max[1] - b.min[1]) / 40);
-  for (let i = 1; i <= nX; i++) { const x = b.min[0] + ((b.max[0] - b.min[0]) * i) / (nX + 1); strips.push(CS().square([wallT, b.max[1] - b.min[1] + 2], false).translate([x - wallT / 2, b.min[1] - 1])); }
-  for (let j = 1; j <= nY; j++) { const y = b.min[1] + ((b.max[1] - b.min[1]) * j) / (nY + 1); strips.push(CS().square([b.max[0] - b.min[0] + 2, wallT], false).translate([b.min[0] - 1, y - wallT / 2])); }
-  if (strips.length) solid = solid.add(prism(CS().union(strips).intersect(inner), deck - 0.01, H - fcE));
-  solid = solid.translate([0, 0, zi - H]);
-  const print = [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, -(zi - H), 1];   // cubierta ya abajo
-  return { solid, print, info: { height: Math.round(H * 100) / 100 } };
+  const H = P.insertH > 0 ? Math.min(P.insertH, D.Db) : Math.max(deck + 2, D.Db - 0.5);
+  const core = insertCore(D, P, { fc: D.fc, H, objs: objectsOf(P, contentPolys, pockets) });
+  const solid = core.solid.translate([0, 0, D.floorTop]);
+  // Impresión: cubierta sobre la cama (voltear en Z e Y).
+  const zTop = D.floorTop + H;
+  const print = [1, 0, 0, 0, 0, -1, 0, 0, 0, 0, -1, 0, 0, 0, zTop, 1];
+  return { solid, print, info: core.info };
 }
 
+/**
+ * Inserto de la TAPA: el mismo inserto girado 180° sobre X (y → −y, z → −z)
+ * y colgado del techo: cubierta hacia los objetos (abajo con la caja
+ * cerrada), paredes hacia el techo. En blanco los sujeta; con huecos, aloja
+ * lo que sobresale de la base (o guarda los objetos en la tapa).
+ * El contenido se refleja en Y antes de girar: cae en su sitio en el mundo.
+ */
+export function lidInsert(D, P, contentPolys = null, pockets = false) {
+  if (D.Dl < 3) return null;
+  const deck = Math.max(4 * D.lh, P.insertDeck || 1.6);
+  const H = Math.max(deck + 1, D.Dl - 0.3);
+  const src = objectsOf(P, contentPolys, pockets);
+  const flipY = (p) => [p[0], -p[1]];
+  const objs = src && src.map((o) => ({ polys: o.polys.map((q) => q.map(flipY)), notches: o.notches ? o.notches.map(flipY) : null }));
+  const core = insertCore(D, P, { fc: D.fcl, H, objs });
+  const zi = D.Hb + D.Dl;                 // techo interior de la tapa
+  const solid = core.solid.transform([1, 0, 0, 0, 0, -1, 0, 0, 0, 0, -1, 0, 0, 0, zi, 1]);
+  const print = [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, -(zi - H), 1];   // cubierta ya abajo
+  // Huecos para dedos en coordenadas del mundo (se reflejaron para modelar).
+  core.info.notches = core.info.notches.map(([x, y]) => [x, -y]);
+  return { solid, print, info: core.info };
+}

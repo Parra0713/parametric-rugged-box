@@ -14,16 +14,16 @@
  *       aids       → mallas auxiliares ya en coordenadas de impresión
  *                    (orejas anti‑warping, cuna de soporte)
  */
-import { installGC, cleanup, prism, frustum, unionAll, toMesh, M, CS, roundRect, yzExtrude, teardrop } from './geo.js';
+import { installGC, cleanup, mark, release, prism, frustum, unionAll, toMesh, M, CS, roundRect, yzExtrude, teardrop } from './geo.js';
 import { derive, pinHeadR, ecoParams } from './params.js';
-import { rrOffset, grooveCut, tongues, gasket, stackLines } from './seal.js';
+import { rrOffset, grooveCut, tongues, gasket, stackLines, ring } from './seal.js';
 import { hinges, knuckleSpans } from './hinge.js';
 import { latches } from './latch.js';
 import { printedPin, filamentCap, filamentLength } from './pins.js';
 import { gridfinityFeet } from './gridfinity.js';
 import { lidRelief, patternArea } from './pattern.js';
 import { baseInsert, lidInsert } from './insert.js';
-import { orgLidGeometry, orgPanel, orgCavity } from './organizer.js';
+import { orgMech, orgPanel, orgCavity } from './organizer.js';
 import { transformVerts, hull2D, fitAngle, tiltChoose, rotatedExtent } from '../bedfit.js';
 import { fitsFlat } from '../optimizer.js';
 import { contactCut, supportFins, wedgeVolume, rotAxis, invRigid, overhangRegions, overhangSupports } from './tilt.js';
@@ -87,7 +87,8 @@ export function criticalLayers(man, lh, zMax) {
 function criticalLayersRaw(man, lh, zMax) {
   const n = Math.min(400, Math.floor(zMax / lh));
   const A = [];
-  for (let k = 0; k < n; k++) A.push(man.slice((k + 0.5) * lh).area());
+  const m0 = mark();
+  for (let k = 0; k < n; k++) { A.push(man.slice((k + 0.5) * lh).area()); release(m0); }
   const out = [];
   const s = (k) => (k < 2 || k > n - 3 || A[k + 2] <= 1e-6 ? 0 : Math.log(A[k - 2] / A[k + 2]));
   for (let k = 2; k < n - 2; k++) {
@@ -175,7 +176,8 @@ function buildBase(D, H, L, report) {
     prism(rr(0), ft + fc, Hb + 1),
     fc > 0 ? frustum(rr(-fc), ft, rr(0), ft + fc) : prism(rr(0), ft, ft + fc + 0.01),
   ]);
-  let core = unionAll([outer, band]).subtract(cavity);
+  const shell = unionAll([outer, band]);
+  let core = shell.subtract(cavity);
   if (D.gfPlate) core = core.subtract(gridfinitySockets(D));
 
   // Frente 3: análisis por capas → ranuras de sombra donde cae el tiempo de capa.
@@ -199,8 +201,9 @@ function buildBase(D, H, L, report) {
 
   // Frente 4: nervios de esquina (rompen la continuidad visual de cualquier
   // marca horizontal y protegen las esquinas en caídas).
+  let bump = null;
   if (D.ribs) {
-    let bump = unionAll([
+    bump = unionAll([
       D.gfFeet ? prism(rr(F), 0, chB) : frustum(rr(F - chB), 0, rr(F), chB),
       prism(rr(F), chB, Hb),
     ]).intersect(prism(cornerZones(D).subtract(rr(t - 0.3)), -1, Hb + 1));   // solo por fuera de la pared
@@ -209,13 +212,30 @@ function buildBase(D, H, L, report) {
   }
 
   // Modo ahorro nervado: nervios verticales hasta la banda (misma envolvente).
+  let rib = null;
   if (D.wallRibs) {
-    let rib = unionAll([
+    rib = unionAll([
       D.gfFeet ? prism(rr(F), 0, chB) : frustum(rr(F - chB), 0, rr(F), chB),
       prism(rr(F), chB, Hb),
     ]).intersect(prism(wallRibZone(D), -1, Hb + 1)).subtract(wallRibAxes(D));
     for (const z of grooves) rib = rib.subtract(vGroove(D, F, z));
     core = core.add(rib);
+  }
+
+  // Compartimentos en la base: el mismo organizador de la tapa, girado 180°
+  // sobre el eje X del plano de unión (celdas abiertas hacia arriba desde el
+  // suelo, tapas interiores bajo el borde). Como en la tapa, la base se vacía
+  // con su propio hueco en UNA resta; el núcleo normal de arriba solo sirvió
+  // para el análisis de capas.
+  if (D.orgB) {
+    const RX = orgFlip(D);
+    core = shell.subtract(orgCavity(D, D.orgB, Hb).transform(RX));
+    for (const z of grooves) core = core.subtract(vGroove(D, t, z));
+    if (bump) core = core.add(bump);
+    if (rib) core = core.add(rib);
+    const og = orgMech(D, D.orgB);
+    if (og.add) core = core.add(og.add.transform(RX));
+    if (og.cut) core = core.subtract(og.cut.transform(RX));
   }
 
   // Canal de montaje del pasador del cierre a través del nervio de esquina
@@ -249,6 +269,12 @@ function buildBase(D, H, L, report) {
   if (D.gfFeet) body = body.add(gridfinityFeet(D));
   return body;
 }
+
+/**
+ * Marco de tapa → base para los compartimentos de la base: giro de 180°
+ * sobre el eje X que pasa por el plano de unión (y → −y, z → 2·Hb − z).
+ */
+const orgFlip = (D) => [1, 0, 0, 0, 0, -1, 0, 0, 0, 0, -1, 0, 0, 0, 2 * D.Hb, 1];
 
 /** Huecos de la placa base Gridfinity (perfil estándar, abiertos hasta el fondo). */
 function gridfinitySockets(D) {
@@ -336,7 +362,7 @@ function buildLid(D, P, H, L, svg, report) {
   // interiores + celdas) en una sola resta. El núcleo "normal" de arriba solo
   // sirve para el análisis de capas (ranuras de sombra), que no cambia.
   if (D.org) {
-    core = shell.subtract(orgCavity(D, zB));
+    core = shell.subtract(orgCavity(D, D.org, zB));
     for (const z of grooves) core = core.subtract(vGroove(D, t, z));
     if (D.ribs) core = core.add(ribBump);
     if (wallRib) core = core.add(wallRib);
@@ -345,7 +371,7 @@ function buildLid(D, P, H, L, svg, report) {
     // Bloques de pivote, canales del eje y pozos de las tapas interiores:
     // todo es interior, así que se hace sobre el núcleo (malla más pequeña
     // que la tapa con bisagras y cierres: booleanos más rápidos).
-    const og = orgLidGeometry(D, { mechOnly: true });
+    const og = orgMech(D, D.org);
     if (og.add) core = core.add(og.add);
     if (og.cut) core = core.subtract(og.cut);
   }
@@ -521,7 +547,8 @@ function memoSolid(key, buildFn) {
   const { solid, ...extra } = r;
   const ent = { vert, tri: new Uint32Array(m.triVerts), extra: JSON.parse(JSON.stringify(extra)) };
   solidMemo.set(key, ent);
-  if (solidMemo.size > 16) solidMemo.delete(solidMemo.keys().next().value);
+  // (48: dos mitades con una tapa interior por celda pasan de 20 piezas.)
+  if (solidMemo.size > 48) solidMemo.delete(solidMemo.keys().next().value);
   // Se devuelve SIEMPRE el sólido rehecho desde la malla guardada: así un
   // acierto y un fallo de la caché dan exactamente la misma triangulación
   // (y la misma huella para la caché de ayudas, y el mismo resultado en un
@@ -597,13 +624,17 @@ function addAidsRaw(D, P, pt, solidNative, normals, G) {
   // ni cierres): permite un bisel simétrico sin tocar la mecánica.
   const tilt = tiltChoose(hv, bed, 'Y');
   if (!tilt.ok) return;
+  // Memoria: cada etapa (bisel → aletas → voladizos → soportes) libera sus
+  // temporales antes de la siguiente; si no, sus picos se suman.
+  const mT = mark();
   const Rm = rotAxis(tilt.axis, tilt.alpha);
   let Q = solidNative().transform(pt.print);
   // El chaflán interior anti línea de contracción (45°) del extremo que sube
   // queda HORIZONTAL al inclinar 45° (techo en el aire). Inclinada, las capas
   // ya no son paralelas al fondo, así que ese chaflán no aporta nada: se
   // elimina en ese extremo y el rincón queda a 90° (dos caras a 45°).
-  const fcI = pt.id === 'base' ? D.fc : pt.id === 'lid' ? D.fcl : 0;
+  // (Con compartimentos esa mitad no tiene chaflán interior: nada que quitar.)
+  const fcI = pt.id === 'base' ? (D.orgB ? 0 : D.fc) : pt.id === 'lid' ? (D.org ? 0 : D.fcl) : 0;
   if (fcI > 0) {
     for (const sx of [-1, 1]) {
       const nz = Rm[2] * (-sx) / Math.SQRT2 + Rm[10] / Math.SQRT2;   // z de Rm·n, n = (−sx,0,1)/√2
@@ -660,6 +691,9 @@ function addAidsRaw(D, P, pt, solidNative, normals, G) {
     Object.assign(pt, { mesh: toMesh(native, normals), volume: Math.round(native.volume()), tris: native.numTri() });
   }
   const R = Q2.transform(Rm).translate([0, 0, -zc]);
+  R.numTri();                              // evaluada: ya no depende del árbol del bisel
+  release(mT, [R]);
+  const mF = mark();
   pt.print = mul(mul(T(0, 0, -zc), Rm), pt.print);
   const fins = P.printAids === 'nofins' ? null : supportFins(R, tilt.axis, D.lw, D.lh, {
     spacing: P.finSpacing, reach: P.finReach, pitch: P.toothPitch, gap: P.finGap,
@@ -674,6 +708,7 @@ function addAidsRaw(D, P, pt, solidNative, normals, G) {
   if (P.overhangSupports !== false) {
     const t0 = performance.now();
     const regions = overhangRegions(R, fins?.solid ?? null, { angle: P.overhangAngle || 50 });
+    release(mF, regions.map((r) => r.region));   // las aletas ya son malla: fuera
     const ov = overhangSupports(R, regions, D.lw, D.lh, { pitch: P.supportPitch || 3 });
     pt.tilt.overhangs = regions.length;
     pt.tilt.overhangArea = Math.round(regions.reduce((a, r) => a + r.area, 0));
@@ -752,8 +787,12 @@ export function build(P, svg, opt = {}) {
     // inserto de la base; B = tapa, cierres, pasadores e inserto de la tapa.
     const want = (g) => !opt.only || opt.only === g;
 
+    // Memoria: cada pieza, en cuanto tiene su malla y sus ayudas, libera todo
+    // lo que creó en WASM (ver `release` en geo.js). La mecánica compartida
+    // (H, L) se creó antes de estas marcas y sigue viva hasta el final.
     // Base (reutilizada si solo cambian parámetros de la tapa).
     if (want('A')) {
+      const m0 = mark();
       const key = baseKey(P, normals);
       let bp, baseSolid = null;
       if (baseCache && baseCache.key === key) {
@@ -775,11 +814,13 @@ export function build(P, svg, opt = {}) {
       addAids(D, P, bp, () => baseSolid || buildBase(D, H, L, []), normals);
       parts.push(bp);
       stage('ayudas base');
+      release(m0);
     }
 
     if (want('B')) {
       // Tapa (reutilizada si solo cambian el contenido, los insertos o las
       // ayudas de impresión: no la tocan).
+      const m0 = mark();
       const key = lidKey(P, normals, svg);
       let lp, lidSolid = null;
       if (lidCache && lidCache.key === key) {
@@ -802,6 +843,7 @@ export function build(P, svg, opt = {}) {
       addAids(D, P, lp, () => lidSolid || buildLid(D, P, H, L, svg, []).lid, normals);
       parts.push(lp);
       stage('ayudas tapa');
+      release(m0);
 
       // Cierre: perfil acostado (X → Z de impresión).
       const lay = [0, 0, 1, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, D.latchW / 2, 1];
@@ -811,40 +853,29 @@ export function build(P, svg, opt = {}) {
       }, normals));
     }
 
-    // Tapas interiores del organizador (grupo A: la tapa ya es la pieza más
-    // cara del grupo B, así los dos hilos de la vista rápida van parejos).
-    // Las idénticas (misma forma salvo una traslación) son una sola pieza
-    // con varias copias.
-    if (want('A') && D.org && D.org.has) {
-      const groups = new Map();
-      for (const p of D.org.panels) {
-        const rel = (v, o) => Math.round((v - o) * 100);
-        const cellsRel = p.cells.map((i) => { const c = D.org.cells[i]; return [rel(c.x0, p.x0), rel(c.x1, p.x0), rel(c.y0, p.y0), rel(c.y1, p.y0), p.snapCells.includes(i) ? 1 : 0]; });
-        const sig = JSON.stringify([rel(p.x1, p.x0), rel(p.y1, p.y0), p.pivots.map((x) => rel(x, p.x0)), rel(p.ax0, p.x0), rel(p.ax1, p.x0), p.well ? [rel(p.well.x0, p.x0), rel(p.well.y0, p.y0), p.well.atWall] : 0,
-          D.org.wells.filter((w) => w.x1 > p.x0 - 3 && w.x0 < p.x1 + 3 && w.y1 > p.y0 - 12 && w.y0 < p.y1 + 12).map((w) => [rel(w.x0, p.x0), rel(w.y0, p.y0), rel(w.x1, p.x0), rel(w.y1, p.y0)]), rel(p.tab, p.x0), cellsRel, D.cham > 0 ? [p.x0, p.y0] : 0]);
-        if (!groups.has(sig)) groups.set(sig, []);
-        groups.get(sig).push(p);
-      }
-      let k = 0;
-      for (const list of groups.values()) {
-        const ref = list[0];
-        const O = D.org;
-        const man = memoSolid(memoKey('org', ref, O.cells.filter((_, i) => ref.cells.includes(i)), O.a, O.zp0, O.zp1, O.rc, O.sealClr, O.snap,
-          D.Li, D.Wi, D.cham, D.ri, D.seg, D.lw), () => ({ solid: orgPanel(D, ref) })).solid;
-        k++;
-        parts.push(part('orgPanel', groups.size > 1 ? `Tapa interior ${k}` : 'Tapa interior', man, {
-          key: `orgPanel${k - 1}`,
-          print: T(0, 0, -D.org.zp0),
-          instances: list.map((p) => T(p.x0 - ref.x0, p.y0 - ref.y0, z0)),
-          qty: list.length, material: 'PETG / PLA',
-          axis: { y: ref.axis.y, z: ref.axis.z + z0 },
-        }, normals));
-      }
-    }
+    // Tapas interiores de los compartimentos. Las de la TAPA van en el grupo A
+    // y las de la BASE en el B: así cada hilo de la vista rápida lleva una
+    // mitad de la caja y las tapas interiores de la otra (van parejos).
+    if (want('A') && D.org && D.org.has) parts.push(...orgPanelParts(D, D.org, 'lid', z0, normals));
+    if (want('B') && D.orgB && D.orgB.has) parts.push(...orgPanelParts(D, D.orgB, 'base', z0, normals));
 
     // Junta: si el anillo no cabe en la cama se divide en tramos rectos
     // (cortes en los lados largos, donde la ranura es recta). El TPU se
     // asienta a presión en la ranura y los tramos quedan a tope.
+    // Junta de cordón (filamento TPU sin imprimir): no hay pieza; se da la
+    // longitud a cortar (perímetro del eje de la ranura + 1 % para que las
+    // puntas queden a tope y comprimidas).
+    if (want('A') && D.sealMode === 'cord') {
+      const off = D.grooves[0].off;
+      let len = 0;
+      for (const q of rrOffset(D, off).toPolygons()) for (let i = 0; i < q.length; i++) {
+        const a2 = q[i], b2 = q[(i + 1) % q.length];
+        len += Math.hypot(b2[0] - a2[0], b2[1] - a2[1]);
+      }
+      D.cord = { d: D.cordD, length: Math.ceil(len * 1.01) };
+      log(D, `junta de cordón: ${D.cord.length} mm de filamento TPU Ø${D.cordD} (ranura de ${D.gw} mm, compresión ${Math.round(D.c * 100)} %, llenado ${Math.round(D.fill * 100)} %)`);
+    }
+    const mG = mark();
     const g = want('A') ? gasket(D) : null;
     if (g) {
       const bx = P.bedX - 8, by = P.bedY - 8;
@@ -871,39 +902,54 @@ export function build(P, svg, opt = {}) {
         D.warn.push(`La junta no cabe entera en la cama: se divide en ${n} tramos rectos.`);
       }
     }
+    release(mG);
 
-    // Insertos interiores.
-    if (want('A') && P.insertMode && P.insertMode !== 'off') {
-      const t1 = performance.now();
-      const hasObjs = (P.contentObjects && P.contentObjects.length) || (P.contentPolys && P.contentPolys.length);
-      const polys = P.insertMode === 'pockets' && hasObjs ? (P.contentPolys || []) : null;
-      if (P.insertMode === 'pockets' && !hasObjs) D.warn.push('Inserto con huecos: añade los objetos (SVG) en la pestaña Contenido (se genera en blanco).');
-      const ins = memoSolid(memoKey('ins', D.Li, D.Wi, D.ri, D.cham, D.seg, D.fc, D.lw, D.lh, D.Db, D.floorTop, D.draft, D.eco,
-        ['contentObjects', 'fingerCount', 'fingerD', 'fingerPos', 'insertDeck', 'insertH', 'insertMode', 'insertTol', 'pocketTol', 'objClearance'].map((k) => P[k]), polys),
-      () => baseInsert(D, P, polys));
-      const ip = part('insert', polys ? 'Inserto con alojamientos' : 'Inserto', ins.solid, {
-        print: ins.print, instances: [T(0, 0, z0)], qty: 1, material: 'PLA (relleno 0 %, 2 paredes)',
-      }, normals);
+    // Insertos interiores (en blanco o con huecos, en la base y/o en la tapa).
+    const fillB = D.content.base, fillL = D.content.lid;
+    const hasObjs = (P.contentObjects && P.contentObjects.length) || (P.contentPolys && P.contentPolys.length);
+    const polys = hasObjs ? (P.contentPolys || []) : null;
+    const INS_KEYS = ['contentObjects', 'fingerCount', 'fingerD', 'fingerPos', 'insertDeck', 'insertH', 'insertTol', 'pocketTol', 'objClearance'];
+    const insAids = (pt, solid) => {
       // Misma lógica de cama que la caja: diagonal + orejas, o inclinado con
       // bisel simétrico, aletas y soportes de voladizos.
       const tol = P.insertTol ?? 0.3;
-      addAids(D, P, ip, () => ins.solid, normals, { hx: D.Li / 2 - tol, hy: D.Wi / 2 - tol, wall: 2 * D.lw + 0.6, mech: false });
+      addAids(D, P, pt, () => solid, normals, { hx: D.Li / 2 - tol, hy: D.Wi / 2 - tol, wall: 2 * D.lw + 0.6, mech: false });
+    };
+    if ((want('A') && fillB === 'pockets') || (want('B') && fillL === 'pockets')) {
+      if (!hasObjs && !D.warn.some((w) => w.startsWith('Inserto con huecos'))) D.warn.push('Inserto con huecos: añade los objetos (SVG) en la pestaña Contenido (se genera en blanco).');
+    }
+    if (want('A') && (fillB === 'blank' || fillB === 'pockets')) {
+      const m0 = mark();
+      const t1 = performance.now();
+      const pk = fillB === 'pockets' && !!hasObjs;
+      const ins = memoSolid(memoKey('ins', D.Li, D.Wi, D.ri, D.cham, D.seg, D.fc, D.lw, D.lh, D.Db, D.floorTop, D.draft, D.eco, pk,
+        INS_KEYS.map((k) => P[k]), pk ? polys : null), () => baseInsert(D, P, polys, pk));
+      const ip = part('insert', pk ? 'Inserto con alojamientos' : 'Inserto', ins.solid, {
+        print: ins.print, instances: [T(0, 0, z0)], qty: 1, material: 'PLA (relleno 0 %, 2 paredes)',
+      }, normals);
+      insAids(ip, ins.solid);
       parts.push(ip);
       D.insert = ins.info;
       log(D, `inserto base: altura ${ins.info.height} mm, ${ins.info.pockets} alojamientos, ${ins.info.notches.length} huecos para dedos (${Math.round(performance.now() - t1)} ms)`);
+      release(m0);
     }
-    if (want('B') && P.insertLid && D.org) D.warn.push('Con compartimentos en la tapa no se genera el inserto de la tapa.');
-    if (want('B') && P.insertLid && !D.org) {
-      const li = lidInsert(D, P);
-      if (li) {
-        const lp2 = part('insertLid', 'Inserto de tapa', li.solid, {
+    if (want('B') && (fillL === 'blank' || fillL === 'pockets')) {
+      const m0 = mark();
+      const t1 = performance.now();
+      const pk = fillL === 'pockets' && !!hasObjs;
+      if (D.Dl < 3) D.warn.push('Tapa demasiado baja para un inserto (< 3 mm de profundidad).');
+      else {
+        const li = memoSolid(memoKey('insL', D.Li, D.Wi, D.ri, D.cham, D.seg, D.fcl, D.lw, D.lh, D.Dl, D.Hb, D.draft, D.eco, pk,
+          INS_KEYS.map((k) => P[k]), pk ? polys : null), () => lidInsert(D, P, polys, pk));
+        const lp2 = part('insertLid', pk ? 'Inserto de tapa con alojamientos' : 'Inserto de tapa', li.solid, {
           print: li.print, instances: [T(0, 0, z0)], qty: 1, material: 'PLA (relleno 0 %, 2 paredes)',
         }, normals);
-        const tol = P.insertTol ?? 0.3;
-        addAids(D, P, lp2, () => li.solid, normals, { hx: D.Li / 2 - tol, hy: D.Wi / 2 - tol, wall: 2 * D.lw + 0.6, mech: false });
+        insAids(lp2, li.solid);
         parts.push(lp2);
+        D.insertLid = li.info;
+        log(D, `inserto tapa: altura ${li.info.height} mm, ${li.info.pockets} alojamientos (${Math.round(performance.now() - t1)} ms)`);
       }
-      else D.warn.push('Tapa demasiado baja para un inserto (< 3 mm de profundidad).');
+      release(m0);
     }
 
     // Pasadores: impresos o filamento + tapones, por separado para bisagra y cierre.
@@ -974,6 +1020,48 @@ export function build(P, svg, opt = {}) {
   }
 }
 
+/**
+ * Tapas interiores de un organizador (`side`: 'lid' | 'base'). Las idénticas
+ * (misma forma salvo una traslación) son una sola pieza con varias copias.
+ * La malla es siempre la del "marco de tapa"; las de la base se colocan con
+ * el giro de 180° (orgFlip).
+ */
+function orgPanelParts(D, O, side, z0, normals) {
+  const out = [];
+  const groups = new Map();
+  const rel = (v, o) => Math.round((v - o) * 100);
+  for (const p of O.panels) {
+    const cellsRel = p.cells.map((i) => { const c = O.cells[i]; return [rel(c.x0, p.x0), rel(c.x1, p.x0), rel(c.y0, p.y0), rel(c.y1, p.y0), p.snapCells.includes(i) ? 1 : 0]; });
+    const sig = JSON.stringify([rel(p.x1, p.x0), rel(p.y1, p.y0), p.pivots.map((x) => rel(x, p.x0)), rel(p.ax0, p.x0), rel(p.ax1, p.x0), p.well ? [rel(p.well.x0, p.x0), rel(p.well.y0, p.y0), p.well.atWall] : 0,
+      O.wells.filter((w) => w.x1 > p.x0 - 3 && w.x0 < p.x1 + 3 && w.y1 > p.y0 - 12 && w.y0 < p.y1 + 12).map((w) => [rel(w.x0, p.x0), rel(w.y0, p.y0), rel(w.x1, p.x0), rel(w.y1, p.y0)]), rel(p.tab, p.x0), cellsRel,
+      (p.magnets || []).map((m) => [rel(m.x, p.x0), rel(m.y, p.y0)]), D.cham > 0 ? [p.x0, p.y0] : 0]);
+    if (!groups.has(sig)) groups.set(sig, []);
+    groups.get(sig).push(p);
+  }
+  const base = side === 'base';
+  const RX = orgFlip(D);
+  let k = 0;
+  for (const list of groups.values()) {
+    const m0 = mark();
+    const ref = list[0];
+    const man = memoSolid(memoKey('org', ref, O.cells.filter((_, i) => ref.cells.includes(i)), O.blocks, O.wells, O.a, O.zp0, O.zp1, O.rc, O.sealClr, O.snap,
+      O.latch, O.latch === 'magnet' ? [O.magnet, O.magnets] : 0, D.Li, D.Wi, D.cham, D.ri, D.seg, D.lw), () => ({ solid: orgPanel(D, O, ref) })).solid;
+    k++;
+    const label = base ? 'Tapa interior de la base' : 'Tapa interior';
+    out.push(part('orgPanel', groups.size > 1 ? `${label} ${k}` : label, man, {
+      key: `orgPanel${base ? 'B' : ''}${k - 1}`, side,
+      print: T(0, 0, -O.zp0),
+      instances: list.map((p) => (base ? mul(mul(T(0, 0, z0), RX), T(p.x0 - ref.x0, p.y0 - ref.y0, 0)) : T(p.x0 - ref.x0, p.y0 - ref.y0, z0))),
+      qty: list.length, material: 'PETG / PLA',
+      // Eje de giro de la copia de referencia (ensamblaje); el visor suma el
+      // desplazamiento en Y de cada copia.
+      axis: base ? { y: -ref.axis.y, z: 2 * D.Hb - ref.axis.z + z0 } : { y: ref.axis.y, z: ref.axis.z + z0 },
+    }, normals));
+    release(m0);
+  }
+  return out;
+}
+
 function part(id, name, man, extra, normals) {
   return {
     id, key: id, name, mesh: toMesh(man, normals),
@@ -992,25 +1080,42 @@ const LID_ONLY = new Set(['orgDepth', 'orgScoop', 'pattern', 'relief', 'patternD
   'patternMargin', 'stripeAngle', 'patternSeed', 'svgSize', 'svgRotate', 'svgOffsetX', 'svgOffsetY',
   'top', 'lidDepth', 'lidMin', 'bedPreset', 'bedX', 'bedY', 'bedZ', 'printAids', 'aidsInPart',
   'finSpacing', 'finReach', 'toothPitch', 'finGap', 'overhangSupports', 'overhangAngle', 'supportPitch',
-  'insertMode', 'insertLid', 'insertH', 'insertTol', 'pocketTol', 'insertDeck', 'fingerCount', 'fingerD',
+  'insertLid', 'orgDepth', 'orgScoop', 'insertH', 'insertTol', 'pocketTol', 'insertDeck', 'fingerCount', 'fingerD',
   'fingerPos', 'holeComp', 'contentPolys', 'contentObjects', 'objClearance', 'objRotate', 'objSpacing', 'objRotateAllow', 'contentFit']);
+// (`insertMode` ya no está: 'org' pone compartimentos en la base. Con
+// compartimentos e imanes en la base, `holeComp` sí la cambia: va aparte.)
 function baseKey(P, normals) {
   const o = {};
   for (const k of Object.keys(P).sort()) if (!LID_ONLY.has(k)) o[k] = P[k];
-  return JSON.stringify(o) + normals;
+  return JSON.stringify(o) + normals + (P.insertMode === 'org' && P.orgLatch === 'magnet' ? `hc${P.holeComp}` : '');
 }
 /* ---------------- Caché de la tapa ---------------- */
 // Simétrica a la de la base: estos parámetros no cambian la malla de la tapa
 // (antes de las ayudas, que tienen su propia caché por huella de malla). Al
 // ajustar el contenido o el inserto el hilo B ya no repite la tapa entera.
 let lidCache = null;
-const NOT_LID = new Set(['insertMode', 'insertLid', 'insertH', 'insertTol', 'pocketTol', 'insertDeck', 'fingerCount', 'fingerD',
+const NOT_LID = new Set(['insertMode', 'insertH', 'insertTol', 'pocketTol', 'insertDeck', 'fingerCount', 'fingerD',
   'fingerPos', 'contentPolys', 'contentObjects', 'objClearance', 'objRotate', 'objSpacing', 'objRotateAllow', 'contentFit',
+  'orgBCols', 'orgBRows', 'orgBMinL', 'orgBMinW', 'orgBDepth', 'orgBCover', 'orgBScoop',
   'aidsInPart', 'finSpacing', 'finReach', 'toothPitch', 'finGap', 'overhangSupports', 'overhangAngle', 'supportPitch']);
 function lidKey(P, normals, svg) {
   const o = {};
   for (const k of Object.keys(P).sort()) if (!NOT_LID.has(k)) o[k] = P[k];
-  return JSON.stringify(o) + normals + (svg || '');
+  // Lo que lleva la base no cambia la tapa, salvo los compartimentos: pueden
+  // agrandar la caja (celdas mínimas) o subir el plano de unión (altura).
+  const orgB = P.insertMode === 'org' ? [P.orgBCols, P.orgBRows, P.orgBMinL, P.orgBMinW, P.orgBDepth, P.orgBCover] : 0;
+  // El logo entra en la clave con su contenido: antes se concatenaba el
+  // objeto ("[object Object]") y cambiar de logo no rehacía la tapa.
+  return JSON.stringify(o) + JSON.stringify(orgB) + normals + svgSig(svg);
+}
+/** Huella del logo ya colocado (FNV‑1a sobre sus coordenadas). */
+function svgSig(svg) {
+  if (!svg) return '';
+  let h = 0x811c9dc5, n = 0;
+  const mix = (v) => { h ^= Math.round(v * 1000) | 0; h = Math.imul(h, 0x01000193); n++; };
+  for (const f of svg.fills || []) { for (const q of f.outer) { mix(q[0]); mix(q[1]); } for (const hh of f.holes || []) for (const q of hh) { mix(q[0]); mix(q[1]); } mix(7); }
+  for (const st of svg.strokes || []) { for (const q of st.points) { mix(q[0]); mix(q[1]); } mix(st.width); }
+  return `svg:${(h >>> 0).toString(36)}:${n}`;
 }
 function clonePart(p) {
   return { ...p, mesh: { ...p.mesh, vert: p.mesh.vert.slice(), tri: p.mesh.tri.slice() } };

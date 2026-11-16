@@ -40,6 +40,25 @@
  *  - Todo sin soportes: la tapa se imprime boca abajo (celdas, carriles y
  *    pozos hacia arriba, agujeros en gota); las tapas interiores, con la cara
  *    exterior sobre la cama (faldones hacia arriba).
+ *
+ * EN LA BASE (v7.3): el mismo organizador, girado 180° sobre el eje X que pasa
+ * por el plano de unión (y → −y, z → 2·Hb − z). Toda la distribución y la
+ * geometría se calculan en el "marco de tapa" (el de arriba) y el motor las
+ * gira: las celdas quedan abiertas hacia arriba desde el suelo, las tapas
+ * interiores justo bajo el borde, con el eje en el lado de las bisagras de la
+ * caja (se abren hacia el fondo) y el pozo para el dedo delante. Impresa de
+ * pie, la base ve exactamente lo que ve la tapa impresa boca abajo.
+ *
+ * TRABA de la tapa interior (`orgLatch`):
+ *  - 'snap' (mecánica): resaltes de clic en los faldones (arriba).
+ *  - 'magnet' (magnética): parejas de imanes de disco Ø × alto dados. Uno va
+ *    en un resalte de la cara interior de la tapa interior y el otro en un
+ *    pilar del cuerpo, cara con cara (0.4 mm de separación): tiran en la
+ *    dirección de apertura, que es como más sujetan. Alojamientos ciegos a
+ *    presión con 6 nervios de aplastamiento y chaflán de entrada (el patrón
+ *    de los agujeros de imán de Gridfinity): se meten con el dedo o un
+ *    tornillo de banco después de imprimir, sin pausar la impresión. Los
+ *    pilares van sobre un divisor o en una esquina, junto al borde libre.
  */
 
 const r2 = (v) => Math.round(v * 100) / 100;
@@ -60,6 +79,53 @@ export const ORG = {
   wellW: 16, wellD: 10, wellH: 6, tabFrac: 0.45,
 };
 
+// Alojamiento de imán a presión (medidas sobre el imán nominal).
+export const MAG = {
+  slack: 0.25,       // radio del agujero = imán/2 + slack (entra sin tocar la pared)
+  bite: 0.05,        // los nervios de aplastamiento muerden el imán 0.05 mm por lado
+  ribs: 6,           // nervios de aplastamiento
+  recess: 0.1,       // la cara del imán queda 0.1 mm por debajo del borde
+  air: 0.2,          // aire entre el resalte de la tapa interior y el pilar
+  skin: 0.6,         // piel bajo el imán de la tapa interior (3 capas)
+  lead: 0.4,         // chaflán de entrada
+  sinkY: 0.2,        // lo que el pilar se funde con el carril del borde libre
+};
+
+/**
+ * Qué lleva cada mitad de la caja: 'off' | 'blank' | 'pockets' | 'org'.
+ * Admite los parámetros antiguos (`lidOrg`, `insertLid`).
+ */
+export function contentModes(P) {
+  const ok = (v) => (['off', 'blank', 'pockets', 'org'].includes(v) ? v : 'off');
+  const base = ok(P.insertMode);
+  const lid = ok(P.lidMode) !== 'off' ? ok(P.lidMode) : P.lidOrg ? 'org' : P.insertLid ? 'blank' : 'off';
+  return { base, lid };
+}
+
+/** Parámetros del organizador de un lado ('lid' | 'base'). */
+function orgParams(P, side) {
+  return side === 'base'
+    ? { cols: P.orgBCols, rows: P.orgBRows, minL: P.orgBMinL, minW: P.orgBMinW, depth: P.orgBDepth, cover: P.orgBCover, scoop: P.orgBScoop }
+    : { cols: P.orgCols, rows: P.orgRows, minL: P.orgMinL, minW: P.orgMinW, depth: P.orgDepth, cover: P.orgCover, scoop: P.orgScoop };
+}
+
+/** Cotas del alojamiento de imán (null si la traba no es magnética). */
+function magnetDims(P, lw, ct) {
+  if (P.orgLatch !== 'magnet') return null;
+  const d = Math.min(20, Math.max(2, Number(P.magnetD) || 6));
+  const h = Math.min(8, Math.max(0.5, Number(P.magnetH) || 2));
+  const lh = P.layerH || 0.2;
+  // Agujero vertical: sale algo más pequeño; se compensa a medias (los
+  // nervios absorben el resto).
+  const comp = (P.holeComp ?? 0.15) / 4;
+  const rOut = r2(d / 2 + MAG.slack + comp), rIn = r2(d / 2 - MAG.bite + comp);
+  const wall = r2(Math.max(1.2, 3 * lw));
+  const pd = r2(h + MAG.recess);
+  // Resalte de la tapa interior: lo que el imán no cabe en su espesor.
+  const hb = r2(Math.max(0, Math.ceil((pd + MAG.skin - ct) / lh - 1e-6) * lh));
+  return { d, h, rOut, rIn, wall, Rp: r2(rOut + wall), pd, hb };
+}
+
 /** Holgura de giro en Ø3 (la de la calibración, interpolada como en derive). */
 const clr3 = (P) => P.clearance ?? 0.25;
 
@@ -67,11 +133,12 @@ const clr3 = (P) => P.clearance ?? 0.25;
 export const decoupleGap = (lw) => r2(Math.max(0.5, lw + 0.05));
 
 /** Parámetros básicos (sin geometría): para dimensionar la caja. */
-export function orgBase(P, lw) {
-  if (!P.lidOrg) return null;
-  const cols = Math.max(1, Math.round(P.orgCols || 1));
-  const rows = Math.max(1, Math.round(P.orgRows || 1));
-  const cover = ['single', 'row', 'cell', 'none'].includes(P.orgCover) ? P.orgCover : 'single';
+export function orgBase(P, lw, side = 'lid') {
+  if (contentModes(P)[side] !== 'org') return null;
+  const Q = orgParams(P, side);
+  const cols = Math.max(1, Math.round(Q.cols || 1));
+  const rows = Math.max(1, Math.round(Q.rows || 1));
+  const cover = ['single', 'row', 'cell', 'none'].includes(Q.cover) ? Q.cover : 'single';
   // Divisores ≥ 3 líneas y tapa interior de 4 (modo ahorro: 2 y 3 líneas).
   const wd = r2(P._eco ? Math.max(0.9, 2 * lw) : Math.max(1.2, 3 * lw));
   const has = cover !== 'none';
@@ -88,10 +155,11 @@ export function orgBase(P, lw) {
   const rB = r2(Math.max(gap + 0.9, ORG.wallB) + 0.2);
   const rail0 = has ? r2(rB + 2 * a + ORG.over) : 0;
   const railMid = has && cover !== 'single' ? r2(ORG.land + 0.4 + ORG.rho + a + ORG.over) : wd;
-  const needL = P.orgMinL > 0 ? r2(cols * P.orgMinL + (cols - 1) * wd) : 0;
-  const needW = P.orgMinW > 0 ? r2(rows * P.orgMinW + rail0 + (rows - 1) * railMid) : 0;
-  const needDl = P.orgDepth > 0 ? r2(g0 + ct + P.orgDepth) : 0;
-  return { cols, rows, cover, wd, ct, g0, a, rB, gap, rail0, railMid, needL, needW, needDl, has };
+  const needL = Q.minL > 0 ? r2(cols * Q.minL + (cols - 1) * wd) : 0;
+  const needW = Q.minW > 0 ? r2(rows * Q.minW + rail0 + (rows - 1) * railMid) : 0;
+  const needDl = Q.depth > 0 ? r2(g0 + ct + Q.depth) : 0;
+  const magnet = has ? magnetDims(P, lw, ct) : null;
+  return { side, cols, rows, cover, wd, ct, g0, a, rB, gap, rail0, railMid, needL, needW, needDl, has, magnet, scoopOn: Q.scoop !== false };
 }
 
 /**
@@ -110,27 +178,34 @@ function halfWidthAt(D, y) {
  * Distribución completa (números): celdas, carriles, ejes, pivotes, pozos y
  * tapas interiores. Marco interno de la tapa cerrada; borde de la tapa en z = Hb.
  */
-export function orgLayout(D, P) {
-  const B = orgBase(P, D.lw);
+export function orgLayout(D, P, side = 'lid') {
+  const B = orgBase(P, D.lw, side);
   if (!B) return null;
   const { cols, rows, cover, wd, ct, g0, a, rB, gap, rail0, railMid, has } = B;
   const L = D.Li, W = D.Wi;
   const zp0 = r2(D.Hb + g0), zp1 = r2(zp0 + ct);
-  const zi = r2(D.Hb + D.Dl);
+  // Fondo de las celdas en el marco de tapa: el techo de la tapa o, para la
+  // base (girada 180°), su suelo.
+  const zi = r2(D.Hb + (side === 'base' ? D.Db : D.Dl));
   const za = r2(zp0 + ORG.rho - ORG.flat);
   const depth = r2(zi - zp1);
   const cellL = r2((L - (cols - 1) * wd) / cols);
   const cellW = r2((W - rail0 - (rows - 1) * railMid) / rows);
   const cells = [];
   const rowsY = [];
-  let y = -W / 2 + rail0;
+  // Todo sobre una rejilla de 0.01 mm desde la misma esquina: así las celdas
+  // (y luego las tapas interiores, bloques y pozos) de una fila salen
+  // EXACTAMENTE iguales y se construyen e imprimen como una pieza repetida,
+  // en vez de diferir en una centésima por el redondeo.
+  const xL = r2(-L / 2);
+  let y = r2(-W / 2 + rail0);
   for (let r = 0; r < rows; r++) {
-    rowsY.push([y, y + cellW]);
+    rowsY.push([y, r2(y + cellW)]);
     for (let c = 0; c < cols; c++) {
-      const x0 = -L / 2 + c * (cellL + wd);
-      cells.push({ r, c, x0: r2(x0), x1: r2(x0 + cellL), y0: r2(y), y1: r2(y + cellW) });
+      const x0 = r2(xL + c * (cellL + wd));
+      cells.push({ r, c, x0, x1: r2(x0 + cellL), y0: y, y1: r2(y + cellW) });
     }
-    y += cellW + railMid;
+    y = r2(y + cellW + railMid);
   }
   // Bloque de pivote (perfil YZ alrededor del eje): ±(a + wallB) en Y, de la
   // punta de la gota − 1 mm hasta zp1.
@@ -165,9 +240,10 @@ export function orgLayout(D, P) {
     const mk = (x0, x1, r, rLast, cellIdx, pl, pr) => {
       const ax = axes[cover === 'single' ? 0 : r];
       // pl/pr: cara del bloque de la izquierda/derecha (el pivote entra en −X/+X).
+      const X0 = r2(x0), X1 = r2(x1);
       return {
-        x0: r2(x0), x1: r2(x1), ax0: r2(pl - ORG.pinE), ax1: r2(pr + ORG.pinE), y0: ax.y, y1: r2(yEnd(rLast)),
-        row: r, rowLast: rLast, axis: ax, pivots: [r2(pl), r2(pr)], tab: r2((x0 + x1) / 2), cells: cellIdx,
+        x0: X0, x1: X1, ax0: r2(pl - ORG.pinE), ax1: r2(pr + ORG.pinE), y0: ax.y, y1: r2(yEnd(rLast)),
+        row: r, rowLast: rLast, axis: ax, pivots: [r2(pl), r2(pr)], tab: r2(X0 + r2((X1 - X0) / 2)), cells: cellIdx,
       };
     };
     const idx = (r, c) => r * cols + c;
@@ -189,16 +265,18 @@ export function orgLayout(D, P) {
         const f = addWallBlocks(ax);
         const r = ax.r;
         const mids = [];
+        const half = r2(hd + 0.45);                                  // 0.9 de pared entre agujeros
+        const offB = r2(wd / 2 - half);                              // cara del bloque desde la cara de la celda
+        const over = r2(wd / 2 - 0.3);                               // lo que la tapa interior pisa del divisor
         for (let c = 0; c < cols - 1; c++) {
-          const xd = (cells[idx(r, c)].x1 + cells[idx(r, c + 1)].x0) / 2;
-          const half = r2(hd + 0.45);                                // 0.9 de pared entre agujeros
-          blocks.push({ axis: ax, x0: r2(xd - half), x1: r2(xd + half), mid: true });
-          mids.push([r2(xd - half), r2(xd + half)]);
+          const xf = r2(cells[idx(r, c)].x1 + offB);
+          blocks.push({ axis: ax, x0: xf, x1: r2(xf + 2 * half), mid: true });
+          mids.push([xf, r2(xf + 2 * half)]);
         }
         for (let c = 0; c < cols; c++) {
           const cl = cells[idx(r, c)];
-          const x0 = c === 0 ? -L / 2 + 0.3 : cl.x0 - wd / 2 + 0.3;
-          const x1 = c === cols - 1 ? L / 2 - 0.3 : cl.x1 + wd / 2 - 0.3;
+          const x0 = c === 0 ? -L / 2 + 0.3 : cl.x0 - over;
+          const x1 = c === cols - 1 ? L / 2 - 0.3 : cl.x1 + over;
           const pl = c === 0 ? -f : mids[c - 1][1];
           const pr = c === cols - 1 ? f : mids[c][0];
           panels.push(mk(x0, x1, r, r, [idx(r, c)], pl, pr));
@@ -210,7 +288,7 @@ export function orgLayout(D, P) {
     // la tapa interior cubre la primera parte (pestaña) y deja descubierta la
     // del borde. Celdas muy pequeñas: sin pozo (no cabe un dedo).
     for (const p of panels) {
-      const ww = Math.min(ORG.wellW, p.x1 - p.x0 - 4);
+      let ww = Math.min(ORG.wellW, p.x1 - p.x0 - 4);
       const atWall = p.y1 >= W / 2 - 0.31;
       // Bajo un carril, el pozo acaba donde acaban las celdas (deja el carril
       // entero entre él y el canal del eje siguiente).
@@ -221,12 +299,33 @@ export function orgLayout(D, P) {
       const wdp = Math.min(ORG.wellD, cellW - 3, yw1 - p.axis.y - 12 - wd);
       if (ww < 10 || wdp < 7) { p.well = null; continue; }
       const yw0 = yw1 - wdp;
+      // Octógono / esquinas muy redondeadas: el pozo se corre hacia el centro
+      // lo justo para quedar dentro del interior (si no, mordía la pared en
+      // diagonal de las celdas de las esquinas).
+      const hw = Math.min(halfWidthAt(D, yw1 - 0.01), halfWidthAt(D, yw0)) - 0.5;
+      if (p.tab + ww / 2 > hw) p.tab = r2(hw - ww / 2);
+      if (p.tab - ww / 2 < -hw) p.tab = r2(-hw + ww / 2);
+      if (p.tab - ww / 2 < p.x0 + 2 || p.tab + ww / 2 > p.x1 - 2) { p.well = null; p.tab = r2((p.x0 + p.x1) / 2); continue; }
+      // Tapa de una celda con imán en la esquina: el pozo se estrecha lo justo
+      // para dejarle sitio (hasta 10 mm; con menos no cabe un dedo).
+      if (B.magnet) {
+        const row = p.cells.map((i) => cells[i]).filter((c) => c.r === p.rowLast);
+        if (row.length === 1) {
+          // (2 líneas de pared entre el pozo y la boca achaflanada del alojamiento.)
+          const fit = 2 * (magCorners(D, B, row[0], row[0])[1] - p.tab - 0.9 - B.magnet.rOut - MAG.lead) - 0.02;
+          if (fit >= 10) ww = Math.min(ww, r2(fit));
+        }
+      }
       const w = { x0: r2(p.tab - ww / 2), x1: r2(p.tab + ww / 2), y0: r2(yw0), y1: r2(yw1),
         yTab: r2(yw0 + ORG.tabFrac * (yw1 - yw0)), h: r2(Math.min(ORG.wellH, depth - 1.5)), atWall };
       if (w.h < 3) { p.well = null; continue; }
       p.well = w;
       wells.push(w);
     }
+  }
+  // Celdas que pisan un pozo (con su pared alrededor): se recortan.
+  for (const c of cells) {
+    c.wells = wells.map((w, i) => (w.x0 - wd < c.x1 && w.x1 + wd > c.x0 && w.y0 - wd < c.y1 && w.y1 + wd > c.y0 ? i : -1)).filter((i) => i >= 0);
   }
   // Octógono: la parte de cada celda que queda más allá de la cuerda del
   // interior a la altura de su eje se rellena (si no, la esquina de la tapa
@@ -239,22 +338,118 @@ export function orgLayout(D, P) {
     }
     for (const p of panels) p.lim = r2(Math.min(...p.cells.map((i) => cells[i].lim)));
   }
+  // Traba magnética: pilares + resaltes (si no caben, se vuelve al clic).
+  let latch = 'snap', magnets = [], magnetWarn = null;
+  if (has && B.magnet) {
+    const res = placeMagnets(D, B, { cells, panels, rowsY, depth, cellL, cellW });
+    if (res.ok) { latch = 'magnet'; magnets = res.magnets; } else magnetWarn = res.why;
+  }
+  for (const c of cells) c.mags = magnets.map((m, i) => (m.x - B.magnet.Rp < c.x1 && m.x + B.magnet.Rp > c.x0 && m.y - B.magnet.Rp < c.y1 && m.y + B.magnet.Rp > c.y0 ? i : -1)).filter((i) => i >= 0);
   if (has) {
     // Celdas con resalte de clic: las del borde libre (single), los extremos
-    // de cada fila (row) o todas (cell).
+    // de cada fila (row) o todas (cell). Con imanes, ninguna.
     for (const p of panels) {
-      p.snapCells = cover === 'cell' ? p.cells
+      p.snapCells = latch === 'magnet' ? [] : cover === 'cell' ? p.cells
         : cover === 'row' ? [p.cells[0], p.cells[p.cells.length - 1]]
           : p.cells.filter((i) => cells[i].r === rows - 1);
     }
   }
   return {
-    ...B, cellL, cellW, depth, zp0, zp1, za, zi, zb, hd, lip, blockR, cells, axes, panels, blocks, wells,
+    ...B, latch, magnets, magnetWarn,
+    cellL, cellW, depth, zp0, zp1, za, zi, zb, hd, lip, blockR, cells, axes, panels, blocks, wells,
     // Resalte de clic: sobresale la holgura deslizante + la interferencia
     // (precarga calibrada del cierre, probeta E, acotada a 0.15–0.35 mm).
     snap: P._orgNoSnap ? (D.sealClr ?? 0.25) : r2((D.sealClr ?? 0.25) + Math.min(0.35, Math.max(0.15, (D.pre ?? 0.15) + 0.05))), sealClr: D.sealClr ?? 0.25,
     rc: r2(Math.min(2.5, cellL / 4, cellW / 4)),
     // Fondo inclinado (modo ahorro: 3 mm en vez de 6; es macizo y pesa).
-    scoop: P.orgScoop !== false ? r2(Math.min(P._eco ? 3 : 6, depth / 3, cellL / 4, cellW / 4)) : 0,
+    scoop: B.scoopOn ? r2(Math.min(P._eco ? 3 : 6, depth / 3, cellL / 4, cellW / 4)) : 0,
   };
+}
+
+/** Centros en X de un pilar en la esquina izquierda / derecha de una fila de celdas. */
+function magCorners(D, B, first, last) {
+  // Junto a un divisor el pilar se funde 0.2 mm con él (como con el carril).
+  const Rp = B.magnet.Rp, sinkX = Math.min(MAG.sinkY, Math.max(0, B.wd / 2 - 0.35));
+  return [
+    first.c === 0 ? -D.Li / 2 + B.gap + Rp : first.x0 + Rp - sinkX,
+    last.c === B.cols - 1 ? D.Li / 2 - B.gap - Rp : last.x1 - Rp + sinkX,
+  ];
+}
+
+/**
+ * Posiciones de los imanes de cada tapa interior (marco de tapa). El pilar
+ * del cuerpo va junto al borde libre: centrado en un divisor (tapas de
+ * varias celdas: medio disco en cada celda) o en una esquina (tapas de una
+ * celda). Nunca toca la pared exterior (queda tras la ranura de desacople),
+ * el pozo para el dedo ni sale del interior.
+ */
+function placeMagnets(D, B, G) {
+  const { gap, magnet: Mg } = B;
+  const { cells, panels, rowsY, depth } = G;
+  const L = D.Li, W = D.Wi, Rp = Mg.Rp;
+  if (depth < Mg.hb + MAG.air + Mg.pd + 0.8) return { ok: false, why: `celdas de ${depth} mm de alto: el imán de ${Mg.h} mm necesita ${r2(Mg.hb + MAG.air + Mg.pd + 0.8)} mm` };
+  const inside = (x, y) => {
+    for (let k = 0; k < 12; k++) {
+      const px = x + Rp * Math.cos((k * Math.PI) / 6), py = y + Rp * Math.sin((k * Math.PI) / 6);
+      if (Math.abs(py) > W / 2 - gap + 0.02 || Math.abs(px) > halfWidthAt(D, py) - gap + 0.02) return false;
+    }
+    return true;
+  };
+  const out = [];
+  for (const p of panels) {
+    const atWall = p.y1 >= W / 2 - 0.31;
+    const yEdge = atWall ? W / 2 - gap : rowsY[p.rowLast][1] + MAG.sinkY;
+    const y = r2(yEdge - Rp);
+    const row = p.cells.map((i) => cells[i]).filter((c) => c.r === p.rowLast);
+    const cand = [];
+    // Divisores interiores a la tapa.
+    // (`xa`/`xb`: hasta dónde llega en X el resalte de la tapa interior: la
+    // cara del divisor vecino si el pilar va en una esquina junto a él.)
+    for (let k = 0; k < row.length - 1; k++) cand.push({ x: r2((row[k].x1 + row[k + 1].x0) / 2), corner: false, xa: -1e4, xb: 1e4 });
+    // Esquinas: contra la pared (tras la ranura) o contra el divisor vecino.
+    const first = row[0], last = row[row.length - 1];
+    const [xl, xr] = magCorners(D, B, first, last);
+    cand.push({ x: r2(xr), corner: true, xa: -1e4, xb: last.c === B.cols - 1 ? 1e4 : last.x1 },
+      { x: r2(xl), corner: true, xa: first.c === 0 ? -1e4 : first.x0, xb: 1e4 });
+    const w = p.well;
+    const ok = (c) => inside(c.x, y) && (!p.lim || Math.abs(c.x) + Rp <= p.lim)
+      && c.x - Rp >= p.x0 - 0.01 && c.x + Rp <= p.x1 + 0.01
+      && (!w || Math.abs(c.x - (w.x0 + w.x1) / 2) >= (w.x1 - w.x0) / 2 + 0.9 + Mg.rOut + MAG.lead - 0.005 || y + Mg.rOut + MAG.lead < w.y0 - 0.9);
+    const valid = cand.filter(ok);
+    if (!valid.length) return { ok: false, why: `no cabe un imán de Ø${Mg.d} mm junto al borde libre (celdas de ${G.cellL}×${G.cellW} mm)` };
+    const width = p.x1 - p.x0, mid = (p.x0 + p.x1) / 2;
+    const sep = 2 * Rp + 1;
+    let picked;
+    if (row.length === 1) {
+      // Tapa de una celda: una esquina (la derecha: todas iguales) o las dos.
+      const right = valid.find((c) => c.corner && c.x > mid), left = valid.find((c) => c.corner && c.x < mid);
+      picked = width >= 60 && right && left && right.x - left.x >= sep ? [left, right] : [right || left || valid[0]];
+    } else {
+      // Varias celdas: reparto SIMÉTRICO respecto al centro de la tapa (la
+      // pestaña está en el centro: si se tira de ella, los imanes sueltan a la
+      // vez). Parejas ±x y, si el número es impar, uno central; si el centro
+      // lo ocupa el pozo, una pareja más.
+      const center = valid.find((c) => Math.abs(c.x - mid) < 0.05);
+      const pairs = valid.filter((c) => c.x > mid + 0.05 && valid.some((q) => Math.abs(q.x + c.x - 2 * mid) < 0.05))
+        .sort((u, v) => u.x - v.x);
+      let n = Math.min(4, Math.max(2, Math.round(width / 75)));
+      if (n % 2 && !center) n = n + 1 <= 2 * pairs.length ? n + 1 : n - 1;
+      const half = [];
+      for (let i = 0; i < Math.floor(n / 2); i++) {
+        const t = mid + ((i + 0.5 + (n % 2) / 2) * width) / n;
+        const best = pairs.filter((c) => !half.includes(c) && half.every((q) => Math.abs(q.x - c.x) >= sep)
+          && c.x - mid >= (n % 2 ? sep : sep / 2))
+          .sort((u, v) => Math.abs(u.x - t) - Math.abs(v.x - t))[0];
+        if (best) half.push(best);
+      }
+      picked = half.flatMap((c) => [c, valid.find((q) => Math.abs(q.x + c.x - 2 * mid) < 0.05)]);
+      if (n % 2 && center) picked.push(center);
+      if (!picked.length) picked = [center || valid[0]];
+    }
+    // `yc`: cara del carril del borde libre (el resalte de la tapa interior y
+    // su hueco en el cuerpo no pasan de ahí); `xa`/`xb`: lo mismo en X.
+    p.magnets = picked.map((c) => ({ x: c.x, y, yc: atWall ? null : r2(rowsY[p.rowLast][1]), xa: c.xa, xb: c.xb })).sort((u, v) => u.x - v.x);
+    for (const m of p.magnets) out.push({ ...m, panel: panels.indexOf(p) });
+  }
+  return { ok: true, magnets: out };
 }

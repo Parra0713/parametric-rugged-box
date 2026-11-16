@@ -57,7 +57,7 @@ const VARIANTS = [
   ['apilable', () => ({ stackable: true })],
   ['gridfinity interior', () => ({ gridfinity: 'baseplate' })],
   ['laberinto + tapa mínima', () => ({ sealMode: 'labyrinth', lidMin: true })],
-  ['inserto en blanco + tapa', () => ({ insertMode: 'blank', insertLid: true })],
+  ['inserto en blanco + tapa', () => ({ insertMode: 'blank', lidMode: 'blank' })],
   ['inserto con alojamiento', (L, W) => ({ insertMode: 'pockets', contentPolys: [ellipse(L, W)] })],
   ['radial + relieve', () => ({ pattern: 'radial', relief: 'emboss' })],
 ];
@@ -104,15 +104,15 @@ cases.push({ name: 'perfil justo XS', p: { innerL: 25, innerW: 25, baseDepth: 12
 cases.push({ name: 'perfil holgado L inclinada', p: { innerL: 210, innerW: 160, baseDepth: 40, lidDepth: 15, ...LOOSE } });
 cases.push({ name: 'perfil justo L inclinada', p: { innerL: 230, innerW: 150, baseDepth: 40, lidDepth: 15, ...TIGHT } });
 // Organizador en la tapa: toda la mecánica de la caja debe seguir intacta.
-cases.push({ name: 'organizador herramienta 6×3 una tapa', p: { innerL: 205, innerW: 100, baseDepth: 30, lidOrg: true, orgCols: 6, orgRows: 3, orgMinL: 33, orgMinW: 32, orgDepth: 26 } });
-cases.push({ name: 'organizador S 3×2 por celda', p: { innerL: 60, innerW: 40, baseDepth: 21, lidDepth: 12, lidOrg: true, orgCols: 3, orgRows: 2, orgCover: 'cell' } });
+cases.push({ name: 'organizador herramienta 6×3 una tapa', p: { innerL: 205, innerW: 100, baseDepth: 30, lidMode: 'org', orgCols: 6, orgRows: 3, orgMinL: 33, orgMinW: 32, orgDepth: 26 } });
+cases.push({ name: 'organizador S 3×2 por celda', p: { innerL: 60, innerW: 40, baseDepth: 21, lidDepth: 12, lidMode: 'org', orgCols: 3, orgRows: 2, orgCover: 'cell' } });
 // Modo ahorro de material: misma mecánica, cierre e impresión sin soportes.
 cases.push({ name: 'ahorro M estándar', p: { eco: true } });
 cases.push({ name: 'ahorro S filamento', p: { innerL: 60, innerW: 40, baseDepth: 21, lidDepth: 9, eco: true } });
 cases.push({ name: 'ahorro XS 25×25', p: { innerL: 25, innerW: 25, baseDepth: 12, lidDepth: 5, eco: true } });
 cases.push({ name: 'ahorro L inclinada', p: { innerL: 240, innerW: 170, baseDepth: 40, lidDepth: 15, eco: true } });
 cases.push({ name: 'ahorro apilable + laberinto + Gridfinity', p: { stackable: true, sealMode: 'labyrinth', gridfinity: 'baseplate', innerL: 168.5, innerW: 84.5, eco: true } });
-cases.push({ name: 'ahorro organizador herramienta + inserto', p: { innerL: 200, innerW: 100, baseDepth: 30, bandProud: 2.4, lidOrg: true, orgCols: 6, orgRows: 3, orgMinL: 33, orgMinW: 32, orgDepth: 26, insertMode: 'blank', eco: true } });
+cases.push({ name: 'ahorro organizador herramienta + inserto', p: { innerL: 200, innerW: 100, baseDepth: 30, bandProud: 2.4, lidMode: 'org', orgCols: 6, orgRows: 3, orgMinL: 33, orgMinW: 32, orgDepth: 26, insertMode: 'blank', eco: true } });
 // Modo ahorro nervado (piel de 3 líneas + nervios verticales): mismos criterios.
 const rib = { eco: true, ecoDesign: 'rib' };
 cases.push({ name: 'nervado M estándar', p: { ...rib } });
@@ -121,7 +121,7 @@ cases.push({ name: 'nervado XS 25×25', p: { innerL: 25, innerW: 25, baseDepth: 
 cases.push({ name: 'nervado L inclinada', p: { innerL: 240, innerW: 170, baseDepth: 40, lidDepth: 15, ...rib } });
 cases.push({ name: 'nervado octógono + pasadores impresos', p: { innerL: 160, innerW: 90, cornerCut: 15, pinMode: 'printed', latchPinMode: 'printed', ...rib } });
 cases.push({ name: 'nervado laberinto + 3 cierres', p: { innerL: 320, innerW: 120, baseDepth: 40, sealMode: 'labyrinth', ...rib } });
-cases.push({ name: 'nervado organizador por celda + inserto', p: { innerL: 200, innerW: 100, baseDepth: 30, bandProud: 2.4, lidOrg: true, orgCols: 6, orgRows: 3, orgMinL: 33, orgMinW: 32, orgDepth: 26, orgCover: 'cell', insertMode: 'blank', ...rib } });
+cases.push({ name: 'nervado organizador por celda + inserto', p: { innerL: 200, innerW: 100, baseDepth: 30, bandProud: 2.4, lidMode: 'org', orgCols: 6, orgRows: 3, orgMinL: 33, orgMinW: 32, orgDepth: 26, orgCover: 'cell', insertMode: 'blank', ...rib } });
 cases.push({ name: 'nervado apilable (cae a mínimos)', p: { stackable: true, ...rib } });
 // Relieve impreso boca abajo: todo el contorno apoya en la cama (sin ménsulas).
 cases.push({ name: 'relieve hex con nervios de esquina', p: { relief: 'emboss', pattern: 'hex', cornerRibs: true } });
@@ -131,9 +131,25 @@ const ribS = { eco: true, ecoDesign: 'ribStiff' };
 cases.push({ name: 'nervado rígido M estándar', p: { ...ribS } });
 cases.push({ name: 'nervado rígido XS 25×25', p: { innerL: 25, innerW: 25, baseDepth: 12, lidDepth: 5, ...ribS } });
 cases.push({ name: 'nervado rígido L inclinada + pasadores impresos', p: { innerL: 240, innerW: 170, baseDepth: 40, lidDepth: 15, pinMode: 'printed', latchPinMode: 'printed', ...ribS } });
-cases.push({ name: 'nervado rígido herramienta + organizador + inserto', p: { innerL: 200, innerW: 100, baseDepth: 30, bandProud: 2.4, lidOrg: true, orgCols: 6, orgRows: 3, orgMinL: 33, orgMinW: 32, orgDepth: 26, insertMode: 'blank', ...ribS } });
+cases.push({ name: 'nervado rígido herramienta + organizador + inserto', p: { innerL: 200, innerW: 100, baseDepth: 30, bandProud: 2.4, lidMode: 'org', orgCols: 6, orgRows: 3, orgMinL: 33, orgMinW: 32, orgDepth: 26, insertMode: 'blank', ...ribS } });
 cases.push({ name: 'nervado rígido octógono + laberinto', p: { innerL: 160, innerW: 90, cornerCut: 15, sealMode: 'labyrinth', ...ribS } });
-cases.push({ name: 'organizador apilable octógono por fila', p: { innerL: 160, innerW: 90, cornerCut: 15, stackable: true, lidOrg: true, orgCols: 5, orgRows: 3, orgCover: 'row' } });
+cases.push({ name: 'organizador apilable octógono por fila', p: { innerL: 160, innerW: 90, cornerCut: 15, stackable: true, lidMode: 'org', orgCols: 5, orgRows: 3, orgCover: 'row' } });
+// v7.3 — Contenido en cualquier mitad: compartimentos en la base, en las dos,
+// insertos con huecos en la tapa; traba magnética; junta de cordón.
+cases.push({ name: 'base con compartimentos 4×2 una tapa', p: { innerL: 140, innerW: 90, baseDepth: 40, insertMode: 'org', orgBCols: 4, orgBRows: 2 } });
+cases.push({ name: 'base con compartimentos por celda + tapa con inserto', p: { innerL: 150, innerW: 100, baseDepth: 35, lidDepth: 14, insertMode: 'org', orgBCols: 3, orgBRows: 2, orgBCover: 'cell', lidMode: 'blank' } });
+cases.push({ name: 'compartimentos en base y tapa + imanes 6×2', p: { innerL: 150, innerW: 100, baseDepth: 40, lidDepth: 22, insertMode: 'org', orgBCols: 3, orgBRows: 2, orgBCover: 'row', lidMode: 'org', orgCols: 3, orgRows: 2, orgCover: 'row', orgLatch: 'magnet' } });
+cases.push({ name: 'base apilable con compartimentos sin tapa interior', p: { innerL: 126, innerW: 84, baseDepth: 36, stackable: true, insertMode: 'org', orgBCols: 3, orgBRows: 2, orgBCover: 'none' } });
+cases.push({ name: 'ahorro base con compartimentos + imanes 8×3', p: { innerL: 160, innerW: 110, baseDepth: 40, insertMode: 'org', orgBCols: 3, orgBRows: 2, orgBCover: 'cell', orgLatch: 'magnet', magnetD: 8, magnetH: 3, eco: true } });
+cases.push({ name: 'L inclinada con compartimentos en la base', p: { innerL: 240, innerW: 170, baseDepth: 45, lidDepth: 15, insertMode: 'org', orgBCols: 5, orgBRows: 3, orgBCover: 'row' } });
+cases.push({ name: 'imanes herramienta por celda en la tapa', p: { innerL: 205, innerW: 100, baseDepth: 30, lidMode: 'org', orgCols: 6, orgRows: 3, orgMinL: 33, orgMinW: 32, orgDepth: 26, orgCover: 'cell', orgLatch: 'magnet' } });
+cases.push({ name: 'huecos para objetos en la tapa y en la base', p: { innerL: 160, innerW: 100, baseDepth: 30, lidDepth: 20, insertMode: 'pockets', lidMode: 'pockets', contentPolys: [ellipse(160, 100)] } });
+cases.push({ name: 'huecos para objetos solo en la tapa', p: { innerL: 120, innerW: 80, lidDepth: 18, lidMode: 'pockets', contentPolys: [ellipse(120, 80)] } });
+cases.push({ name: 'parámetros antiguos (lidOrg + insertLid)', p: { innerL: 120, innerW: 80, lidDepth: 18, lidOrg: true, orgCols: 3, orgRows: 2, insertLid: true, insertMode: 'blank' } });
+cases.push({ name: 'cordón TPU M estándar', p: { sealMode: 'cord' } });
+cases.push({ name: 'cordón TPU XS 25×25', p: { innerL: 25, innerW: 25, baseDepth: 12, lidDepth: 5, sealMode: 'cord' } });
+cases.push({ name: 'cordón TPU L inclinada + apilable', p: { innerL: 240, innerW: 170, baseDepth: 40, lidDepth: 15, stackable: true, sealMode: 'cord' } });
+cases.push({ name: 'cordón TPU ahorro nervado octógono', p: { innerL: 160, innerW: 90, cornerCut: 15, sealMode: 'cord', eco: true, ecoDesign: 'rib' } });
 if (args.quick) cases = cases.filter((c) => /^(20×20|60×40|120×80|250×170|380×260) estándar|apilable|alojamiento|varios|impresos \(|^XS 20×20×5/.test(c.name)).slice(0, 12);
 if (args.filter) cases = cases.filter((c) => c.name.includes(args.filter));
 if (args.chunk) {
@@ -167,6 +183,11 @@ for (const c of cases) {
   // Los tramos centrales de una junta dividida son dos tiras rectas (una por lado).
   for (const p of r.parts) check(p.status === 'NoError' && p.components <= (p.id === 'gasket' ? 2 : 1), `${p.name}: ${p.status}, ${p.components} sólido(s)`);
   check(r.D.hinge.kl >= 4 && r.D.latchW >= 6, `mecánica mínima: nudillo ${r.D.hinge.kl}, cierre ${r.D.latchW}`);
+
+  // Tapas interiores sin el apriete de los resaltes de clic (para medir
+  // choques). OJO: build() libera al terminar todo lo creado en WASM, así
+  // que va ANTES de construir la base y la tapa de esta comprobación.
+  const rsOrg = r.parts.some((q) => q.id === 'orgPanel') ? build({ ...P, _orgNoSnap: true }, null, { normals: false }) : null;
 
   // Mismas cotas que usó el motor (si predijo impresión inclinada, con tiltAdd).
   const D = derive(r.D.tilted ? { ...P, _tilted: true } : P);
@@ -217,10 +238,35 @@ for (const c of cases) {
     const v = m.intersect(id === 'insert' ? base : lid).volume();
     check(v < 0.05, `${pt.name}: encaja sin interferencia (${v.toFixed(3)} mm³)`);
     const cps = P.contentObjects ? P.contentObjects.flatMap((o) => o.polys) : P.contentPolys;
-    if (id === 'insert' && cps) {
-      const obj = M().union(cps.map((p) => CS().ofPolygons([p], 'EvenOdd').extrude(D.Db - 1).translate([0, 0, D.floorTop + 0.5])));
+    const mode = r.D.content[id === 'insert' ? 'base' : 'lid'];
+    if (mode === 'pockets' && cps) {
+      // El contenido (mismo sitio en el mundo para las dos mitades) cabe en su hueco.
+      const [za, zb] = id === 'insert' ? [D.floorTop + 0.5, D.Hb - 0.5] : [D.Hb + 0.5, D.Hb + D.Dl - 0.5];
+      const obj = M().union(cps.map((p) => CS().ofPolygons([p], 'EvenOdd').extrude(zb - za).translate([0, 0, za])));
       const vo = m.intersect(obj).volume();
-      check(vo < 0.05, `${pt.name}: el contenido cabe en su alojamiento (${vo.toFixed(3)} mm³)`);
+      check(vo < 0.05 && pt.volume > 0, `${pt.name}: el contenido cabe en su alojamiento (${vo.toFixed(3)} mm³)`);
+    }
+  }
+  // Tapas interiores (de la tapa y de la base): en su sitio no chocan con
+  // ninguna mitad ni con los insertos; los resaltes de clic sí aprietan.
+  {
+    const pp = r.parts.filter((q) => q.id === 'orgPanel');
+    if (pp.length) {
+      const z0 = r.assembly.z0;
+      const all = M().union(rsOrg.parts.filter((q) => q.id === 'orgPanel').flatMap((q) => q.instances.map((inst) => toMan(q.mesh, inst).translate([0, 0, -z0]))));
+      const others = r.parts.filter((q) => q.id === 'insert' || q.id === 'insertLid').map((q) => toMan(q.mesh));
+      const v = all.intersect(base).volume() + all.intersect(lid).volume() + others.reduce((a, o) => a + all.intersect(o).volume(), 0);
+      check(v < 0.05, `tapas interiores (${pp.reduce((a, q) => a + q.instances.length, 0)}): cerradas sin interferencia (${v.toFixed(3)} mm³)`);
+      const sides = new Set(pp.map((q) => q.side));
+      check((!r.D.org || !r.D.org.has || sides.has('lid')) && (!r.D.orgB || !r.D.orgB.has || sides.has('base')), `tapas interiores en ${[...sides].join(' y ')}`);
+    }
+    for (const side of ['base', 'lid']) {
+      const O = side === 'base' ? r.D.orgB : r.D.org;
+      if (P.orgLatch === 'magnet' && O && O.has) check(O.latch === 'magnet' && O.magnets.length >= O.panels.length, `traba magnética (${side}): ${O.magnets.length} parejas de imanes en ${O.panels.length} tapas interiores`);
+    }
+    if (P.sealMode === 'cord') {
+      check(!r.parts.some((q) => q.id === 'gasket') && r.D.cord && r.D.cord.length > 2 * (D.Li + D.Wi) * 0.9 && D.gd - D.tl > 0.6 * 1.75 && D.gd - D.tl < 0.9 * 1.75 && D.fill <= 0.95,
+        `junta de cordón: sin pieza impresa, ${r.D.cord?.length} mm de filamento, ranura ${D.gw}×${D.gd} mm, llenado ${Math.round(D.fill * 100)} %`);
     }
   }
   // Montaje real de pasadores y tapones + impresión plana sin soportes.
