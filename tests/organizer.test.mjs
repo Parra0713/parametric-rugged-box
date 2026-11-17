@@ -78,6 +78,8 @@ const cases = [
   ['M · 3×2 por celda · imanes 8×3', { innerL: 150, innerW: 100, lidDepth: 22, orgCols: 3, orgRows: 2, orgCover: 'cell', orgLatch: 'magnet', magnetD: 8, magnetH: 3 }],
   ['M octógono · 4×2 por fila · imanes 5×1', { innerL: 160, innerW: 90, cornerCut: 15, lidDepth: 20, orgCols: 4, orgRows: 2, orgCover: 'row', orgLatch: 'magnet', magnetD: 5, magnetH: 1 }],
   ['S · 2×2 una tapa · imanes 4×0,8 (sin resalte)', { innerL: 80, innerW: 60, lidDepth: 14, orgCols: 2, orgRows: 2, orgCover: 'single', orgLatch: 'magnet', magnetD: 4, magnetH: 0.8 }],
+  ['herramienta · una tapa · 1 imán elegido', { ...user, orgCover: 'single', orgLatch: 'magnet', magnetCount: 1 }],
+  ['herramienta · por fila · 3 imanes elegidos', { ...user, orgCover: 'row', orgLatch: 'magnet', magnetCount: 3 }],
   ['herramienta · una tapa · 2 imanes elegidos', { ...user, orgCover: 'single', orgLatch: 'magnet', magnetCount: 2 }],
   ['M · 4×2 por fila · 5 imanes elegidos', { innerL: 180, innerW: 100, lidDepth: 22, orgCols: 4, orgRows: 2, orgCover: 'row', orgLatch: 'magnet', magnetCount: 5 }],
   // En la base (mismo organizador, girado) y en las dos mitades.
@@ -276,9 +278,12 @@ function checkSide(P, r, rs, side, both) {
     {
       // Cantidad: la sugerida (carga estimada / fuerza de una pareja) o la elegida.
       const mi = O.magnetInfo, asked = Number(P.magnetCount) || 0;
-      const okCount = O.panels.every((q) => (asked ? q.magnets.length === asked || (q.magnets.length < asked && !!mi.note) || q.magnets.length === asked + 1 : q.magnets.length >= Math.min(q.magnetPlan.suggested, 2)));
+      // Elegido a mano: exactamente ese número, o menos con aviso si no caben.
+      const okCount = O.panels.every((q) => (asked ? q.magnets.length === asked || (q.magnets.length < asked && !!mi.note) : q.magnets.length >= Math.min(q.magnetPlan.suggested, 2)));
       check(mi && mi.pull > 0 && mi.suggested >= 1 && okCount, `${tag}imanes por tapa: ${asked ? `pedidos ${asked}` : 'automático'}, puestos ${mi.placed.join('+')} (sugeridos ${mi.suggested}: ${mi.pull} g por pareja, carga ${mi.load} g)${mi.note ? ' — ' + mi.note : ''}`);
     }
+    // Un número impar elegido a mano sin sitio central libre no puede ser simétrico.
+    if (Number(P.magnetCount) % 2 === 1) sym = 0;
     check(sym < 0.05, `${tag}imanes repartidos simétricos respecto a la pestaña (${sym.toFixed(3)} mm)`);
   } else {
     check(want !== 'magnet' || !!O.magnetWarn, `${tag}traba de clic${want === 'magnet' ? ' (el imán no cabía: aviso)' : ''}`);

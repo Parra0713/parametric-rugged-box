@@ -468,8 +468,13 @@ function placeMagnets(D, B, G) {
       const center = valid.find((c) => Math.abs(c.x - mid) < 0.05);
       const pairs = valid.filter((c) => c.x > mid + 0.05 && valid.some((q) => Math.abs(q.x + c.x - 2 * mid) < 0.05))
         .sort((u, v) => u.x - v.x);
-      let n = Math.min(want, 2 * pairs.length + (center ? 1 : 0));
-      if (n % 2 && !center) n = n + 1 <= 2 * pairs.length ? n + 1 : n - 1;
+      // Automático: siempre simétrico (un impar sin centro libre se redondea).
+      // Elegido a mano: se respeta el número; si es impar y el centro lo
+      // ocupa el pozo, el imán suelto va en el sitio libre más cercano a él.
+      let n = Math.min(want, valid.length);
+      const oddOff = n % 2 && !center && Mg.count > 0;
+      if (n % 2 && !center && !oddOff) n = n + 1 <= 2 * pairs.length ? n + 1 : n - 1;
+      if (!oddOff) n = Math.min(n, 2 * pairs.length + (center ? 1 : 0));
       const half = [];
       for (let i = 0; i < Math.floor(n / 2); i++) {
         const t = mid + ((i + 0.5 + (n % 2) / 2) * width) / n;
@@ -480,6 +485,11 @@ function placeMagnets(D, B, G) {
       }
       picked = half.flatMap((c) => [c, valid.find((q) => Math.abs(q.x + c.x - 2 * mid) < 0.05)]);
       if (n % 2 && center) picked.push(center);
+      if (oddOff) {
+        const extra = valid.filter((c) => picked.every((q) => Math.abs(q.x - c.x) >= sep))
+          .sort((u, v) => Math.abs(u.x - mid) - Math.abs(v.x - mid))[0];
+        if (extra) picked.push(extra);
+      }
       if (!picked.length) picked = [center || valid[0]];
     }
     // `yc`: cara del carril del borde libre (el resalte de la tapa interior y
@@ -494,7 +504,10 @@ function placeMagnets(D, B, G) {
   const info = {
     pull: Mg.pull, load: Math.max(...plans.map((q) => q.load)), suggested: Math.max(...plans.map((q) => q.suggested)),
     asked: Mg.count, placed: plans.map((q) => q.placed),
-    note: short ? `solo caben ${Math.min(...plans.map((q) => q.placed))} imanes por tapa interior de los ${Mg.count} pedidos` : null,
+    note: short ? (() => {
+      const k = Math.min(...plans.map((q) => q.placed)), some = plans.some((q) => q.placed >= Mg.count);
+      return `${some ? 'en algunas tapas interiores ' : ''}solo ${k === 1 ? 'cabe 1 imán' : `caben ${k} imanes`} de los ${Mg.count} pedidos`;
+    })() : null,
   };
   return { ok: true, magnets: out, info };
 }
