@@ -21,7 +21,7 @@ import { M as Msg } from '../i18n/msg.js';
 export { contentModes };
 
 /** Versión de la aplicación (la misma que package.json; va en el LEEME y en el registro). */
-export const VERSION = '7.4.0';
+export const VERSION = '7.4.1';
 
 /* ------------------------------------------------------------------------ */
 /*  Valores por defecto                                                     */

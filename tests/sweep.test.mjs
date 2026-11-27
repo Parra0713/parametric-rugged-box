@@ -219,7 +219,8 @@ for (const c of cases) {
     const R = toMan(pt.mesh, pt.print);
     const helpers = pt.aids.map((x) => toMan(x.mesh));
     const helper = helpers.length ? M().union(helpers) : null;
-    const left = overhangRegions(R, helper, { angle: 52, step: 0.6, minArea: 4 });
+    // Como lo ve el slicer: una sección por capa (2° de margen sobre el ángulo).
+    const left = overhangRegions(R, helper, { angle: 52, step: D.lh, lw: D.lw, minArea: 4, helperGap: Math.max(0.4, D.lh * 1.5, P.finGap || 0) });
     const area = left.reduce((s, x) => s + x.area, 0);
     check(area < 20, `${pt.name}: voladizo sin soporte restante ${area.toFixed(0)} mm²`);
   }

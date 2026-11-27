@@ -104,7 +104,16 @@ registro interno del motor) y `logs/sweep-latest.json` (resumen). **Ejecuta
   completo tras tocar esto. `tests/mempeak.test.mjs` mide el pico de cada
   caja en un proceso nuevo y tiene presupuesto (205 mm, 18 tapas interiores,
   inclinada: 375 → 145 MB).
-- Soportes de voladizos (`overhangSupports`): la holgura con la pieza se
+- Detector de voladizos (`overhangRegions`): una sección por capa de
+  impresión (`step = D.lh`, a media capa, como el slicer; antes 0.6 mm y se
+  escapaban voladizos que el slicer sí veía). Las ayudas apoyan a través de
+  su holgura (`helperGap` = hueco de las aletas). Ignora < lw/2 de ancho y
+  < 3 mm². Devuelve `z` = base de la capa (el soporte acaba en límite de
+  capa). El barrido comprueba lo que queda igual, capa a capa.
+- Soportes de voladizos (`overhangSupports`): las tiras de capas seguidas
+  que se tocan se agrupan en UNA columna (hasta 2 líneas de alto) y la resta
+  de la pieza la escalona; si el voladizo empieza en la 2.ª capa, una capa
+  pegada debajo. La holgura con la pieza se
   resta en seis pasos evaluados (no la unión de seis copias casi iguales) y
   el aligerado es UN hueco (el soporte bajado 2 capas ∩ celdas de la
   rejilla), no rejilla + piel + pie unidos: mismas caras coincidentes =
@@ -310,6 +319,8 @@ de los textos del `SCHEMA` debe cumplirlos:
 
 Cifras en los textos: `fmtN`/`mm()`/`dims()` de `src/i18n/index.js`
 (separador decimal del idioma y espacio duro antes de la unidad).
+`tests/ui-guide.test.mjs` y `tests/ui.e2e.mjs` (asidero `window.__rugged`)
+comprueban estos puntos; un ajuste nuevo debe pasar ambos.
 
 ## Idiomas (i18n)
 
@@ -335,9 +346,7 @@ Cifras en los textos: `fmtN`/`mm()`/`dims()` de `src/i18n/index.js`
   clearance, walls, infill, overhang, bridge…
 - `npm run i18n` comprueba claves, huecos y claves usadas; `npm run i18n:new
   -- fr` crea la plantilla de un idioma nuevo. El registro técnico
-  (`D.log`) sigue en español: es para depurar. `tests/ui-guide.test.mjs` y
-`tests/ui.e2e.mjs` (asidero `window.__rugged`) comprueban estos puntos; un
-ajuste nuevo debe pasar ambos.
+  (`D.log`) sigue en español: es para depurar.
 
 ## Criterios de validación (los comprueba el barrido)
 
@@ -393,6 +402,8 @@ suben `node_modules/`, `scratch/`, `logs/` ni archivos de entorno o claves
 (ver `.gitignore`). `dist/rugged-box.html` SÍ se sube (es la app lista para
 usar): compílala (`npm run build`) en el mismo commit que cambie `src/`.
 Publicación: `.github/workflows/pages.yml` copia `dist/rugged-box.html` a
-GitHub Pages en cada push que la cambie; `release.yml` crea la release al
-subir una etiqueta `vX.Y.Z`, con la app adjunta y las notas de
-`docs/releases/vX.Y.Z.md` (escritas en tono natural, sin aire de IA).
+GitHub Pages en cada push que la cambie; `release.yml` crea la etiqueta y
+la release (con la app adjunta) al llegar a `main` unas notas nuevas en
+`docs/releases/vX.Y.Z.md` (versión de `package.json`; escritas en tono
+natural, sin aire de IA). También con una etiqueta `vX.Y.Z` o a mano desde
+Actions. Desde la nube no se pueden subir etiquetas: basta con las notas.

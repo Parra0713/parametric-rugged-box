@@ -711,7 +711,7 @@ function addAidsRaw(D, P, pt, solidNative, normals, G) {
   // detectan capa a capa contando con lo que ya sostienen las aletas.
   if (P.overhangSupports !== false) {
     const t0 = performance.now();
-    const regions = overhangRegions(R, fins?.solid ?? null, { angle: P.overhangAngle || 50 });
+    const regions = overhangRegions(R, fins?.solid ?? null, { angle: P.overhangAngle || 50, step: D.lh, lw: D.lw, helperGap: fins?.gap ?? 0 });
     release(mF, regions.map((r) => r.region));   // las aletas ya son malla: fuera
     const ov = overhangSupports(R, regions, D.lw, D.lh, { pitch: P.supportPitch || 3 });
     pt.tilt.overhangs = regions.length;

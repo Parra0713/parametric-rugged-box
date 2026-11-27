@@ -123,10 +123,17 @@ y la memoria WASM se libera de verdad en cada ciclo.
   contenido lo permite), banda más fina o pared con una línea menos (nunca
   < 4 líneas ni < 1.6 mm), y la aplica con un clic.
 * **Soportes de voladizos detectados capa a capa:** al inclinar, el programa
-  corta la pieza cada 0.6 mm y marca lo que sobresale más de 50° respecto a la
-  capa anterior (contando con lo que ya sostienen las aletas). Solo ahí genera
-  columnas en rejilla de 2 líneas con interfaz maciza de 2 capas, pie de 2
-  capas y separación de 1 capa con la pieza. Bisagras y cierres intactos son
+  corta la pieza como el slicer, una sección por capa de impresión (a media
+  altura de cada capa), y marca lo que sobresale más de 50° respecto a la
+  capa anterior, contando con lo que ya sostienen las aletas a través de su
+  holgura. Ignora astillas de menos de media línea de ancho y puntas de
+  menos de 3 mm² (el slicer las resuelve con un puente corto). Hasta v7.4.0
+  cortaba cada 0.6 mm: un voladizo más bajo que eso pasaba aquí y el slicer
+  sí lo marcaba. Solo donde hace falta genera columnas en rejilla de 2
+  líneas con interfaz maciza de 2 capas, pie de 2 capas y separación de 1
+  capa con la pieza; las tiras de capas seguidas se agrupan en una columna
+  escalonada, y un voladizo que empieza en la 2.ª capa recibe una capa
+  pegada debajo. Bisagras y cierres intactos son
   autoportantes a 45°; lo que sí necesita soporte (p. ej. la cara inferior de
   la banda en el extremo alto) queda cubierto.
 * **Apilable:** la base de arriba conserva la pared RECTA hasta la

@@ -213,7 +213,7 @@ export function supportFins(R, axis, lw, lh, opt = {}) {
   }
   release(m0, fins);
   if (!fins.length) return null;
-  return { solid: M().union(fins), volume: Math.round(vol), count: fins.length };
+  return { solid: M().union(fins), volume: Math.round(vol), count: fins.length, gap };
 }
 
 /** Volumen de una cuña maciza equivalente (para comparar el ahorro). */
@@ -242,36 +242,57 @@ export function wedgeVolume(R, lh) {
  * soporte en PLA/PETG con buena ventilación). Lo que no cumple es un voladizo
  * o una "isla" que empezaría en el aire (típico del primer borde de un nudillo
  * o de una mejilla de cierre cuando la caja se inclina 45°).
+ *
+ * Se corta como el slicer: una sección por capa (step = altura de capa), a
+ * media altura de cada capa. Con un paso mayor, un voladizo más bajo que el
+ * paso caía entre dos cortes y el slicer lo marcaba aunque aquí pasara.
+ * Las astillas más estrechas que media línea (lw/2) se ignoran: el slicer
+ * las cubre con el solape de la línea y suelen ser ruido del teselado.
  * @param R       sólido en orientación de impresión (z ≥ 0)
  * @param helper  sólido que ya da soporte (aletas), o null
- * @returns [{ z, region: CrossSection, area }]
+ * Las ayudas (aletas, soportes) se separan de la pieza a propósito para que
+ * se desprendan (`helperGap`, en vertical y en horizontal): su capa de debajo
+ * cuenta como apoyo a través de esa holgura, como el «top Z distance» de los
+ * soportes del slicer.
+ * @param opt     { step: altura de capa, lw: ancho de línea, angle, minArea, helperGap }
+ * @returns [{ z (base de la capa del voladizo), region: CrossSection, area }]
  */
 export function overhangRegions(R, helper, opt = {}) {
-  const step = opt.step || 0.6;
+  const step = opt.step || 0.2;
+  const sliver = (opt.lw || 0.45) / 4;     // radio de limpieza: quita lo de < lw/2 de ancho
   const tanT = Math.tan(((opt.angle || 50) * Math.PI) / 180);
-  const minA = opt.minArea || 1.0;
+  const minA = opt.minArea || 3;            // mm²: menos es una punta que el slicer cubre con un puente corto ("remove small overhangs")
   const bb = R.boundingBox();
-  const all = helper ? R.add(helper) : R;
+  const g = helper ? Math.max(0, opt.helperGap || 0) : 0;
   const out = [];
-  // Cientos de capas, cada una con sus cortes y desplazamientos: se libera
-  // lo de cada capa al acabarla (solo siguen vivos el corte anterior y las
-  // zonas encontradas). Era el mayor consumo de memoria de toda la caja.
+  // Cientos de capas (una por capa de impresión), cada una con sus cortes y
+  // desplazamientos: se libera lo de cada capa al acabarla (solo siguen vivos
+  // el corte anterior y las zonas encontradas). Era el mayor consumo de
+  // memoria de toda la caja.
   const regions = [];
-  let prev = all.slice(Math.min(0.1, step / 2));
+  // Lo que sostiene la capa z: la capa anterior de la pieza y, a través de
+  // su holgura, la de las ayudas.
+  const below = (z, r) => {
+    if (!helper) return r;
+    const h = helper.slice(Math.max(step / 2, z - step - g));
+    return h.isEmpty() ? r : r.add(g ? h.offset(g, 'Round', 2, 12) : h);
+  };
   const m0 = mark();
-  for (let z = step; z < bb.max[2] - 0.05; z += step) {
+  let last = R.slice(step / 2);                          // primera capa
+  for (let z = step * 1.5; z < bb.max[2] - 0.01; z += step) {
     const cur = R.slice(z);
     if (!cur.isEmpty()) {
+      const prev = below(z, last);
       let U = cur.subtract(prev.offset(step * tanT, 'Round', 2, 12));
-      // Quita astillas de menos de ~0.6 mm de ancho (ruido de teselado).
-      U = U.offset(-0.3, 'Square').offset(0.3, 'Square');
+      // Quita astillas de menos de media línea de ancho (ruido de teselado).
+      U = U.offset(-sliver, 'Square').offset(sliver, 'Square');
       for (const piece of U.decompose()) {
         const a = piece.area();
-        if (a >= minA) { out.push({ z, region: piece, area: a }); regions.push(piece); }
+        if (a >= minA) { out.push({ z: z - step / 2, region: piece, area: a }); regions.push(piece); }   // z = base de la capa: el soporte acaba en un límite de capa
       }
     }
-    prev = all.slice(z);
-    release(m0, [prev, ...regions]);
+    last = cur;
+    release(m0, [last, ...regions]);
   }
   return out;
 }
@@ -293,22 +314,40 @@ export function overhangSupports(R, regions, lw, lh, opt = {}) {
   const gapZ = opt.gapZ ?? lh;
   const gapXY = opt.gapXY ?? 0.4;
   const pitch = opt.pitch || 3;
+  // Un voladizo inclinado da una tira por capa. Las tiras seguidas y que se
+  // tocan se agrupan (hasta 2 líneas de alto, el espesor mínimo de pared:
+  // así la columna nunca atraviesa la pieza) y cada grupo es UNA columna
+  // hasta su tira más alta; la resta de la pieza de abajo le da la forma
+  // escalonada. Mucha menos geometría que una columna por capa.
+  const span = opt.span ?? 2 * lw;
+  const groups = [];
+  for (const r of [...regions].sort((a, b) => a.z - b.z)) {
+    const near = r.region.offset(0.5, 'Square');
+    const g = groups.find((q) => r.z - q.z1 <= lh * 1.01 && r.z - q.z0 <= span && !q.last.intersect(near).isEmpty());
+    if (g) { g.parts.push(r.region); g.z1 = r.z; g.last = r.region; }
+    else groups.push({ z0: r.z, z1: r.z, last: r.region, parts: [r.region] });
+  }
   const cols = [];
-  for (const { z, region } of regions) {
-    const top = z - gapZ;
+  for (const g of groups) {
+    const top = g.z1 - gapZ;
+    const foot = CS().union(g.parts).offset(0.3, 'Square');
     // Incluso un voladizo a 0.4 mm de la cama necesita algo debajo: 1–2
     // capas de soporte actúan como una mini‑balsa local.
-    if (top < lh * 0.99) continue;
-    cols.push(prism(region.offset(0.3, 'Square'), 0, top));
+    if (top >= lh * 0.99) cols.push(prism(foot, 0, top));
+    // Si empieza en la 2.ª capa no cabe la separación: una capa pegada a la
+    // pieza (como un brim por debajo) para que no se imprima en el aire.
+    else if (g.z0 >= lh * 0.99) cols.push(prism(foot, 0, g.z0));
   }
   if (!cols.length) return null;
   const m0 = mark();
   let S = M().union(cols);
   // Holgura con la pieza: solo el trozo de pieza que rodea las columnas
   // (las columnas engordadas 1 mm), así las uniones son pequeñas y rápidas.
-  const near = R.intersect(M().union(regions.filter((r) => r.z - gapZ >= lh * 0.99)
-    .map((r) => prism(r.region.offset(1.5, 'Square'), -1, r.z + 2))));
-  if (!near.isEmpty()) {
+  // Un solo prisma con la huella de todos (unión en 2D, barata) en vez de uno
+  // por voladizo: con una sección por capa salen muchas zonas pequeñas.
+  const used = regions.filter((r) => r.z - gapZ >= lh * 0.99);
+  const near = used.length ? R.intersect(prism(CS().union(used.map((r) => r.region.offset(1.5, 'Square'))), -1, Math.max(...used.map((r) => r.z)) + 2)) : null;
+  if (near && !near.isEmpty()) {
     // Holgura con la pieza (encima y a los cuatro lados): seis restas
     // pequeñas, una tras otra y evaluando cada una. Unir antes las seis
     // copias casi coincidentes de la pieza era lo más lento de los soportes.
