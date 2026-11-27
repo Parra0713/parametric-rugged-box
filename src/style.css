@@ -188,6 +188,8 @@ select {
   background-repeat: no-repeat; background-position: right 9px center; background-size: 9px 13px;
 }
 select:hover { background-color: var(--fill-2); }
+/* Selector de idioma de la barra superior: tan ancho como su texto. */
+.actions select.lang { width: auto; min-width: 0; }
 option { background: var(--surface); color: var(--text); }
 
 /* Deslizador: pista fina con el tramo recorrido en el acento y botón blanco. */

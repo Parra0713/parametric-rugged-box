@@ -39,6 +39,7 @@ import { printedPin, filamentCap } from './pins.js';
 import { latches } from './latch.js';
 import { rrOffset } from './seal.js';
 import { fitsFlat } from '../optimizer.js';
+import { M as Msg } from '../i18n/msg.js';
 
 /** Parámetros que forman el perfil de calibración (de la impresora). */
 export const CAL_KEYS = ['filClr', 'clearance', 'clearanceL', 'tiltAdd', 'holeComp', 'sealClr', 'axialGap',
@@ -92,32 +93,32 @@ export function calibPlan(P, opt = {}) {
 
   if (want(usesFil)) {
     tests.push({
-      id: 'A', key: 'filClr', label: 'Filamento en bisagra (agujero horizontal)', piece: 'hinge', mode: 'filament', pinD: 1.75, len: Lk,
+      id: 'A', key: 'filClr', label: Msg('cal.A.label'), piece: 'hinge', mode: 'filament', pinD: 1.75, len: Lk,
       variants: series('filClr', filC).map((v, i) => ({ n: i + 1, value: v, d: r3(1.75 + 2 * v) })),
-      how: 'Mete un trozo recto de filamento en cada nudillo. Elige el número en el que entra empujando con la mano y gira sin bailar.',
+      how: Msg('cal.A.how'),
     });
   }
   const pinRow = (id, key, pinD, center, label) => ({
     id, key, label, piece: 'hinge', mode: 'printed', pinD, len: Lk,
     variants: series(key, center).map((v, i) => ({ n: i + 1, value: v, d: r3(pinD + 2 * v) })),
-    how: `Pasa el pasador de prueba Ø${pinD} (impreso acostado, como los de la caja) por cada nudillo. Elige el número en el que entra a mano, los dientes hacen clic y gira sin bailar.`,
+    how: Msg('cal.P.how', { d: pinD }),
   });
   if (mode === 'universal') {
-    tests.push(pinRow('P3', 'clearance', 3, P.clearance ?? 0.25, 'Pasador impreso Ø3 (cajas XS a M)'));
-    tests.push(pinRow('P5', 'clearanceL', 5, P.clearanceL ?? P.clearance ?? 0.25, 'Pasador impreso Ø5 (cajas grandes)'));
+    tests.push(pinRow('P3', 'clearance', 3, P.clearance ?? 0.25, Msg('cal.P3.label')));
+    tests.push(pinRow('P5', 'clearanceL', 5, P.clearanceL ?? P.clearance ?? 0.25, Msg('cal.P5.label')));
   } else if (usesPrinted || ((D.org && D.org.has) || (D.orgB && D.orgB.has))) {
     // Pasador impreso de la caja o, si solo usa filamento, el eje Ø3 de las
     // tapas interiores del organizador (misma unión: eje acostado en agujero
     // horizontal de la tapa).
     const d = !usesPrinted ? 3 : D.pinMode === 'printed' ? D.pinD : D.latchPinD;
     const c0 = !usesPrinted ? (P.clearance ?? 0.25) : D.pinMode === 'printed' ? D.clr : D.clrL;
-    tests.push({ ...pinRow('P', 'clearance', d, c0, usesPrinted ? `Pasador impreso Ø${d} de esta caja` : 'Eje Ø3 de las tapas interiores'), scaled: true });
+    tests.push({ ...pinRow('P', 'clearance', d, c0, usesPrinted ? Msg('cal.P.labelBox', { d }) : Msg('cal.P.labelAxle')), scaled: true });
   }
   if (want(tilted)) {
     tests.push({
-      id: 'F', key: 'tiltAdd', label: 'Agujero inclinado 45° (cajas que no caben planas)', piece: 'tilted', mode: 'filament', pinD: 1.75, len: Lk,
+      id: 'F', key: 'tiltAdd', label: Msg('cal.F.label'), piece: 'tilted', mode: 'filament', pinD: 1.75, len: Lk,
       filC, variants: series('tiltAdd', P.tiltAdd ?? 0).map((v, i) => ({ n: i + 1, value: v, d: r3(1.75 + 2 * (filC + v)) })),
-      how: 'Mete filamento en cada nudillo inclinado (como quedan las bisagras cuando la caja se imprime inclinada). Elige el que entra y gira sin bailar.',
+      how: Msg('cal.F.how'),
     });
   }
   // B: agujero vertical (barril del cierre, tapones). En universal, con el
@@ -125,37 +126,35 @@ export function calibPlan(P, opt = {}) {
   const latchFil = mode === 'universal' || D.latchPinMode === 'filament';
   const latchHole = latchFil ? r3(1.75 + 2 * filC) : r3(D.latchPinD + 2 * D.clrL);
   tests.push({
-    id: 'B', key: 'holeComp', label: 'Agujero vertical (cierre)' + (mode === 'universal' || usesFil ? ' y tapones' : ''), piece: 'bore',
+    id: 'B', key: 'holeComp', label: Msg('cal.B.label', { caps: mode === 'universal' || usesFil }), piece: 'bore',
     mode: latchFil ? 'filament' : 'printed', pinD: latchFil ? 1.75 : D.latchPinD, baseHole: latchHole,
     len: mode === 'universal' ? 6 : r3(Math.min(8, Math.max(4, D.latchW))), caps: mode === 'universal' || usesFil,
     variants: series('holeComp', P.holeComp ?? 0.15).map((v, i) => ({ n: i + 1, value: v, d: r3(latchHole + v), cap: r3(1.55 + v) })),
-    how: (latchFil ? 'Mete filamento en cada barril' : 'Pasa el pasador de prueba por cada barril')
-      + '. Elige el número en el que gira libre sin juego visible'
-      + (mode === 'universal' || usesFil ? '; parte cada tapón de su pestaña y comprueba que agarra el filamento sin rajarse.' : '.'),
+    how: Msg('cal.B.how', { fil: latchFil, caps: mode === 'universal' || usesFil }),
   });
   // C: lengüeta y ranura (deslizante entre paredes verticales).
   const twRef = mode === 'universal' ? 2.2 : D.tw;
   tests.push({
-    id: 'C', key: 'sealClr', label: 'Lengüeta en la ranura', piece: 'tongue', tw: twRef, tl: mode === 'universal' ? 2.4 : D.tl,
+    id: 'C', key: 'sealClr', label: Msg('cal.C.label'), piece: 'tongue', tw: twRef, tl: mode === 'universal' ? 2.4 : D.tl,
     variants: series('sealClr', P.sealClr ?? 0.25).map((v, i) => ({ n: i + 1, value: v, w: r3(twRef + 2 * v) })),
-    how: 'Mete la lengüeta (pieza C) en cada ranura. Elige el número en el que entra y sale deslizando sin forzar y sin bailar de lado.',
+    how: Msg('cal.C.how'),
   });
   // d: apilado (marco de la tapa y pie de la base, los dos en la primera capa).
   if (want(D.stack)) {
     tests.push({
-      id: 'd', key: 'stackClr', label: 'Apilado (primera capa)', piece: 'stack',
+      id: 'd', key: 'stackClr', label: Msg('cal.d.label'), piece: 'stack',
       variants: series('stackClr', P.stackClr ?? 0.3).map((v, i) => ({ n: i + 1, value: v })),
-      how: 'Encaja la pieza d (la base de arriba) sobre cada marco por las caras que tocaron la cama, como se apilan dos cajas. Elige el número en el que asienta del todo sin forzar y sin juego lateral.',
+      how: Msg('cal.d.how'),
     });
   }
   // E: precarga del cierre (gancho real sobre el retén, que es un puente).
   tests.push({
-    id: 'E', key: 'latchPre', label: 'Precarga del cierre', piece: 'latch', ref: mode === 'universal' ? 'S' : D.cls,
+    id: 'E', key: 'latchPre', label: Msg('cal.E.label'), piece: 'latch', ref: mode === 'universal' ? 'S' : D.cls,
     // 3 puestos con paso doble: el útil es la probeta más pesada y la
     // precarga tolera más que un ajuste de pasador.
     stepE: 2 * step,
     variants: series('latchPre', P.latchPre ?? 0.15, 3, 2 * step).map((v, i) => ({ n: i + 1, value: v })),
-    how: 'Monta el cierre de prueba con su pasador en cada puesto y ciérralo. Elige el número en el que cierra con un clic firme, queda sin juego y se abre con la uña sin forzar.',
+    how: Msg('cal.E.how'),
   });
 
   // Solo algunas probetas (repetir las que quedaron fuera de rango o medir
@@ -168,10 +167,8 @@ export function calibPlan(P, opt = {}) {
     version: 2, mode, created: Date.now(), fine: !!opt.fine, step, n,
     partial: only || onlyKeys ? kept.map((t) => t.id) : null,
     lw: D.lw ?? P.lineWidth, lh: D.lh ?? P.layerH, cls: D.cls,
-    summary: (mode === 'universal'
-      ? 'universal (todas las cajas, XS a L)'
-      : `esta caja: clase ${D.cls}${usesFil ? ' · filamento' : ''}${usesPrinted ? ' · pasador impreso' : ''}${tilted ? ' · inclinada' : ''}${D.stack ? ' · apilable' : ''}`)
-      + (only || onlyKeys ? ` · solo ${kept.map((t) => t.id).join(', ')}` : ''),
+    summary: Msg('cal.summary', { universal: mode === 'universal', cls: D.cls, fil: usesFil, printed: usesPrinted, tilted, stack: !!D.stack,
+      only: only || onlyKeys ? kept.map((t) => t.id).join(', ') : '' }),
     tests: kept,
   };
 }
@@ -212,10 +209,10 @@ export function applyResults(plan, choices, current) {
   };
   const byId = (id) => plan.tests.find((t) => t.id === id);
   const tA = byId('A');
-  if (tA) { const v = pick(tA); if (v != null) set('filClr', v, 'probeta A'); }
+  if (tA) { const v = pick(tA); if (v != null) set('filClr', v, Msg('cal.why.test', { id: 'A' })); }
   for (const id of ['P3', 'P5']) {
     const t = byId(id);
-    if (t) { const v = pick(t); if (v != null) set(t.key, v, `probeta ${id}`); }
+    if (t) { const v = pick(t); if (v != null) set(t.key, v, Msg('cal.why.test', { id })); }
   }
   const tP = byId('P');
   if (tP) {
@@ -225,8 +222,8 @@ export function applyResults(plan, choices, current) {
     if (v != null) {
       const a = current.clearance ?? 0.25, b = current.clearanceL ?? a;
       const now = a + (b - a) * Math.min(1, Math.max(0, (tP.pinD - 3) / 2));
-      set('clearance', a + (v - now), `probeta P (Ø${tP.pinD})`);
-      set('clearanceL', b + (v - now), `probeta P (Ø${tP.pinD})`);
+      set('clearance', a + (v - now), Msg('cal.why.testD', { id: 'P', d: tP.pinD }));
+      set('clearanceL', b + (v - now), Msg('cal.why.testD', { id: 'P', d: tP.pinD }));
     }
   }
   const tF = byId('F');
@@ -234,7 +231,7 @@ export function applyResults(plan, choices, current) {
     const v = pick(tF);
     // Medido con el filamento como calibre: holgura absoluta a 45° menos la
     // horizontal (que A puede haber cambiado a la vez).
-    if (v != null) set('tiltAdd', tF.filC + v - values.filClr, 'probeta F');
+    if (v != null) set('tiltAdd', tF.filC + v - values.filClr, Msg('cal.why.test', { id: 'F' }));
   }
   const tB = byId('B');
   if (tB) {
@@ -249,28 +246,28 @@ export function applyResults(plan, choices, current) {
         const a = values.clearance, b = values.clearanceL ?? a;
         newBase = tB.pinD + 2 * (a + (b - a) * Math.min(1, Math.max(0, (tB.pinD - 3) / 2)));
       }
-      set('holeComp', d - newBase, `probeta B (agujero Ø${r3(d)})`);
+      set('holeComp', d - newBase, Msg('cal.why.testHole', { id: 'B', d: r3(d) }));
     }
   }
   const tC = byId('C');
   if (tC) {
     const s = pick(tC);
     if (s != null) {
-      set('sealClr', s, 'probeta C');
+      set('sealClr', s, Msg('cal.why.test', { id: 'C' }));
       // Misma familia (deslizante entre paredes verticales):
       //   nudillos +0.15 (caras largas que no deben rozar al girar)
       //   inserto +0.05 · objeto en su hueco +0.35 (objetos reales)
       //   apilado +0.05 solo si no se midió con la probeta d
-      set('axialGap', s + 0.15, 'deducida de C');
-      set('insertTol', s + 0.05, 'deducida de C');
-      set('pocketTol', Math.max(0.4, s + 0.35), 'deducida de C');
-      if (!byId('d') || choices.d == null || choices.d === '') set('stackClr', s + 0.05, 'deducida de C');
+      set('axialGap', s + 0.15, Msg('cal.why.from', { id: 'C' }));
+      set('insertTol', s + 0.05, Msg('cal.why.from', { id: 'C' }));
+      set('pocketTol', Math.max(0.4, s + 0.35), Msg('cal.why.from', { id: 'C' }));
+      if (!byId('d') || choices.d == null || choices.d === '') set('stackClr', s + 0.05, Msg('cal.why.from', { id: 'C' }));
     }
   }
   const tD = byId('d');
-  if (tD) { const v = pick(tD); if (v != null) set('stackClr', v, 'probeta d'); }
+  if (tD) { const v = pick(tD); if (v != null) set('stackClr', v, Msg('cal.why.test', { id: 'd' })); }
   const tE = byId('E');
-  if (tE) { const v = pick(tE); if (v != null) set('latchPre', v, 'probeta E'); }
+  if (tE) { const v = pick(tE); if (v != null) set('latchPre', v, Msg('cal.why.test', { id: 'E' })); }
   return { values, changes, retest, retestIds };
 }
 
@@ -575,12 +572,12 @@ export function buildCalibration(P, plan) {
     };
     for (const t of plan.tests) {
       if (t.piece === 'hinge') {
-        items.push({ id: 'cal' + t.id, name: `${t.id} · ${t.label}`, man: hingeBar(t, G) });
+        items.push({ id: 'cal' + t.id, name: `${t.id} · ${t.key}`, label: t.label, man: hingeBar(t, G) });
         if (t.mode === 'printed') pinFor(D, t.len + 0.2, t.pinD, t.variants[2]?.value ?? 0.25, 'cal' + t.id + 'pin', `${t.id} · pasador de prueba Ø${t.pinD}`);
       } else if (t.piece === 'tilted') {
-        items.push({ id: 'calF', name: `F · ${t.label}`, man: tiltedBar(t, G) });
+        items.push({ id: 'calF', name: `F · ${t.key}`, label: t.label, man: tiltedBar(t, G) });
       } else if (t.piece === 'bore') {
-        items.push({ id: 'calB', name: `B · ${t.label}`, man: borePlate(t, G, D) });
+        items.push({ id: 'calB', name: `B · ${t.key}`, label: t.label, man: borePlate(t, G, D) });
         if (t.mode === 'printed') pinFor(D, t.len + 0.2, t.pinD, t.variants[2]?.value ?? 0.25, 'calBpin', `B · pasador de prueba Ø${t.pinD}`);
       } else if (t.piece === 'tongue') {
         items.push({ id: 'calC', name: 'C · ranuras', man: grooveBlock(t, G) });

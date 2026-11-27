@@ -19,6 +19,7 @@
  */
 import { derive, octagonPts } from './engine/params.js';
 import { hull2D, fitAngle } from './bedfit.js';
+import { M as Msg } from './i18n/msg.js';
 
 /** Desplaza hacia dentro un polígono convexo antihorario `d` mm. */
 function insetConvex(pts, d) {
@@ -100,10 +101,10 @@ export function optimize(P, cmax) {
     if (b !== P.bandProud) cost += 1.0 * ((P.bandProud || D0.bo) - (b || D0.bo)) + 0.3;
     if (w !== P.wall) cost += 3 * (P.wall - w) + 0.5;
     const changes = [];
-    if (dc > 0) changes.push(`esquinas recortadas ${c} mm${cmax != null ? ' (el contenido sigue libre)' : ` (interior −${Math.round(2 * c * c)} mm²)`}`);
-    if (P.cornerRibs && !rb && c === 0) changes.push('sin nervios de esquina');
-    if (b !== P.bandProud) changes.push(`vuelo de banda ${b} mm`);
-    if (w !== P.wall) changes.push(`pared ${w} mm (${Math.round(w / lw)} líneas)`);
+    if (dc > 0) changes.push(Msg('opt.corners', { mm: c, free: cmax != null, area: Math.round(2 * c * c) }));
+    if (P.cornerRibs && !rb && c === 0) changes.push(Msg('opt.noRibs'));
+    if (b !== P.bandProud) changes.push(Msg('opt.band', { mm: b }));
+    if (w !== P.wall) changes.push(Msg('opt.wall', { mm: w, lines: Math.round(w / lw) }));
     options.push({ cost, changes, P: Q, fit: f });
   }
   if (!options.length) return { status: 'none', fit: f0 };
@@ -111,7 +112,7 @@ export function optimize(P, cmax) {
   // Alternativas distintas entre sí (por tipo de cambio).
   const seen = new Set(), alts = [];
   for (const o of options) {
-    const key = o.changes.map((c) => c.split(' ')[0]).join('+');
+    const key = o.changes.map((c) => c.k).join('+');
     if (!seen.has(key)) { seen.add(key); alts.push(o); }
     if (alts.length >= 3) break;
   }

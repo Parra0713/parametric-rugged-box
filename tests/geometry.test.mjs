@@ -13,6 +13,7 @@
 import Module from 'manifold-3d';
 import { init, build, _internal } from '../src/engine/engine.js';
 import { DEFAULTS } from '../src/engine/params.js';
+import { tm } from '../src/i18n/index.js';
 
 await init(Module);
 const { derive, hinges, latches, buildBase, buildLid, M, cleanup } = _internal;
@@ -56,7 +57,7 @@ for (const c of cases) {
   check(res.ok, `build en ${res.ms} ms (${Math.round(performance.now() - t0)} ms total)`);
   for (const p of res.parts) check(p.status === 'NoError' && p.tris > 0, `${p.name}: ${p.tris} tri, ${p.volume} mm³`);
   check(res.D.hinge.kl >= 4 && res.D.latchW >= 6, `mecánica mínima: nudillo ${res.D.hinge.kl} mm, cierre ${res.D.latchW} mm`);
-  if (res.D.warn.length) console.log('    avisos:', res.D.warn.join(' | '));
+  if (res.D.warn.length) console.log('    avisos:', res.D.warn.map(tm).join(' | '));
 
   // Geometría cruda para colisiones (sin pies: no afectan).
   const D = derive(P);

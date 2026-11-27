@@ -22,6 +22,7 @@ import Module from 'manifold-3d';
 import { init, build } from '../src/engine/engine.js';
 import { calibPlan, buildCalibration, applyResults, CAL_KEYS, CAL_LIMITS } from '../src/engine/calib.js';
 import { DEFAULTS, derive } from '../src/engine/params.js';
+import { tm } from '../src/i18n/index.js';
 
 await init(Module);
 let fails = 0;
@@ -192,8 +193,8 @@ console.log('\nRepetición parcial');
   const again = calibPlan(P1, { only: res.retestIds });
   const tA = again.tests.find((t) => t.id === 'A');
   const lastA = plan.tests.find((t) => t.id === 'A').variants.at(-1).value;
-  check(again.tests.map((t) => t.id).join(',') === 'A,B' && again.partial && /solo A, B/.test(again.summary),
-    `el test nuevo solo lleva ${again.tests.map((t) => t.id).join(', ')} (${again.summary})`);
+  check(again.tests.map((t) => t.id).join(',') === 'A,B' && again.partial && /solo A, B/.test(tm(again.summary)),
+    `el test nuevo solo lleva ${again.tests.map((t) => t.id).join(', ')} (${tm(again.summary)})`);
   check(tA.variants[Math.floor(tA.variants.length / 2)].value > lastA, `A se centra más allá de la más holgada (${lastA} → centro ${tA.variants[Math.floor(tA.variants.length / 2)].value})`);
   const partial = calibPlan({ ...P0, pinMode: 'printed' }, { mode: 'box', onlyKeys: ['clearance'] });
   check(partial.tests.length === 1 && partial.tests[0].key === 'clearance', `solo lo que falta: ${partial.tests.map((t) => t.id).join(', ')}`);

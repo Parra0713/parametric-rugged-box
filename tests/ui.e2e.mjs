@@ -38,7 +38,8 @@ const check = (ok, msg) => { console.log(`${ok ? '  ✔' : '  ✘'} ${msg}`); if
 const browser = await chromium.launch({ args: ['--use-gl=swiftshader', '--enable-unsafe-swiftshader', '--ignore-gpu-blocklist', '--js-flags=--expose-gc'] });
 const problems = [];
 const open = async (opts = {}) => {
-  const ctx = await browser.newContext({ viewport: { width: 1440, height: 900 }, ...opts });
+  // Navegador en español salvo que se pida otro idioma (sección «Idiomas»).
+  const ctx = await browser.newContext({ viewport: { width: 1440, height: 900 }, locale: 'es-ES', ...opts });
   const page = await ctx.newPage();
   page.on('console', (m) => { if (m.type() === 'error') problems.push(m.text()); });
   page.on('pageerror', (e) => problems.push('excepción: ' + e.message));
@@ -225,6 +226,43 @@ console.log('\nFugas de memoria y rendimiento de la interfaz');
   check(lag < 250, `la interfaz no se bloquea al cambiar un ajuste (2 fotogramas en ${Math.round(lag)} ms)`);
   await idle(p4);
   await c4.close();
+}
+
+/* 8. Idiomas ------------------------------------------------------- */
+console.log('\nIdiomas');
+{
+  // Un navegador en inglés abre en inglés; con todo desplegado no queda español
+  // (salvo el registro técnico, que es para depurar).
+  const { ctx: c5, page: p5 } = await open({ locale: 'en-US' });
+  await p5.evaluate(() => {
+    const R = window.__rugged;
+    for (const [k, v] of Object.entries({ insertMode: 'org', lidMode: 'pockets', orgBCover: 'cell', orgLatch: 'magnet', sealMode: 'cord', pinMode: 'filament', eco: true })) R.setParam(k, v);
+  });
+  await idle(p5);
+  const scan = () => p5.evaluate(() => {
+    const out = [];
+    const exp = document.querySelector('.expert input'); if (exp && !exp.checked) exp.click();
+    for (const tb of document.querySelectorAll('#params [data-tab]')) { tb.click(); out.push(document.querySelector('#params').innerText); }
+    document.querySelectorAll('#info details').forEach((d) => { d.open = true; });
+    const info = document.querySelector('#info').cloneNode(true);
+    info.querySelectorAll('[data-fold="log"]').forEach((n) => n.remove());
+    out.push(info.innerText, document.querySelector('header').innerText, document.querySelector('.toolbar').innerText);
+    document.querySelectorAll('[title],[aria-label]').forEach((n) => out.push(n.title || '', n.getAttribute('aria-label') || ''));
+    document.querySelectorAll('option').forEach((o) => out.push(o.textContent));
+    return { lang: document.documentElement.lang, text: out.join('\n') };
+  });
+  const en = await scan();
+  const left = [...new Set(en.text.split('\n').filter((l) => /[áéíóúñ¿¡]|\b(de|del|la|las|el|los|con|para|una?|tapa|caja)\b/i.test(l) && !/Español/.test(l)))];
+  check(en.lang === 'en' && !left.length, `navegador en inglés: interfaz en inglés${left.length ? ' — quedan: ' + left.slice(0, 4).join(' | ') : ''}`);
+  // Cambio desde el selector: inmediato, sin recalcular, y se recuerda.
+  const before = await p5.evaluate(() => window.__rugged.state.result);
+  await p5.selectOption('#lang', 'es');
+  const es = await scan();
+  const same = await p5.evaluate(() => window.__rugged.state.result).then((r) => JSON.stringify(r?.D?.inner) === JSON.stringify(before?.D?.inner));
+  const leftEn = [...new Set(es.text.split('\n').filter((l) => /\b(the|with|lid|box|settings?|width|hinges?|latch(es)?)\b/i.test(l) && !/English|Rugged Box|Gridfinity/.test(l)))];
+  check(es.lang === 'es' && !leftEn.length, `al elegir español todo cambia${leftEn.length ? ' — quedan: ' + leftEn.slice(0, 4).join(' | ') : ''}`);
+  check(await p5.evaluate(() => localStorage.getItem('ruggedbox.lang')) === 'es' && same && !(await p5.isVisible('#busy')), 'el idioma elegido se recuerda y no se recalcula la caja');
+  await c5.close();
 }
 
 check(!problems.length, `sin errores de consola ni diálogos del navegador${problems.length ? ' — ' + [...new Set(problems)].slice(0, 4).join(' | ') : ''}`);

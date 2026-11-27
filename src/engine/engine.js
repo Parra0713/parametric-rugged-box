@@ -28,6 +28,7 @@ import { ORG } from './orgLayout.js';
 import { transformVerts, hull2D, fitAngle, tiltChoose, rotatedExtent } from '../bedfit.js';
 import { fitsFlat } from '../optimizer.js';
 import { contactCut, supportFins, wedgeVolume, rotAxis, invRigid, overhangRegions, overhangSupports } from './tilt.js';
+import { M as Msg } from '../i18n/msg.js';
 
 /* ---------------- Matrices 4×4 (columna mayor) ---------------- */
 const I4 = () => [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1];
@@ -195,7 +196,7 @@ function buildBase(D, H, L, report) {
     const z = c.z;
     const zg = Math.max(z, zLo + v);
     const ok = D.shadow && zg - z <= 0.8 * v && zg + v <= zHi;
-    report.push({ part: 'Base', z, drop: c.drop, masked: ok ? 'ranura de sombra' : D.stack && z < zLo ? 'chaflán de apilado' : z >= zc - 1.2 ? 'banda' : 'no' });
+    report.push({ part: 'base', z, drop: c.drop, masked: ok ? 'shadow' : D.stack && z < zLo ? 'stackChamfer' : z >= zc - 1.2 ? 'band' : 'no' });
     if (ok && grooves.length < 2) grooves.push(r2(zg));
   }
   for (const z of grooves) core = core.subtract(vGroove(D, t, z));
@@ -331,8 +332,8 @@ function buildLid(D, P, H, L, svg, report) {
     const zp = Math.max(c.z, zLoP + v);                      // en impresión (desde la cara superior)
     const zw = r2(zT - zp);                                  // altura en mundo
     const ok = D.shadow && zp - c.z <= 0.8 * v && zw - v >= zc + 1.0;
-    report.push({ part: 'Tapa', z: c.z, drop: c.drop,
-      masked: ok ? 'ranura de sombra' : D.stack && c.z < ce ? 'chaflán de apilado' : zT - c.z < zc + 1 ? 'banda' : 'no' });
+    report.push({ part: 'lid', z: c.z, drop: c.drop,
+      masked: ok ? 'shadow' : D.stack && c.z < ce ? 'stackChamfer' : zT - c.z < zc + 1 ? 'band' : 'no' });
     if (ok && grooves.length < 2) grooves.push(zw);
   }
   for (const z of grooves) core = core.subtract(vGroove(D, t, z));
@@ -606,7 +607,7 @@ function addAidsRaw(D, P, pt, solidNative, normals, G) {
         const bridges = clipToBed(ears.bridges, hull, fit.angle, P.bedX, P.bedY);
         if (!body.isEmpty()) {
           const solid = unionAll([prism(body, 0, 2 * D.lh), bridges.isEmpty() ? null : prism(bridges, 0, D.lh)]);
-          pt.aids.push({ name: 'Orejas anti‑warping (retiro fácil)', ...meshOf(solid) });
+          pt.aids.push({ name: 'Orejas anti‑warping (retiro fácil)', label: Msg('aid.ears'), ...meshOf(solid) });
         }
       }
     }
@@ -705,7 +706,7 @@ function addAidsRaw(D, P, pt, solidNative, normals, G) {
     ...tilt, cut: Math.round(cut.h * 100) / 100, contact: cut.width, symmetric,
     finVol: fins?.volume ?? 0, finCount: fins?.count ?? 0, wedgeVol: wedgeVolume(R, D.lh),
   };
-  if (fins) pt.aids.push({ name: `Aletas de soporte (${fins.count} × ${tilt.alpha}° sobre ${tilt.axis})`, ...meshOf(fins.solid) });
+  if (fins) pt.aids.push({ name: `Aletas de soporte (${fins.count} × ${tilt.alpha}° sobre ${tilt.axis})`, label: Msg('aid.fins', { n: fins.count, a: tilt.alpha, axis: tilt.axis }), ...meshOf(fins.solid) });
   // Voladizos de las partes salientes (nudillos, mejillas, retenes): se
   // detectan capa a capa contando con lo que ya sostienen las aletas.
   if (P.overhangSupports !== false) {
@@ -716,7 +717,7 @@ function addAidsRaw(D, P, pt, solidNative, normals, G) {
     pt.tilt.overhangs = regions.length;
     pt.tilt.overhangArea = Math.round(regions.reduce((a, r) => a + r.area, 0));
     if (ov) {
-      pt.aids.push({ name: `Soportes de voladizos (${ov.count} zonas)`, ...meshOf(ov.solid) });
+      pt.aids.push({ name: `Soportes de voladizos (${ov.count} zonas)`, label: Msg('aid.supports', { n: ov.count }), ...meshOf(ov.solid) });
       pt.tilt.ovVol = ov.volume;
       pt.tilt.ovCount = ov.count;
     }
@@ -778,7 +779,7 @@ export function build(P, svg, opt = {}) {
   D.log = [];
   let tS = performance.now();
   const stage = (name) => { const t = performance.now(); log(D, `${name}: ${Math.round(t - tS)} ms`); tS = t; };
-  if (D.eco) log(D, `modo ahorro de material: ${D.ecoChanges.join(', ') || 'ya estaba en mínimos'}`);
+  if (D.eco) log(D, `modo ahorro de material: ${D.ecoChanges.length} cambios`);
   if (D.tilted) log(D, `impresión inclinada prevista: agujeros de bisagra y cierre ${D.tiltAdd >= 0 ? '+' : ''}${D.tiltAdd} mm por lado`);
   log(D, `clase ${D.cls} · interior ${D.Li}×${D.Wi} · base ${D.Db} + tapa ${D.Dl} mm · pared ${D.t} · banda ${D.bo}${D.cham ? ` · octógono ${D.cham}` : ''}${D.stack ? ' · apilable' : ''}${D.rot90 ? ' · girada 90°' : ''}`);
   log(D, `bisagras ${D.hinge.n}×${D.hinge.nk} (nudillo ${D.hinge.kl} mm) en x=${D.hinge.xs.join(', ')} · cierres ${D.latch.n}×${D.latchW} mm en x=${D.latch.xs.join(', ')}`);
@@ -899,10 +900,10 @@ export function build(P, svg, opt = {}) {
           const piece = g.intersect(M().cube([xb - xa, gW + 20, 10]).translate([xa, -gW / 2 - 10, -1]));
           const cx = (Math.max(xa, -L0) + Math.min(xb, L0)) / 2;
           parts.push(part('gasket', `Junta (tramo ${k + 1}/${n})`, piece.translate([-cx, 0, 0]), {
-            print: I4(), instances: [T(cx, 0, zg)], qty: 1, material: 'TPU 95A', key: `gasket${k}`,
+            print: I4(), instances: [T(cx, 0, zg)], qty: 1, material: 'TPU 95A', key: `gasket${k}`, label: Msg('part.gasketPiece', { k: k + 1, n }),
           }, normals));
         }
-        D.warn.push(`La junta no cabe entera en la cama: se divide en ${n} tramos rectos.`);
+        D.warn.push(Msg('warn.gasketSplit', { n }));
       }
     }
     release(mG);
@@ -919,7 +920,7 @@ export function build(P, svg, opt = {}) {
       addAids(D, P, pt, () => solid, normals, { hx: D.Li / 2 - tol, hy: D.Wi / 2 - tol, wall: 2 * D.lw + 0.6, mech: false });
     };
     if ((want('A') && fillB === 'pockets') || (want('B') && fillL === 'pockets')) {
-      if (!hasObjs && !D.warn.some((w) => w.startsWith('Inserto con huecos'))) D.warn.push('Inserto con huecos: añade los objetos (SVG) en la pestaña Contenido (se genera en blanco).');
+      if (!hasObjs && !D.warn.some((w) => w.k === 'warn.pocketsNoObjects')) D.warn.push(Msg('warn.pocketsNoObjects'));
     }
     if (want('A') && (fillB === 'blank' || fillB === 'pockets')) {
       const m0 = mark();
@@ -928,6 +929,7 @@ export function build(P, svg, opt = {}) {
       const ins = memoSolid(memoKey('ins', D.Li, D.Wi, D.ri, D.cham, D.seg, D.fc, D.lw, D.lh, D.Db, D.floorTop, D.draft, D.eco, pk,
         INS_KEYS.map((k) => P[k]), pk ? polys : null), () => baseInsert(D, P, polys, pk));
       const ip = part('insert', pk ? 'Inserto con alojamientos' : 'Inserto', ins.solid, {
+        label: Msg(pk ? 'part.insertPockets' : 'part.insert'),
         print: ins.print, instances: [T(0, 0, z0)], qty: 1, material: 'PLA (relleno 0 %, 2 paredes)',
       }, normals);
       insAids(ip, ins.solid);
@@ -940,11 +942,12 @@ export function build(P, svg, opt = {}) {
       const m0 = mark();
       const t1 = performance.now();
       const pk = fillL === 'pockets' && !!hasObjs;
-      if (D.Dl < 3) D.warn.push('Tapa demasiado baja para un inserto (< 3 mm de profundidad).');
+      if (D.Dl < 3) D.warn.push(Msg('warn.lidTooShallowInsert'));
       else {
         const li = memoSolid(memoKey('insL', D.Li, D.Wi, D.ri, D.cham, D.seg, D.fcl, D.lw, D.lh, D.Dl, D.Hb, D.draft, D.eco, pk,
           INS_KEYS.map((k) => P[k]), pk ? polys : null), () => lidInsert(D, P, polys, pk));
         const lp2 = part('insertLid', pk ? 'Inserto de tapa con alojamientos' : 'Inserto de tapa', li.solid, {
+          label: Msg(pk ? 'part.insertLidPockets' : 'part.insertLid'),
           print: li.print, instances: [T(0, 0, z0)], qty: 1, material: 'PLA (relleno 0 %, 2 paredes)',
         }, normals);
         insAids(lp2, li.solid);
@@ -1001,9 +1004,9 @@ export function build(P, svg, opt = {}) {
     // Integridad: una pieza rígida debe ser UN solo sólido (trozos sueltos =
     // geometría incompleta) y la malla debe ser válida.
     for (const p of parts) {
-      if (p.status !== 'NoError') D.warn.push(`${p.name}: malla con error (${p.status}).`);
+      if (p.status !== 'NoError') D.warn.push(Msg('warn.meshError', { part: p.label, status: p.status }));
       if (p.components > 1 && p.id !== 'gasket') {
-        D.warn.push(`${p.name}: ${p.components} trozos separados (revisa el registro).`);
+        D.warn.push(Msg('warn.meshPieces', { part: p.label, n: p.components }));
         log(D, `AVISO ${p.name}: ${p.components} componentes`);
       }
     }
@@ -1059,6 +1062,7 @@ function orgPanelParts(D, P, O, side, z0, normals) {
     const cx = (ref.ax0 + ref.ax1) / 2, cy = (ref.axis.y - ORG.rho + ref.y1) / 2;
     const pt = part('orgPanel', groups.size > 1 ? `${label} ${k}` : label, man, {
       key: `orgPanel${base ? 'B' : ''}${k - 1}`, side,
+      label: Msg(base ? 'part.orgPanelBase' : 'part.orgPanel', { k: groups.size > 1 ? k : 0 }),
       print: T(-cx, -cy, -O.zp0),
       instances: list.map((p) => (base ? mul(mul(T(0, 0, z0), RX), T(p.x0 - ref.x0, p.y0 - ref.y0, 0)) : T(p.x0 - ref.x0, p.y0 - ref.y0, z0))),
       qty: list.length, material: 'PETG / PLA',
@@ -1077,7 +1081,9 @@ function orgPanelParts(D, P, O, side, z0, normals) {
 
 function part(id, name, man, extra, normals) {
   return {
-    id, key: id, name, mesh: toMesh(man, normals),
+    // `name`: para el registro (español); `label`: lo que ve el usuario,
+    // como mensaje (src/i18n/msg.js) para traducirlo en la interfaz.
+    id, key: id, name, label: Msg(`part.${id}`), mesh: toMesh(man, normals),
     status: String(man.status()?.value ?? man.status()),
     volume: Math.round(man.volume()),
     components: man.decompose().length,

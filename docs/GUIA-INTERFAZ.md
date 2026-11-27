@@ -169,8 +169,37 @@ Cada tipo de dato tiene un único control, y se comporta como en el sistema:
 6. ¿Avisa sin bloquear? ¿Nada de `alert`/`confirm`/`prompt`?
 7. ¿Libera lo que crea? (Abrir y cerrar 20 veces no debe dejar nodos,
    temporizadores ni memoria.)
-8. `node tests/ui-guide.test.mjs` en verde y, tras `npm run build`,
+8. ¿El texto nuevo está en `es.js` y `en.js` (o en SCHEMA + `en.js`)?
+   `npm run i18n` en verde.
+9. `node tests/ui-guide.test.mjs` en verde y, tras `npm run build`,
    `npm run test:ui`.
+
+## Idiomas: hablar como se habla en el hobby
+
+La interfaz usa las palabras de los slicers (PrusaSlicer, Orca, Bambu
+Studio, Cura) y de los foros de impresión 3D, no traducciones de
+diccionario. Mismo nombre para lo mismo en panel, avisos, README y archivos.
+
+| Español | English | Evitar |
+|---|---|---|
+| slicer | slicer | laminador |
+| tolerancia | clearance / tolerance | holgura |
+| pieza de prueba, test de tolerancias | test piece, tolerance test | probeta |
+| paredes, capas superiores/inferiores | walls, top/bottom layers | perímetros (en textos al usuario) |
+| relleno (gyroid) | infill (gyroid) | |
+| brim, raft, mouse ears | brim, raft, mouse ears | balsa, borde |
+| voladizo, puente | overhang, bridge | |
+| tapa, base, cierre, bisagra, nudillos, pasador | lid, base, latch, hinge, knuckles, pin | |
+| junta, lengüeta, ranura | gasket, tongue, groove | |
+| tapa interior, compartimentos | compartment lid, compartments | |
+| inserto, huecos, hueco para el dedo | insert, cutouts, finger cutout | |
+| ajuste a presión | press-fit | |
+| línea de contracción | shrink line | |
+
+Reglas de forma: frase normal (sentence case) en ambos idiomas; en inglés,
+ortografía de EE. UU. y «25%» sin espacio; en español, coma decimal y
+«25 %». Las cifras pasan por `fmtN`/`mm`/`dims`, que ya aplican el formato
+del idioma.
 
 ## Variables de diseño (`src/style.css`)
 

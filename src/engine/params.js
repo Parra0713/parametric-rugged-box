@@ -16,11 +16,12 @@
  */
 
 import { orgBase, orgLayout, contentModes } from './orgLayout.js';
+import { M as Msg } from '../i18n/msg.js';
 
 export { contentModes };
 
 /** Versión de la aplicación (la misma que package.json; va en el LEEME y en el registro). */
-export const VERSION = '7.3.1';
+export const VERSION = '7.4.0';
 
 /* ------------------------------------------------------------------------ */
 /*  Valores por defecto                                                     */
@@ -186,7 +187,7 @@ export function ecoParams(P) {
   const ch = [];
   const lower = (k, v, label) => {
     v = Math.round(v * 100) / 100;
-    if (Q[k] > v + 1e-9) { ch.push(`${label} ${Q[k]} → ${v} mm`); Q[k] = v; }
+    if (Q[k] > v + 1e-9) { ch.push(Msg('eco.lower', { what: Msg(`what.${label}`), from: Q[k], to: v })); Q[k] = v; }
   };
   const big = Math.max(P.innerL, P.innerW) > 190;
   // Nervado: piel de 3 líneas (mínimo para que sea estanca) y la rigidez la
@@ -194,18 +195,18 @@ export function ecoParams(P) {
   const rib = (P.ecoDesign === 'rib' || P.ecoDesign === 'ribStiff') && !P.stackable;
   if (rib) Q._ecoRib = P.ecoDesign === 'ribStiff' ? 'stiff' : 'light';
   Q._wall0 = P.wall;
-  lower('wall', rib ? Math.max(3 * lw, 1.2) : Math.max(4 * lw, 1.6), 'pared');
-  lower('floor', Math.max((big ? 6 : 5) * lh, big ? 1.2 : 1.0), 'fondo');
-  lower('top', Math.max((big ? 6 : 5) * lh, big ? 1.2 : 1.0), 'techo');
-  if (Q.floorChamfer > 1.2) lower('floorChamfer', 1.2, 'chaflán interior');
-  if (Q.cornerRibs) { Q.cornerRibs = false; ch.push('sin nervios de esquina'); }
+  lower('wall', rib ? Math.max(3 * lw, 1.2) : Math.max(4 * lw, 1.6), 'wall');
+  lower('floor', Math.max((big ? 6 : 5) * lh, big ? 1.2 : 1.0), 'floor');
+  lower('top', Math.max((big ? 6 : 5) * lh, big ? 1.2 : 1.0), 'top');
+  if (Q.floorChamfer > 1.2) lower('floorChamfer', 1.2, 'floorChamfer');
+  if (Q.cornerRibs) { Q.cornerRibs = false; ch.push(Msg('eco.noCornerRibs')); }
   // Patrón grabado: se mantiene el grabado (el relieve, impreso boca abajo,
   // deja toda la cara colgando sobre los nervios) pero con piel mínima bajo
   // las celdas (ver derive).
   if (Q.relief === 'engrave' && Q.pattern !== 'smooth' && !Q.stackable) Q._ecoEngrave = true;
   {
     const cm = contentModes(Q);
-    if ([cm.base, cm.lid].some((m) => m === 'blank' || m === 'pockets')) lower('insertDeck', Math.max(5 * lh, 1.0), 'cubierta del inserto');
+    if ([cm.base, cm.lid].some((m) => m === 'blank' || m === 'pockets')) lower('insertDeck', Math.max(5 * lh, 1.0), 'insertDeck');
   }
   Q._ecoChanges = ch;
   return Q;
@@ -271,19 +272,19 @@ const anyOrgCover = (P) => { const m = contentModes(P); return (m.base === 'org'
 
 export const SCHEMA = [
   /* ---------------- Caja ---------------- */
-  { tab: 'caja', group: 'Medidas interiores', items: [
+  { tab: 'caja', id: 'size', group: 'Medidas interiores', items: [
     { k: 'innerL', label: 'Largo', type: 'range', min: 20, max: 400, step: 0.5, unit: 'mm', hint: 'Espacio útil, sin paredes' },
     { k: 'innerW', label: 'Ancho', type: 'range', min: 20, max: 400, step: 0.5, unit: 'mm' },
     { k: 'baseDepth', label: 'Profundidad de la base', type: 'range', min: 5, max: 250, step: 0.5, unit: 'mm' },
     { k: 'lidDepth', label: 'Profundidad de la tapa', type: 'range', min: 0, max: 120, step: 0.5, unit: 'mm' },
     { k: 'lidMin', label: 'Tapa lo más plana posible', type: 'toggle', hint: 'Para objetos que quedan a ras del borde' },
   ]},
-  { tab: 'caja', group: 'Forma', items: [
+  { tab: 'caja', id: 'shape', group: 'Forma', items: [
     { k: 'innerR', label: 'Radio de las esquinas', type: 'range', min: 0.5, max: 20, step: 0.5, unit: 'mm' },
     { k: 'cornerCut', label: 'Esquinas recortadas (octógono)', type: 'range', min: 0, max: 80, step: 0.5, unit: 'mm', hint: 'Ayuda a que una caja larga quepa en la cama' },
     { k: 'cornerRibs', label: 'Nervios de esquina', type: 'toggle' },
   ]},
-  { tab: 'caja', group: 'Paredes', items: [
+  { tab: 'caja', id: 'walls', group: 'Paredes', items: [
     { k: 'eco', label: 'Modo ahorro de material', type: 'toggle',
       hint: 'Mínimo filamento con la misma mecánica y cierre: paredes y fondos mínimos seguros, banda estrecha, grabado con piel mínima…' },
     { k: 'ecoDesign', label: 'Diseño del modo ahorro', type: 'select', when: (P) => !!P.eco, options: [
@@ -295,14 +296,14 @@ export const SCHEMA = [
     { k: 'bandH', label: 'Altura de la banda', type: 'range', min: 3, max: 12, step: 0.5, unit: 'mm', adv: true },
     { k: 'bandProud', label: 'Vuelo de la banda (0 = auto)', type: 'range', min: 0, max: 8, step: 0.1, unit: 'mm', adv: true },
   ]},
-  { tab: 'caja', group: 'Apilado y Gridfinity', gridfinity: true, items: [
+  { tab: 'caja', id: 'stack', group: 'Apilado y Gridfinity', gridfinity: true, items: [
     { k: 'stackable', label: 'Apilable', type: 'toggle', hint: 'La base encaja sobre la tapa de otra caja igual' },
     { k: 'gridfinity', label: 'Gridfinity', type: 'select', options: [
       ['off', 'No'], ['baseplate', 'Placa interior (bins dentro)'], ['feet', 'Pies (caja sobre placa)']] },
   ]},
 
   /* ---------------- Contenido ---------------- */
-  { tab: 'contenido', group: 'Objetos', content: true, items: [
+  { tab: 'contenido', id: 'objects', group: 'Objetos', content: true, items: [
     { k: 'contentFit', label: 'Tamaño de la caja', type: 'select', options: [
       ['auto', 'Ajustarlo al contenido'], ['manual', 'Usar las medidas de la pestaña Caja']] },
     { k: 'objSpacing', label: 'Pared entre objetos', type: 'range', min: 1.2, max: 10, step: 0.2, unit: 'mm', hint: 'Más pared = inserto más rígido' },
@@ -311,7 +312,7 @@ export const SCHEMA = [
   ]},
   // Qué lleva cada mitad. Los ajustes de cada opción solo aparecen cuando
   // esa opción está elegida (`when`): la interfaz enseña lo que aplica.
-  { tab: 'contenido', group: 'En la base', items: [
+  { tab: 'contenido', id: 'base', group: 'En la base', items: [
     { k: 'insertMode', label: 'La base lleva', type: 'select', options: FILL_OPTIONS },
     { k: 'orgBCols', label: 'Columnas (lado largo)', type: 'range', min: 1, max: 20, step: 1, unit: '', when: orgOn('base') },
     { k: 'orgBRows', label: 'Filas (lado corto)', type: 'range', min: 1, max: 12, step: 1, unit: '', when: orgOn('base') },
@@ -323,7 +324,7 @@ export const SCHEMA = [
     { k: 'orgBScoop', label: 'Fondo inclinado para recoger piezas', type: 'toggle', adv: true, when: orgOn('base') },
     { k: 'insertH', label: 'Altura del inserto (0 = auto)', type: 'range', min: 0, max: 200, step: 0.5, unit: 'mm', adv: true, when: insOn('base') },
   ]},
-  { tab: 'contenido', group: 'En la tapa', items: [
+  { tab: 'contenido', id: 'lid', group: 'En la tapa', items: [
     { k: 'lidMode', label: 'La tapa lleva', type: 'select', options: FILL_OPTIONS },
     { k: 'orgCols', label: 'Columnas (lado largo)', type: 'range', min: 1, max: 20, step: 1, unit: '', when: orgOn('lid') },
     { k: 'orgRows', label: 'Filas (lado corto)', type: 'range', min: 1, max: 12, step: 1, unit: '', when: orgOn('lid') },
@@ -334,7 +335,7 @@ export const SCHEMA = [
     { k: 'orgDepth', label: 'Altura de las celdas (0 = la de la tapa)', type: 'range', min: 0, max: 120, step: 0.5, unit: 'mm', when: orgOn('lid'), hint: 'Si no caben, la tapa crece' },
     { k: 'orgScoop', label: 'Fondo inclinado para recoger piezas', type: 'toggle', adv: true, when: orgOn('lid') },
   ]},
-  { tab: 'contenido', group: 'Traba de las tapas interiores', when: (P) => anyOrgCover(P), items: [
+  { tab: 'contenido', id: 'latch', group: 'Traba de las tapas interiores', when: (P) => anyOrgCover(P), items: [
     { k: 'orgLatch', label: 'Traba', type: 'select', options: [
       ['snap', 'Mecánica (clic)'], ['magnet', 'Magnética (imanes)']],
       hint: 'Mecánica: sin piezas extra. Magnética: una pareja de imanes de disco por punto de cierre, a presión' },
@@ -346,21 +347,21 @@ export const SCHEMA = [
       options: [[0, 'Automático (los sugeridos)'], [1, '1'], [2, '2'], [3, '3'], [4, '4'], [5, '5'], [6, '6']],
       hint: 'Son parejas: cada punto lleva un imán en la caja y otro en la tapa interior. El resumen dice cuántos se sugieren y por qué' },
   ]},
-  { tab: 'contenido', group: 'Insertos', when: (P) => anyInsert(P), items: [
+  { tab: 'contenido', id: 'inserts', group: 'Insertos', when: (P) => anyInsert(P), items: [
     { k: 'fingerCount', label: 'Huecos para los dedos', type: 'select', options: [
       ['auto', 'Automático (2)'], ['0', 'Ninguno'], ['1', 'Uno'], ['2', 'Dos']], when: (P) => anyPockets(P) },
     { k: 'fingerD', label: 'Tamaño del hueco para dedo', type: 'range', min: 10, max: 40, step: 1, unit: 'mm', when: (P) => anyPockets(P) },
-    { k: 'pocketTol', label: 'Holgura del objeto', type: 'range', min: 0, max: 3, step: 0.05, unit: 'mm', cal: true, hint: 'Juego entre el objeto y su hueco', when: (P) => anyPockets(P) },
-    { k: 'insertTol', label: 'Holgura con la caja', type: 'range', min: 0, max: 1.5, step: 0.025, unit: 'mm', cal: true, adv: true },
+    { k: 'pocketTol', label: 'Tolerancia del objeto', type: 'range', min: 0, max: 3, step: 0.05, unit: 'mm', cal: true, hint: 'Juego entre el objeto y su hueco', when: (P) => anyPockets(P) },
+    { k: 'insertTol', label: 'Tolerancia con la caja', type: 'range', min: 0, max: 1.5, step: 0.025, unit: 'mm', cal: true, adv: true },
     { k: 'insertDeck', label: 'Espesor de la cubierta', type: 'range', min: 0.8, max: 4, step: 0.2, unit: 'mm', adv: true },
     { k: 'fingerPos', label: 'Posición de los huecos', type: 'range', min: -100, max: 100, step: 5, unit: '%', adv: true, when: (P) => anyPockets(P) },
   ]},
 
   /* ---------------- Tapa ---------------- */
-  { tab: 'tapa', group: 'Diseño de la tapa', items: [
+  { tab: 'tapa', id: 'lidDesign', group: 'Diseño de la tapa', items: [
     { k: 'pattern', label: 'Patrón', type: 'select', options: [
       ['smooth', 'Liso'], ['hex', 'Hexagonal'], ['stripes', 'Estriado'], ['cross', 'Reforzado cruzado'],
-      ['circuit', 'Sci‑fi: circuito'], ['radial', 'Sci‑fi: radial']] },
+      ['circuit', 'Sci-fi: circuito'], ['radial', 'Sci-fi: radial']] },
     { k: 'relief', label: 'Acabado', type: 'select', options: [
       ['engrave', 'Grabado (recomendado)'], ['emboss', 'En relieve']] },
     { k: 'patternSize', when: (P) => P.pattern !== 'smooth', label: 'Tamaño del patrón', type: 'range', min: 4, max: 40, step: 0.5, unit: 'mm' },
@@ -370,7 +371,7 @@ export const SCHEMA = [
     { k: 'stripeAngle', label: 'Ángulo', type: 'range', min: 0, max: 180, step: 5, unit: '°', adv: true, when: (P) => P.pattern === 'stripes' },
     { k: 'patternSeed', label: 'Variante', type: 'range', min: 1, max: 999, step: 1, unit: '', adv: true, when: (P) => P.pattern === 'circuit' },
   ]},
-  { tab: 'tapa', group: 'Logo', svg: true, items: [
+  { tab: 'tapa', id: 'logo', group: 'Logo', svg: true, items: [
     { k: 'svgSize', label: 'Tamaño', type: 'range', min: 5, max: 100, step: 1, unit: '%' },
     { k: 'svgRotate', label: 'Giro', type: 'range', min: -180, max: 180, step: 1, unit: '°' },
     { k: 'svgOffsetX', label: 'Mover en X', type: 'range', min: -150, max: 150, step: 0.5, unit: 'mm', adv: true },
@@ -378,31 +379,32 @@ export const SCHEMA = [
   ]},
 
   /* ---------------- Mecánica ---------------- */
-  { tab: 'mecanica', group: 'Bisagras y cierres', items: [
+  { tab: 'mecanica', id: 'mech', group: 'Bisagras y cierres', items: [
     { k: 'sizeClass', label: 'Robustez', type: 'select', options: [
       ['auto', 'Automática según tamaño'], ['XS', 'XS — ultrapequeña (< 50 mm)'], ['S', 'S — pequeña'], ['M', 'M — mediana'], ['L', 'L — grande']],
       hint: 'Escala bisagras y cierres; automática elige XS por debajo de 50 mm exteriores' },
     { k: 'pinMode', label: 'Pasadores', type: 'select', options: [
-      ['auto', 'Automático'], ['filament', 'Trozo de filamento 1.75 mm'], ['printed', 'Impresos (a presión)']] },
+      ['auto', 'Automático'], ['filament', 'Trozo de filamento de 1,75 mm'], ['printed', 'Impresos (a presión)']] },
     { k: 'hingeCount', label: 'Bisagras (0 = auto)', type: 'range', min: 0, max: 4, step: 1, unit: '', adv: true },
     { k: 'latchCount', label: 'Cierres (0 = auto)', type: 'range', min: 0, max: 4, step: 1, unit: '', adv: true },
-    { k: 'clearance', label: 'Holgura de pasadores impresos', type: 'range', min: 0.05, max: 0.5, step: 0.025, unit: 'mm', cal: true, hint: 'Viene del perfil de calibración (pestaña Impresión)' },
-    { k: 'filClr', label: 'Holgura del filamento', type: 'range', min: 0, max: 0.4, step: 0.025, unit: 'mm', cal: true, adv: true },
-    { k: 'axialGap', label: 'Holgura entre nudillos', type: 'range', min: 0.2, max: 0.8, step: 0.05, unit: 'mm', cal: true, adv: true },
+    { k: 'clearance', label: 'Tolerancia de pasadores impresos', type: 'range', min: 0.05, max: 0.5, step: 0.025, unit: 'mm', cal: true, hint: 'Viene del perfil de calibración (pestaña Impresión)' },
+    { k: 'filClr', label: 'Tolerancia del filamento', type: 'range', min: 0, max: 0.4, step: 0.025, unit: 'mm', cal: true, adv: true },
+    { k: 'axialGap', label: 'Tolerancia entre nudillos', type: 'range', min: 0.2, max: 0.8, step: 0.05, unit: 'mm', cal: true, adv: true },
   ]},
-  { tab: 'mecanica', group: 'Sellado', items: [
+  { tab: 'mecanica', id: 'seal', group: 'Sellado', items: [
     { k: 'sealMode', label: 'Junta entre tapa y base', type: 'select', options: [
       ['tpu', 'Junta de TPU impresa (hermético)'], ['cord', 'Cordón de filamento TPU 1,75 (hermético, sin imprimir)'],
       ['labyrinth', 'Laberinto doble'], ['simple', 'Lengüeta simple']],
       hint: 'Cordón: se corta un trozo de filamento TPU y se mete en la ranura; no hay que imprimir la junta' },
     { k: 'gasketCompression', label: 'Compresión de la junta', type: 'range', min: 0.15, max: 0.35, step: 0.01, unit: '', adv: true,
       when: (P) => P.sealMode === 'tpu' || P.sealMode === 'cord' },
-    { k: 'sealClr', label: 'Holgura de la lengüeta', type: 'range', min: 0.05, max: 0.6, step: 0.025, unit: 'mm', cal: true, adv: true },
+    { k: 'sealClr', label: 'Tolerancia de la lengüeta', type: 'range', min: 0.05, max: 0.6, step: 0.025, unit: 'mm', cal: true, adv: true },
   ]},
 
   /* ---------------- Impresión ---------------- */
-  { tab: 'impresion', group: 'Impresora', items: [
-    { k: 'bedPreset', label: 'Modelo', type: 'select',
+  { tab: 'impresion', id: 'printer', group: 'Impresora', items: [
+    // Las opciones son nombres de impresoras: no se traducen (salvo «custom»).
+    { k: 'bedPreset', label: 'Modelo', type: 'select', names: true,
       options: Object.entries(BED_PRESETS).map(([k, v]) => [k, v.name]) },
     { k: 'bedX', label: 'Cama X', type: 'range', min: 100, max: 500, step: 1, unit: 'mm', adv: true },
     { k: 'bedY', label: 'Cama Y', type: 'range', min: 100, max: 500, step: 1, unit: 'mm', adv: true },
@@ -413,11 +415,11 @@ export const SCHEMA = [
   // Perfil de calibración: estos valores son de la IMPRESORA y el material,
   // no del diseño. Se guardan aparte (perfil persistente) y se aplican a
   // todas las cajas; el test de holguras los mide (ver src/engine/calib.js).
-  { tab: 'impresion', group: 'Calibración de holguras', calib: true, items: [
+  { tab: 'impresion', id: 'calib', group: 'Calibración de tolerancias', calib: true, items: [
     { k: 'filClr', label: 'Filamento en bisagra', type: 'range', min: 0, max: 0.4, step: 0.025, unit: 'mm', cal: true,
-      hint: 'Holgura por lado del filamento 1.75 en los agujeros de la caja' },
+      hint: 'Tolerancia por lado del filamento de 1,75 en los agujeros de la caja' },
     { k: 'clearance', label: 'Pasador impreso (Ø3)', type: 'range', min: 0.05, max: 0.5, step: 0.025, unit: 'mm', cal: true,
-      hint: 'Holgura por lado del pasador impreso en bisagras y orejetas' },
+      hint: 'Tolerancia por lado del pasador impreso en bisagras y orejetas' },
     { k: 'clearanceL', label: 'Pasador impreso grande (Ø5)', type: 'range', min: 0.05, max: 0.5, step: 0.025, unit: 'mm', cal: true,
       hint: 'Cajas grandes; entre Ø3 y Ø5 se interpola' },
     { k: 'tiltAdd', label: 'Extra si se imprime inclinada', type: 'range', min: -0.2, max: 0.4, step: 0.025, unit: 'mm', cal: true,
@@ -432,7 +434,7 @@ export const SCHEMA = [
     { k: 'insertTol', label: 'Inserto en la caja', type: 'range', min: 0, max: 1.5, step: 0.025, unit: 'mm', cal: true, adv: true },
     { k: 'pocketTol', label: 'Objeto en su hueco', type: 'range', min: 0, max: 3, step: 0.05, unit: 'mm', cal: true, adv: true },
   ]},
-  { tab: 'impresion', group: 'Soportes y adherencia', items: [
+  { tab: 'impresion', id: 'supports', group: 'Soportes y adherencia', items: [
     { k: 'printAids', label: 'Ayudas de impresión', type: 'select', options: [
       ['auto', 'Automáticas (recomendado)'], ['nofins', 'Sin aletas'], ['off', 'Ninguna']],
       hint: 'Orejas en diagonal; bisel, aletas y soportes si va inclinada' },
@@ -444,9 +446,9 @@ export const SCHEMA = [
     { k: 'finSpacing', when: (P) => P.printAids === 'auto', label: 'Separación de aletas (0 = auto)', type: 'range', min: 0, max: 80, step: 1, unit: 'mm', adv: true },
     { k: 'finReach', when: (P) => P.printAids === 'auto', label: 'Alcance de aletas (0 = auto)', type: 'range', min: 0, max: 100, step: 5, unit: '%', adv: true },
     { k: 'toothPitch', when: (P) => P.printAids === 'auto', label: 'Paso de dientes de aleta', type: 'range', min: 3, max: 15, step: 0.5, unit: 'mm', adv: true },
-    { k: 'finGap', when: (P) => P.printAids === 'auto', label: 'Holgura de aleta (0 = auto)', type: 'range', min: 0, max: 1, step: 0.05, unit: 'mm', adv: true },
+    { k: 'finGap', when: (P) => P.printAids === 'auto', label: 'Tolerancia de aleta (0 = auto)', type: 'range', min: 0, max: 1, step: 0.05, unit: 'mm', adv: true },
   ]},
-  { tab: 'impresion', group: 'Acabado (línea de contracción)', items: [
+  { tab: 'impresion', id: 'finish', group: 'Acabado (línea de contracción)', items: [
     { k: 'shadowLine', label: 'Ranuras que ocultan la línea', type: 'toggle' },
     { k: 'floorChamfer', label: 'Chaflán interior', type: 'range', min: 0, max: 8, step: 0.2, unit: 'mm', adv: true },
     { k: 'snapToPrinter', label: 'Ajustar medidas a capas y líneas', type: 'toggle', adv: true },
@@ -505,7 +507,7 @@ export function derive(P) {
   const lw = P.lineWidth, lh = P.layerH;
   const snapW = (v) => (P.snapToPrinter ? Math.max(3, Math.round(v / lw)) * lw : v);
   const snapH = (v) => (P.snapToPrinter ? Math.max(1, Math.round(v / lh)) * lh : v);
-  const note = (name, a, b) => { if (Math.abs(a - b) > 1e-6) D.snapped.push(`${name} ${r2(a)} → ${r2(b)} mm`); };
+  const note = (name, a, b) => { if (Math.abs(a - b) > 1e-6) D.snapped.push(Msg('snap.value', { what: Msg(`what.${name}`), from: r2(a), to: r2(b) })); };
   D.lw = lw; D.lh = lh;
 
   /* ---- Orientación: mecánica siempre en el lado largo ---- */
@@ -518,16 +520,16 @@ export function derive(P) {
   const OB = orgBase(P, lw, 'lid');
   let OBb = orgBase(P, lw, 'base');
   if (OBb && P.gridfinity === 'baseplate') {
-    warn.push('Compartimentos en la base y placa Gridfinity interior no caben a la vez: se omiten los compartimentos de la base.');
+    warn.push(Msg('warn.orgVsBaseplate'));
     OBb = null; D.content = { ...D.content, base: 'off' };
   }
-  for (const [O1, where] of [[OB, 'la tapa'], [OBb, 'la base']]) {
+  for (const [O1, where] of [[OB, Msg('side.lid')], [OBb, Msg('side.base')]]) {
     if (!O1) continue;
-    if (O1.needL > D.Li + 1e-6) { D.snapped.push(`interior ${r2(D.Li)} → ${O1.needL} mm de largo para ${O1.cols} celdas en ${where}`); D.Li = O1.needL; }
-    if (O1.needW > D.Wi + 1e-6) { D.snapped.push(`interior ${r2(D.Wi)} → ${O1.needW} mm de ancho para ${O1.rows} filas en ${where}`); D.Wi = O1.needW; }
+    if (O1.needL > D.Li + 1e-6) { D.snapped.push(Msg('snap.orgLength', { from: r2(D.Li), to: O1.needL, n: O1.cols, where })); D.Li = O1.needL; }
+    if (O1.needW > D.Wi + 1e-6) { D.snapped.push(Msg('snap.orgWidth', { from: r2(D.Wi), to: O1.needW, n: O1.rows, where })); D.Wi = O1.needW; }
   }
 
-  D.t = r2(snapW(P.wall)); note('Pared', P.wall, D.t);
+  D.t = r2(snapW(P.wall)); note('wall', P.wall, D.t);
   D.t0 = P._wall0 != null ? r2(snapW(P._wall0)) : D.t;      // pared sin modo ahorro
   D.ri = clamp(P.innerR, 0.5, Math.min(D.Li, D.Wi) / 2 - 0.5);
   // Esquinas recortadas: pierna del chaflán sobre el rectángulo interior.
@@ -605,7 +607,7 @@ export function derive(P) {
     const bo0 = P.bandProud > 0 ? P.bandProud : Mx.bo;
     const Fmin = r2((P.sealMode === 'tpu' ? 2.4 : P.sealMode === 'cord' ? 2.2 : 2.0) + 2 * Math.max(0.9, 2 * lw) + 0.05);
     if (D.t + D.bo < Fmin) D.bo = r2(Fmin - D.t);
-    if (D.bo !== bo0) D.ecoChanges.push(`banda ${bo0} → ${D.bo} mm${D.bo > bo0 ? ' (ranura con 2 líneas por lado)' : ''}`);
+    if (D.bo !== bo0) D.ecoChanges.push(Msg('eco.band', { from: bo0, to: D.bo, grew: D.bo > bo0 }));
   }
   D.F = r2(D.t + D.bo);              // ancho de la cara de unión
 
@@ -652,7 +654,7 @@ export function derive(P) {
     } else {
       D.gw = r2(clamp(0.45 * D.F, Math.max(2.0, gwMin), 3.6));
       D.grooves = [{ off: D.F / 2, w: D.gw }];
-      D.snapped.push(`laberinto de una sola ranura (banda de ${r2(D.F)} mm: la doble necesita ${r2(3 * wmin + 2 * gwMin)} mm)`);
+      D.snapped.push(Msg('snap.singleLabyrinth', { band: r2(D.F), need: r2(3 * wmin + 2 * gwMin) }));
     }
   } else {
     D.gw = r2(clamp(0.45 * D.F, 2.0, 3.6));
@@ -759,19 +761,19 @@ export function derive(P) {
   // placa con retícula de nervios, más rígida que una lisa del mismo peso).
   const skin = P._ecoEngrave ? Math.ceil(0.9 / lh - 1e-6) * lh : 1.2;
   D.topT = r2(snapH(engr ? Math.max(P.top, D.pd + skin) : P.top));
-  if (P._ecoEngrave) D.ecoChanges.push(`grabado con piel de ${r2(D.topT - D.pd)} mm bajo las celdas (techo ${D.topT} mm)`);
-  D.floor = r2(snapH(P.floor)); note('Fondo', P.floor, D.floor);
+  if (P._ecoEngrave) D.ecoChanges.push(Msg('eco.engrave', { skin: r2(D.topT - D.pd), top: D.topT }));
+  D.floor = r2(snapH(P.floor)); note('floor', P.floor, D.floor);
 
   /* ---- Gridfinity ---- */
   D.gfMode = P.gridfinity;
   D.gfFeet = D.gfMode === 'feet' && !D.stack;
-  if (D.gfMode === 'feet' && D.stack) warn.push('Apilable y pies Gridfinity son incompatibles: se omiten los pies.');
+  if (D.gfMode === 'feet' && D.stack) warn.push(Msg('warn.stackVsFeet'));
   D.gfH = 4.75;                      // altura de los pies
   D.gbH = 4.65;                      // altura de la placa base interior
   D.gfNx = Math.floor((D.gfMode === 'feet' ? D.Lo : D.Li) / 42 + 1e-6);
   D.gfNy = Math.floor((D.gfMode === 'feet' ? D.Wo : D.Wi) / 42 + 1e-6);
   if (D.gfMode !== 'off' && (D.gfNx < 1 || D.gfNy < 1)) {
-    warn.push('La caja es menor que una celda Gridfinity (42 mm): Gridfinity omitido.');
+    warn.push(Msg('warn.gfTooSmall'));
     D.gfMode = 'off'; D.gfFeet = false;
   }
   D.gfPlate = D.gfMode === 'baseplate';
@@ -786,7 +788,7 @@ export function derive(P) {
       const ok = [[-1, -1], [1, -1], [1, 1], [-1, 1]].every(([a, b]) => insideConvex(outl, cx + a * half, cy + b * half, feet ? 0 : 0.25));
       if (ok) D.gfCells.push([cx, cy]);
     }
-    if (!D.gfCells.length) { warn.push('Ninguna celda Gridfinity cabe en este contorno.'); D.gfMode = 'off'; D.gfFeet = false; D.gfPlate = false; }
+    if (!D.gfCells.length) { warn.push(Msg('warn.gfNoCells')); D.gfMode = 'off'; D.gfFeet = false; D.gfPlate = false; }
   }
   D.floorTop = r2(D.floor + (D.gfPlate ? D.gbH : 0) + (D.stack ? D.hf : 0));   // suelo útil
   if (D.stack) {
@@ -806,11 +808,11 @@ export function derive(P) {
   const latchNeed = D.gd + D.mem + 0.5 + 2 * D.rl + 0.8 + D.zpDrop;
   const DbMin = r2(Math.max(latchNeed - D.floorTop, D.fc + 2, 5));
   let Db = P.baseDepth;
-  if (Db < DbMin) { warn.push(`Base demasiado baja para los cierres: profundidad ajustada a ${DbMin} mm.`); Db = DbMin; }
+  if (Db < DbMin) { warn.push(Msg('warn.baseMin', { mm: DbMin })); Db = DbMin; }
   if (OBb) {
     // Celdas + tapa interior + holgura hasta el borde.
     const need = Math.max(OBb.needDl, r2(OBb.g0 + OBb.ct + 5));
-    if (need > Db + 1e-6) { D.snapped.push(`base ${r2(Db)} → ${need} mm de profundidad para los compartimentos`); Db = need; }
+    if (need > Db + 1e-6) { D.snapped.push(Msg('snap.orgDepth', { where: Msg('side.base'), from: r2(Db), to: need })); Db = need; }
   }
   D.Hb = r2(snapH(D.floorTop + Db));
   D.Db = r2(D.Hb - D.floorTop);
@@ -823,11 +825,11 @@ export function derive(P) {
   const HlMin = r2(D.bandHl + Math.max(1.6, D.bo + (D.stack ? D.db : 0.5)));
   const DlMin = r2(Math.max(0, HlMin - D.topT));
   let Dl = P.lidMin ? DlMin : P.lidDepth;
-  if (Dl < DlMin) { if (!P.lidMin) warn.push(`Tapa ajustada a su mínimo mecánico: ${DlMin} mm.`); Dl = DlMin; }
+  if (Dl < DlMin) { if (!P.lidMin) warn.push(Msg('warn.lidMin', { mm: DlMin })); Dl = DlMin; }
   if (OB) {
     // Celdas + tapa interior + holgura hasta el borde.
     const need = Math.max(OB.needDl, r2(OB.g0 + OB.ct + 5));
-    if (need > Dl + 1e-6) { D.snapped.push(`tapa ${r2(Dl)} → ${need} mm de profundidad para los compartimentos`); Dl = need; }
+    if (need > Dl + 1e-6) { D.snapped.push(Msg('snap.orgDepth', { where: Msg('side.lid'), from: r2(Dl), to: need })); Dl = need; }
   }
   D.Hl = r2(snapH(D.topT + Dl));
   D.Dl = r2(D.Hl - D.topT);
@@ -860,11 +862,11 @@ export function derive(P) {
   const needMin = Math.max(minHinge, minLatch);
   const avail0 = D.Lo - 2 * (D.ro + 2) - 2 * D.cham;    // tramo recto del lado largo
   D.ribs = !!P.cornerRibs && D.cham === 0;
-  if (P.cornerRibs && D.cham > 0) D.snapped.push('nervios de esquina sustituidos por el recorte octogonal');
+  if (P.cornerRibs && D.cham > 0) D.snapped.push(Msg('snap.ribsOctagon'));
   let cw = clamp(0.08 * Math.min(D.Lo, D.Wo) + 4, 5, 12);
   if (D.ribs) {
     cw = Math.min(cw, (avail0 - needMin) / 2);
-    if (cw < 2.5) { D.ribs = false; cw = 0; warn.push('Caja corta: se omiten los nervios de esquina para dejar sitio a la mecánica.'); }
+    if (cw < 2.5) { D.ribs = false; cw = 0; warn.push(Msg('warn.shortNoRibs')); }
   } else cw = 0;
   D.cw = r2(cw);
   let avail = avail0 - 2 * cw;
@@ -872,7 +874,7 @@ export function derive(P) {
     // La mecánica puede invadir el inicio del radio de esquina.
     avail = Math.max(avail, D.Lo - 2 * (0.5 * D.ro + 1));
     if (avail < needMin) {
-      warn.push(`Lado largo muy corto: la mecánica mínima necesita ~${Math.ceil(needMin + D.ro + 2)} mm de largo interior.`);
+      warn.push(Msg('warn.tooShort', { mm: Math.ceil(needMin + D.ro + 2) }));
       avail = needMin;
     }
   }
@@ -917,8 +919,8 @@ export function derive(P) {
       ...D.latch.xs.map((x) => Math.abs(x) + D.latch.span / 2));
     const cwMax = D.Lo / 2 - D.ro - maxEnd - acc;
     if (cwMax < D.cw) {
-      if (cwMax < 2.5) { D.ribs = false; D.cw = 0; D.snapped.push('nervios de esquina omitidos: dejan sitio para montar los pasadores'); }
-      else { D.cw = r2(cwMax); D.snapped.push(`nervios de esquina acortados a ${D.cw} mm para montar los pasadores`); }
+      if (cwMax < 2.5) { D.ribs = false; D.cw = 0; D.snapped.push(Msg('snap.ribsDropped')); }
+      else { D.cw = r2(cwMax); D.snapped.push(Msg('snap.ribsShort', { mm: D.cw })); }
     }
   }
 
@@ -955,10 +957,10 @@ export function derive(P) {
   /* ---- Nervios de pared (modo ahorro nervado) ---- */
   D.wallRibs = P._ecoRib ? wallRibs(D, P, lw) : null;
   if (P._ecoRib && !D.wallRibs) {
-    D.ecoChanges.push('sin sitio para nervios: pared de 3 líneas sin nervar');
+    D.ecoChanges.push(Msg('eco.noRibs'));
   } else if (D.wallRibs) {
     const R = D.wallRibs;
-    D.ecoChanges.push(`nervios de ${R.w}×${R.h} mm cada ${R.pitch} mm (${R.n} en total, rigidez ${Math.round(100 * R.stiff)} % de la pared ${P._ecoRib === 'stiff' ? 'normal' : 'de 4 líneas'})`);
+    D.ecoChanges.push(Msg('eco.ribs', { w: R.w, h: R.h, pitch: R.pitch, n: R.n, stiff: Math.round(100 * R.stiff), ref: P._ecoRib === 'stiff' ? 'normal' : 'four' }));
   }
 
   // Rigidez a flexión de la pared frente a la de la caja sin ahorro.
@@ -1001,14 +1003,14 @@ export function derive(P) {
   D.seg = P.quality === 'final' ? 96 : D.draft ? 20 : 40;
   // Compartimentos: D.org (tapa) y D.orgB (base, misma distribución en el
   // "marco de tapa"; el motor la gira 180° — ver orgLayout.js).
-  for (const [key, side, where, OBx] of [['org', 'lid', 'la tapa', OB], ['orgB', 'base', 'la base', OBb]]) {
+  for (const [key, side, where, OBx] of [['org', 'lid', Msg('side.lid'), OB], ['orgB', 'base', Msg('side.base'), OBb]]) {
     let O = OBx ? orgLayout(D, P, side) : null;
     if (O && (O.cellL < 5 || O.cellW < 5 || O.depth < 3)) {
-      warn.push(`Compartimentos de ${where}: celdas demasiado pequeñas (${O.cellL}×${O.cellW}×${O.depth} mm). Reduce filas/columnas o agranda la caja.`);
+      warn.push(Msg('warn.orgCellsTooSmall', { where, l: O.cellL, w: O.cellW, d: O.depth }));
       O = null;
     }
-    if (O && O.magnetWarn) warn.push(`Traba magnética en ${where}: ${O.magnetWarn}. Se usa la traba mecánica (clic).`);
-    if (O && O.magnetInfo && O.magnetInfo.note) warn.push(`Imanes en ${where}: ${O.magnetInfo.note}.`);
+    if (O && O.magnetWarn) warn.push(Msg('warn.magnetFallback', { where, why: O.magnetWarn }));
+    if (O && O.magnetInfo && O.magnetInfo.note) warn.push(Msg('warn.magnetCount', { where, note: O.magnetInfo.note }));
     D[key] = O;
     if (!O && D.content[side] === 'org') D.content = { ...D.content, [side]: 'off' };
   }

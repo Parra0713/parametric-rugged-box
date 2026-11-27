@@ -24,11 +24,12 @@ function newProfile(name, values = defaults(), src = {}) {
 }
 
 /**
- * Carga los perfiles. Si no hay ninguno, crea "Mi impresora" con los valores
+ * Carga los perfiles. Si no hay ninguno, crea uno («Mi impresora» o su
+ * traducción, `defaultName`) con los valores
  * que el usuario ya tuviera en sus parámetros guardados (versiones previas,
  * cuando las holguras eran parámetros normales de la caja).
  */
-export function loadProfiles(savedP = {}) {
+export function loadProfiles(savedP = {}, defaultName = 'Mi impresora') {
   let st = null;
   try { st = JSON.parse(safeGet(STORE_CAL) || 'null'); } catch { st = null; }
   if (!st || !st.profiles || !Object.keys(st.profiles).length) {
@@ -36,7 +37,7 @@ export function loadProfiles(savedP = {}) {
     for (const k of CAL_KEYS) {
       if (k in savedP && savedP[k] !== DEFAULTS[k]) { values[k] = savedP[k]; src[k] = 'manual'; }
     }
-    st = { active: 'p1', profiles: { p1: newProfile('Mi impresora', values, src) } };
+    st = { active: 'p1', profiles: { p1: newProfile(defaultName, values, src) } };
     safeSet(STORE_CAL, JSON.stringify(st));
   }
   for (const p of Object.values(st.profiles)) {

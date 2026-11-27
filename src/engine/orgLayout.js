@@ -60,6 +60,7 @@
  *    tornillo de banco después de imprimir, sin pausar la impresión. Los
  *    pilares van sobre un divisor o en una esquina, junto al borde libre.
  */
+import { M as Msg } from '../i18n/msg.js';
 
 const r2 = (v) => Math.round(v * 100) / 100;
 
@@ -417,7 +418,7 @@ function placeMagnets(D, B, G) {
   const { gap, magnet: Mg } = B;
   const { cells, panels, rowsY, depth } = G;
   const L = D.Li, W = D.Wi, Rp = Mg.Rp;
-  if (depth < Mg.hb + MAG.air + Mg.pd + 0.8) return { ok: false, why: `celdas de ${depth} mm de alto: el imán de ${Mg.h} mm necesita ${r2(Mg.hb + MAG.air + Mg.pd + 0.8)} mm` };
+  if (depth < Mg.hb + MAG.air + Mg.pd + 0.8) return { ok: false, why: Msg('mag.tooShallow', { depth, h: Mg.h, need: r2(Mg.hb + MAG.air + Mg.pd + 0.8) }) };
   const inside = (x, y) => {
     for (let k = 0; k < 12; k++) {
       const px = x + Rp * Math.cos((k * Math.PI) / 6), py = y + Rp * Math.sin((k * Math.PI) / 6);
@@ -446,7 +447,7 @@ function placeMagnets(D, B, G) {
       && c.x - Rp >= p.x0 - 0.01 && c.x + Rp <= p.x1 + 0.01
       && (!w || Math.abs(c.x - (w.x0 + w.x1) / 2) >= (w.x1 - w.x0) / 2 + 0.9 + Mg.rOut + MAG.lead - 0.005 || y + Mg.rOut + MAG.lead < w.y0 - 0.9);
     const valid = cand.filter(ok);
-    if (!valid.length) return { ok: false, why: `no cabe un imán de Ø${Mg.d} mm junto al borde libre (celdas de ${G.cellL}×${G.cellW} mm)` };
+    if (!valid.length) return { ok: false, why: Msg('mag.noRoom', { d: Mg.d, l: G.cellL, w: G.cellW }) };
     const width = p.x1 - p.x0, mid = (p.x0 + p.x1) / 2;
     const sep = 2 * Rp + 1;
     // Sugerencia: los que hacen falta para la carga estimada (mínimo 2 en
@@ -504,10 +505,7 @@ function placeMagnets(D, B, G) {
   const info = {
     pull: Mg.pull, load: Math.max(...plans.map((q) => q.load)), suggested: Math.max(...plans.map((q) => q.suggested)),
     asked: Mg.count, placed: plans.map((q) => q.placed),
-    note: short ? (() => {
-      const k = Math.min(...plans.map((q) => q.placed)), some = plans.some((q) => q.placed >= Mg.count);
-      return `${some ? 'en algunas tapas interiores ' : ''}solo ${k === 1 ? 'cabe 1 imán' : `caben ${k} imanes`} de los ${Mg.count} pedidos`;
-    })() : null,
+    note: short ? Msg('mag.short', { n: Math.min(...plans.map((q) => q.placed)), asked: Mg.count, some: plans.some((q) => q.placed >= Mg.count) }) : null,
   };
   return { ok: true, magnets: out, info };
 }

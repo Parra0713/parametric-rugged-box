@@ -31,6 +31,7 @@ import { M, CS } from '../src/engine/geo.js';
 import { overhangRegions } from '../src/engine/tilt.js';
 import { pack } from '../src/packer.js';
 import { pinChecks, bridgeChecks, mechChecks, thicknessChecks, printFitChecks } from './lib/assembly.mjs';
+import { tm } from '../src/i18n/index.js';
 
 await init(Module);
 const { hinges, latches, buildBase, buildLid } = _internal;
@@ -181,7 +182,7 @@ for (const c of cases) {
     summary.push(res); continue;
   }
   appendFileSync(logFile, r.D.log.map((l) => '   · ' + l).join('\n') + '\n');
-  if (r.D.warn.length) appendFileSync(logFile, `   avisos: ${r.D.warn.join(' | ')}\n`);
+  if (r.D.warn.length) appendFileSync(logFile, `   avisos: ${r.D.warn.map(tm).join(' | ')}\n`);
   // Los tramos centrales de una junta dividida son dos tiras rectas (una por lado).
   for (const p of r.parts) check(p.status === 'NoError' && p.components <= (p.id === 'gasket' ? 2 : 1), `${p.name}: ${p.status}, ${p.components} sólido(s)`);
   check(r.D.hinge.kl >= 4 && r.D.latchW >= 6, `mecánica mínima: nudillo ${r.D.hinge.kl}, cierre ${r.D.latchW}`);

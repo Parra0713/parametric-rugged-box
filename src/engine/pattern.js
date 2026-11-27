@@ -17,6 +17,7 @@
  */
 import { CS, poly, prism, frustum, unionAll } from './geo.js';
 import { rrOffset, stackLines } from './seal.js';
+import { M as Msg } from '../i18n/msg.js';
 
 /** Región útil de la cara superior. */
 export function patternArea(D, P) {
@@ -300,7 +301,7 @@ export function lidRelief(D, P, svg) {
     const free = ribs ? inner.subtract(ribs) : inner;
     const lim = limitBridges(free, D.maxBridge, D.rw);
     if (lim.split) ribs = inner.subtract(lim.cs || CS());
-    if (D.pattern !== 'smooth' || logo) warn.push('Apilable: la cara superior de la tapa es la interfaz de apilado; el patrón y el logo no se aplican.');
+    if (D.pattern !== 'smooth' || logo) warn.push(Msg('warn.stackNoPattern'));
     return { cut: null, add: ribs ? frame.add(prism(ribs, zTop - 0.01, zTop + D.hs)) : frame, warn };
   }
 
@@ -315,8 +316,8 @@ export function lidRelief(D, P, svg) {
     // Cavidades = puentes al imprimir boca abajo.
     const lim = limitBridges(cells, maxW, P.patternRib);
     cells = lim.cs;
-    if (lim.split) warn.push(`Patrón: ${lim.split} celdas superaban ${maxW} mm de puente y llevan un nervio fino (sin soportes).`);
-    if (logo && widerThan(logo, maxW)) warn.push(`Logo grabado con zonas de más de ${maxW} mm: el laminador pondrá soporte ahí. Usa "Relieve" o un logo de trazo.`);
+    if (lim.split) warn.push(Msg('warn.patternBridges', { n: lim.split, mm: maxW }));
+    if (logo && widerThan(logo, maxW)) warn.push(Msg('warn.logoBridges', { mm: maxW }));
     const region = unionAll([cells, logo]);
     if (!region || region.isEmpty()) return { cut: null, add: null, warn };
     return { cut: prism(region, zTop - D.pd, zTop + 1), add: null, warn };
@@ -338,7 +339,7 @@ export function lidRelief(D, P, svg) {
   const lim = limitBridges(area.subtract(raised), maxW, P.patternRib);
   if (lim.split) {
     raised = lim.cs ? area.subtract(lim.cs) : area;
-    warn.push(`Relieve: ${lim.split} zonas superaban ${maxW} mm de puente y llevan nervios finos (sin soportes).`);
+    warn.push(Msg('warn.embossBridges', { n: lim.split, mm: maxW }));
   }
   return { cut: null, add: prism(raised, zTop - 0.01, zTop + D.pd), warn };
 }

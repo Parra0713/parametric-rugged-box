@@ -48,7 +48,7 @@ export function parseContentSVG(text) {
       }
     }
   }
-  if (!polys.length) throw new Error('El SVG no tiene contornos cerrados.');
+  if (!polys.length) throw new Error('err.svgNoClosed');
   let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
   for (const p of polys) for (const [x, y] of p) { x0 = Math.min(x0, x); x1 = Math.max(x1, x); y0 = Math.min(y0, y); y1 = Math.max(y1, y); }
   const cx = (x0 + x1) / 2, cy = (y0 + y1) / 2;

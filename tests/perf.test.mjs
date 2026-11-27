@@ -64,7 +64,8 @@ for (const [name, p] of splitCases) {
     const P = { ...DEFAULTS, ...p, quality: q };
     const full = build(P, null);
     const m = mergeResults(build(P, null, { only: 'A' }), build(P, null, { only: 'B' }));
-    const sameWarn = JSON.stringify([...full.D.warn].sort()) === JSON.stringify([...m.D.warn].sort());
+    const ws = (w) => JSON.stringify(w.map((x) => JSON.stringify(x)).sort());   // avisos = mensajes {k, p}
+    const sameWarn = ws(full.D.warn) === ws(m.D.warn);
     const extra = (r) => JSON.stringify([r.D.filament, r.D.cord || null, r.D.insert || null, r.D.insertLid || null, r.parts.map((x) => [x.key, x.side || '', x.axis || null])]);
     check(sig(full) === sig(m) && sameWarn && extra(full) === extra(m),
       `${name} (${q}): ${m.parts.length} piezas iguales`);

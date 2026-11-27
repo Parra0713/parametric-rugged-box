@@ -10,7 +10,8 @@
  */
 const ORDER = ['base', 'lid', 'latch', 'orgPanel', 'gasket', 'insert', 'insertLid', 'hingePin', 'latchPin', 'cap'];
 
-const uniq = (arr) => [...new Set(arr)];
+// Sin repetidos (los avisos son mensajes {k, p}: se comparan por su contenido).
+const uniq = (arr) => { const seen = new Set(); return arr.filter((x) => { const k = typeof x === 'string' ? x : JSON.stringify(x); return seen.has(k) ? false : seen.add(k); }); };
 
 export function mergeResults(a, b) {
   const rank = (p) => { const i = ORDER.indexOf(p.id); return i < 0 ? ORDER.length : i; };

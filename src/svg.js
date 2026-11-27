@@ -39,7 +39,7 @@ export function parseSVG(text) {
       }
     }
   }
-  if (!fills.length && !strokes.length) throw new Error('El SVG no contiene formas utilizables.');
+  if (!fills.length && !strokes.length) throw new Error('err.svgNoShapes');
   return { fills, strokes, bbox: { x0, y0, x1, y1 } };
 }
 

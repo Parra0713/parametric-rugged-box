@@ -1,12 +1,12 @@
 {
   "name": "rugged-box",
-  "version": "7.3.1",
+  "version": "7.4.0",
   "description": "Generador paramétrico de cajas Rugged Box imprimibles en 3D (FDM)",
   "scripts": {
     "dev": "vite",
     "build": "vite build && node scripts/rename-dist.mjs",
     "preview": "vite preview",
-    "test": "node tests/geometry.test.mjs && node tests/bedfit.test.mjs && node tests/assembly.test.mjs && node tests/perf.test.mjs && node tests/mempeak.test.mjs && node tests/calib.test.mjs && node tests/organizer.test.mjs && node tests/estimate.test.mjs && node tests/ui-guide.test.mjs && node tests/budget.test.mjs",
+    "test": "node tests/geometry.test.mjs && node tests/bedfit.test.mjs && node tests/assembly.test.mjs && node tests/perf.test.mjs && node tests/mempeak.test.mjs && node tests/calib.test.mjs && node tests/organizer.test.mjs && node tests/estimate.test.mjs && node scripts/i18n.mjs check && node tests/ui-guide.test.mjs && node tests/budget.test.mjs",
     "test:guide": "node tests/ui-guide.test.mjs",
     "test:ui": "node tests/ui.e2e.mjs",
     "test:quick": "node tests/sweep.test.mjs --quick",
@@ -14,7 +14,9 @@
     "test:assembly": "node tests/assembly.test.mjs",
     "test:perf": "node tests/perf.test.mjs && node tests/mempeak.test.mjs",
     "test:calib": "node tests/calib.test.mjs",
-    "test:org": "node tests/organizer.test.mjs && node tests/estimate.test.mjs && node tests/budget.test.mjs"
+    "test:org": "node tests/organizer.test.mjs && node tests/estimate.test.mjs && node tests/budget.test.mjs",
+    "i18n": "node scripts/i18n.mjs check",
+    "i18n:new": "node scripts/i18n.mjs new"
   },
   "author": "Parra0713",
   "license": "MIT",

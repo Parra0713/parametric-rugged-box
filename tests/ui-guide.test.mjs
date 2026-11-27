@@ -14,6 +14,8 @@
  */
 import { readFileSync } from 'node:fs';
 import { DEFAULTS, SCHEMA, TABS, VERSION, contentModes, migrate } from '../src/engine/params.js';
+import { LOCALES, setLang, t, schemaKeys } from '../src/i18n/index.js';
+import { check as checkI18n } from '../scripts/i18n.mjs';
 
 let fails = 0;
 const check = (ok, msg) => { console.log(`${ok ? '  ✔' : '  ✘'} ${msg}`); if (!ok) fails++; };
@@ -161,6 +163,37 @@ console.log('\nHTML');
   check(/id="btnUndo"[^>]*disabled/.test(html) && /id="btnRedo"[^>]*disabled/.test(html), 'deshacer y rehacer en la cabecera');
   const upper = html.replace(/<svg[\s\S]*?<\/svg>/g, '').replace(/<[^>]+>/g, ' ').match(/\b[A-ZÁÉÍÓÚÑ]{4,}\b/g);
   check(!upper, `sin rótulos en mayúsculas${upper ? ' — ' + upper.join(', ') : ''}`);
+}
+
+
+/* Idiomas ------------------------------------------------------------ */
+console.log('\nIdiomas');
+{
+  const { errors } = checkI18n();
+  check(!errors.length, `claves, huecos y tipos coinciden en ${Object.keys(LOCALES).join(', ')}${errors.length ? ' — ' + errors.join(' / ') : ''}`);
+  // Cada texto con lógica se puede escribir con datos de ejemplo (sin excepciones).
+  const sample = new Proxy({}, { get: (_, k) => (['where', 'sides', 'list'].includes(k) ? ['a', 'b'] : k === 'why' || k === 'note' || k === 'what' || k === 'part' ? 'x' : 2), has: () => true });
+  for (const code of Object.keys(LOCALES)) {
+    setLang(code, { persist: false });
+    const bad = [];
+    for (const k of Object.keys(LOCALES[code])) {
+      try { const v = t(k, sample); if (v == null || (typeof v !== 'string' && !Array.isArray(v))) bad.push(k); } catch (e) { bad.push(`${k} (${e.message})`); }
+    }
+    check(!bad.length, `${code}: todos los textos se generan${bad.length ? ' — ' + bad.join(', ') : ''}`);
+  }
+  setLang('es', { persist: false });
+  // Vocabulario del hobby (docs/GUIA-INTERFAZ.md, «Idiomas»).
+  const flat = (d) => Object.entries(d).map(([k, v]) => [k, typeof v === 'function' ? '' : [].concat(v).join(' ')]);
+  const esAll = [...flat(LOCALES.es), ...Object.entries(schemaKeys(TABS, SCHEMA))];
+  const esBad = esAll.filter(([, v]) => /\b(laminador|holguras?|probetas?|balsa)\b/i.test(v)).map(([k]) => k);
+  check(!esBad.length, `español: «slicer», «tolerancia», «pieza de prueba», «raft» (no laminador, holgura, probeta, balsa)${esBad.length ? ' — ' + esBad.join(', ') : ''}`);
+  const enBad = flat(LOCALES.en).filter(([, v]) => /[áéíóúñ¿¡]/i.test(v)).map(([k]) => k);
+  check(!enBad.length, `inglés sin restos de español${enBad.length ? ' — ' + enBad.join(', ') : ''}`);
+  // La interfaz no lleva textos visibles escritos a mano: todo pasa por t().
+  const code = js.split('\n').filter((l) => !/^\s*(\/\/|\*|\/\*)/.test(l)).join('\n').replace(/\/\*[\s\S]*?\*\//g, '');
+  const literal = [...code.matchAll(/(['`])((?:(?!\1)[^\\\n])*[áéíóúñ¿¡](?:(?!\1)[^\\\n])*)\1/g)].map((m) => m[2]).filter((x) => !/^\[i18n\]/.test(x));
+  check(!literal.length, `main.js sin textos en español fuera de los diccionarios${literal.length ? ' — ' + literal.slice(0, 5).join(' | ') : ''}`);
+  check(/id="lang"/.test(html) && /data-i18n=/.test(html), 'selector de idioma y textos fijos traducibles en index.html');
 }
 
 console.log(fails ? `\n${fails} FALLOS` : '\nTodo correcto');

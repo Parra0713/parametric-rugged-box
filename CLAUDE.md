@@ -1,8 +1,9 @@
 # CLAUDE.md — Rugged Box
 
 Generador web paramétrico de cajas tipo *rugged box* imprimibles en FDM.
-Todo el texto de la interfaz, comentarios y mensajes de commit van **en
-español**. Unidades: milímetros y grados.
+Comentarios y mensajes de commit van **en español**. La interfaz está en
+español (idioma de origen) e inglés: ver «Idiomas». Unidades: milímetros y
+grados.
 
 ## Comandos
 
@@ -307,8 +308,34 @@ de los textos del `SCHEMA` debe cumplirlos:
     que se crea se libera** (diálogos al cerrarse, temporizadores, URLs,
     geometrías; historial con tope).
 
-Cifras en los textos: `fmtN`/`mm()`/`dims()` de main.js (coma decimal y
-espacio duro antes de la unidad). `tests/ui-guide.test.mjs` y
+Cifras en los textos: `fmtN`/`mm()`/`dims()` de `src/i18n/index.js`
+(separador decimal del idioma y espacio duro antes de la unidad).
+
+## Idiomas (i18n)
+
+- **Español = origen.** Textos de ajustes (label, hint, opciones) en
+  `SCHEMA` (`params.js`); el resto en `src/i18n/locales/es.js`. Cada idioma
+  es un archivo en `locales/` y una línea en `LOCALES` (`src/i18n/index.js`).
+  Si falta una clave: idioma actual → inglés → español.
+- **El motor no escribe frases.** Avisos, ajustes automáticos, cambios del
+  modo ahorro, nombres de pieza y textos de calibración son mensajes
+  `Msg('clave', {datos})` (`src/i18n/msg.js`; en el motor se importa como
+  `M as Msg` porque `M` es Manifold). La interfaz los escribe con `tm()`.
+  Así el idioma cambia sin recalcular y las cachés no dependen del idioma.
+- **La interfaz** usa `t('clave', {datos})`; textos fijos de `index.html`
+  con `data-i18n`, `data-i18n-title`, `data-i18n-aria`. Nada de frases
+  escritas a mano en `main.js` (lo comprueba `ui-guide`).
+- **Texto nuevo = clave en `es.js` y `en.js`** (ajuste nuevo: solo su
+  traducción `s.<grupo>.<k>` en `en.js`; cada grupo de SCHEMA tiene `id`).
+  Valores: texto con huecos `{x}` o función `(p, h) => …` para plurales y
+  frases opcionales (`h.pl`, `h.list`, `h.mm`, `h.dims`, `h.tm`).
+- **Vocabulario del hobby**: el de los slicers y foros (`docs/GUIA-INTERFAZ.md`,
+  «Idiomas»). En español: slicer, tolerancia, pieza de prueba, paredes,
+  relleno, brim/raft, mouse ears. En inglés: lid, latch, hinge, knuckles,
+  clearance, walls, infill, overhang, bridge…
+- `npm run i18n` comprueba claves, huecos y claves usadas; `npm run i18n:new
+  -- fr` crea la plantilla de un idioma nuevo. El registro técnico
+  (`D.log`) sigue en español: es para depurar. `tests/ui-guide.test.mjs` y
 `tests/ui.e2e.mjs` (asidero `window.__rugged`) comprueban estos puntos; un
 ajuste nuevo debe pasar ambos.
 

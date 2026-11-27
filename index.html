@@ -20,48 +20,49 @@
       </svg>
       <h1>Rugged Box</h1>
     </div>
-    <div class="status" id="status" role="status" aria-live="polite"><span class="dot" aria-hidden="true"></span><span id="statusText">Preparando el motor…</span></div>
+    <div class="status" id="status" role="status" aria-live="polite"><span class="dot" aria-hidden="true"></span><span id="statusText" data-i18n="ui.starting">Preparando el motor…</span></div>
     <div class="actions">
-      <div class="pair" role="group" aria-label="Historial">
-        <button id="btnUndo" class="icon" title="Deshacer (Ctrl+Z)" aria-label="Deshacer" disabled>
+      <select id="lang" class="lang" aria-label="Idioma" data-i18n-aria="ui.language"></select>
+      <div class="pair" role="group" aria-label="Historial" data-i18n-aria="ui.history">
+        <button id="btnUndo" class="icon" title="Deshacer (Ctrl+Z)" aria-label="Deshacer" data-i18n-aria="ui.undo" disabled>
           <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M7.5 4.5 3.5 8.5l4 4M4 8.5h7.5a4.5 4.5 0 0 1 0 9H9" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg>
         </button>
-        <button id="btnRedo" class="icon" title="Rehacer (Ctrl+Mayús+Z)" aria-label="Rehacer" disabled>
+        <button id="btnRedo" class="icon" title="Rehacer (Ctrl+Mayús+Z)" aria-label="Rehacer" data-i18n-aria="ui.redo" disabled>
           <svg viewBox="0 0 20 20" aria-hidden="true"><path d="m12.5 4.5 4 4-4 4M16 8.5H8.5a4.5 4.5 0 0 0 0 9H11" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg>
         </button>
       </div>
-      <button id="btnReset" class="plain" title="Volver a los valores iniciales (se puede deshacer)">Restablecer</button>
-      <button id="btnStl">STL por pieza</button>
-      <button id="btnZip" class="primary">Exportar todo</button>
+      <button id="btnReset" class="plain" title="Volver a los valores iniciales (se puede deshacer)" data-i18n="ui.reset" data-i18n-title="ui.resetTitle">Restablecer</button>
+      <button id="btnStl" data-i18n="ui.stlPerPart">STL por pieza</button>
+      <button id="btnZip" class="primary" data-i18n="ui.exportAll">Exportar todo</button>
     </div>
   </header>
 
   <main class="layout">
-    <aside class="panel params" id="params" aria-label="Ajustes de la caja"></aside>
+    <aside class="panel params" id="params" aria-label="Ajustes de la caja" data-i18n-aria="ui.settings"></aside>
 
-    <section class="stage" aria-label="Vista 3D">
+    <section class="stage" aria-label="Vista 3D" data-i18n-aria="ui.view3d">
       <div class="viewport" id="viewport"></div>
       <div class="hud" id="hud">
-        <div class="calbar material" id="calbar" hidden><span id="calbarText">Test de holguras</span>
-          <button id="calDl" class="sm">Descargar test</button><button id="calBack" class="sm primary">Volver a la caja</button></div>
+        <div class="calbar material" id="calbar" hidden><span id="calbarText" data-i18n="ui.calTest">Test de tolerancias</span>
+          <button id="calDl" class="sm" data-i18n="ui.calDownload">Descargar test</button><button id="calBack" class="sm primary" data-i18n="ui.calBack">Volver a la caja</button></div>
         <div class="toasts" id="toasts"></div>
       </div>
       <div class="busy material" id="busy" hidden>Calculando…</div>
-      <div class="toolbar material" role="toolbar" aria-label="Vista">
-        <div class="seg" role="radiogroup" aria-label="Modo de vista" id="modeSeg">
-          <button data-mode="assembled" class="on" role="radio" aria-checked="true">Montada</button>
-          <button data-mode="exploded" role="radio" aria-checked="false">Despiece</button>
-          <button data-mode="print" role="radio" aria-checked="false">Placas</button>
+      <div class="toolbar material" role="toolbar" aria-label="Vista" data-i18n-aria="ui.view">
+        <div class="seg" role="radiogroup" aria-label="Modo de vista" data-i18n-aria="ui.viewMode" id="modeSeg">
+          <button data-mode="assembled" class="on" role="radio" aria-checked="true" data-i18n="ui.assembled">Montada</button>
+          <button data-mode="exploded" role="radio" aria-checked="false" data-i18n="ui.exploded">Despiece</button>
+          <button data-mode="print" role="radio" aria-checked="false" data-i18n="ui.plates">Placas</button>
         </div>
-        <label class="mini" id="openWrap">Abrir <input type="range" id="open" min="0" max="1" step="0.01" value="0" aria-label="Abrir la caja" /></label>
-        <label class="tgl"><input type="checkbox" id="inner" /><span>Espacio útil</span></label>
-        <label class="tgl"><input type="checkbox" id="section" /><span>Corte</span></label>
-        <input type="range" id="sectionPos" class="mini-range" min="-150" max="150" step="0.5" value="0" aria-label="Posición del corte" hidden />
-        <button id="btnFit" class="sm" title="Encuadrar la caja en la vista">Encuadrar</button>
+        <label class="mini" id="openWrap"><span data-i18n="ui.open">Abrir</span> <input type="range" id="open" min="0" max="1" step="0.01" value="0" aria-label="Abrir la caja" data-i18n-aria="ui.openBox" /></label>
+        <label class="tgl"><input type="checkbox" id="inner" /><span data-i18n="ui.interior">Espacio útil</span></label>
+        <label class="tgl"><input type="checkbox" id="section" /><span data-i18n="ui.section">Corte</span></label>
+        <input type="range" id="sectionPos" class="mini-range" min="-150" max="150" step="0.5" value="0" aria-label="Posición del corte" data-i18n-aria="ui.sectionPos" hidden />
+        <button id="btnFit" class="sm" title="Encuadrar la caja en la vista" data-i18n="ui.fit" data-i18n-title="ui.fitTitle">Encuadrar</button>
       </div>
     </section>
 
-    <aside class="panel info" id="info" aria-label="Resultado"></aside>
+    <aside class="panel info" id="info" aria-label="Resultado" data-i18n-aria="ui.result"></aside>
   </main>
 
   <script type="module" src="./src/main.js"></script>

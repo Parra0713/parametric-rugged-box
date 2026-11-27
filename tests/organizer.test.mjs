@@ -35,6 +35,7 @@ import { M, CS, prism } from '../src/engine/geo.js';
 import { rrOffset } from '../src/engine/seal.js';
 import { ORG, MAG } from '../src/engine/orgLayout.js';
 import { transformVerts, hull2D, fitAngle } from '../src/bedfit.js';
+import { tm } from '../src/i18n/index.js';
 
 await init(Module);
 let fails = 0;
@@ -129,7 +130,7 @@ function checkSide(P, r, rs, side, both) {
   const O = isB ? D.orgB : D.org;
   const tag = both ? (isB ? '[base] ' : '[tapa] ') : '';
   const Q = isB ? { minL: P.orgBMinL, minW: P.orgBMinW, depth: P.orgBDepth } : { minL: P.orgMinL, minW: P.orgMinW, depth: P.orgDepth };
-  check(!!O, `${tag}compartimentos activos${O ? `: ${O.cols}×${O.rows} celdas de ${O.cellL}×${O.cellW}×${O.depth} mm, interior ${D.Li}×${D.Wi}, ${isB ? 'base ' + D.Db : 'tapa ' + D.Dl}` : ' — ' + D.warn.join(' | ')}`);
+  check(!!O, `${tag}compartimentos activos${O ? `: ${O.cols}×${O.rows} celdas de ${O.cellL}×${O.cellW}×${O.depth} mm, interior ${D.Li}×${D.Wi}, ${isB ? 'base ' + D.Db : 'tapa ' + D.Dl}` : ' — ' + D.warn.map(tm).join(' | ')}`);
   if (!O) return;
   check((!Q.minL || O.cellL >= Q.minL - 0.01) && (!Q.minW || O.cellW >= Q.minW - 0.01) && (!Q.depth || O.depth >= Q.depth - 0.01),
     `${tag}celdas ≥ lo pedido (${Q.minL || '-'}×${Q.minW || '-'}×${Q.depth || '-'})`);
@@ -349,8 +350,8 @@ console.log('\nLas 16 combinaciones de contenido (base × tapa)');
     }
     const pk = (side, ins) => D.content[side] !== 'pockets' || (ins && ins.pockets === 1);
     check(!bad.length && JSON.stringify([...want].sort()) === JSON.stringify([...extra].sort()) && v < 0.05 && D.content.base === b && D.content.lid === l
-      && pk('base', D.insert) && pk('lid', D.insertLid) && !D.warn.some((w) => /no cabe|demasiado/.test(w)),
-      `base: ${NAME[b]} + tapa: ${NAME[l]} → ${r.parts.length} piezas, interior sin solapes (${v.toFixed(2)} mm³)${bad.length ? ' — inválidas: ' + bad.map((x) => x.name).join(', ') : ''}${D.warn.length ? ' — ' + D.warn.join(' | ') : ''}`);
+      && pk('base', D.insert) && pk('lid', D.insertLid) && !D.warn.some((w) => w.k === 'warn.orgCellsTooSmall'),
+      `base: ${NAME[b]} + tapa: ${NAME[l]} → ${r.parts.length} piezas, interior sin solapes (${v.toFixed(2)} mm³)${bad.length ? ' — inválidas: ' + bad.map((x) => x.name).join(', ') : ''}${D.warn.length ? ' — ' + D.warn.map(tm).join(' | ') : ''}`);
   }
 }
 
