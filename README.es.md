@@ -198,8 +198,7 @@ Se agradecen issues y pull requests. Antes de abrir uno:
 
 Sube `version` en `package.json` y `VERSION` en `src/engine/params.js`,
 compila (`npm run build`), escribe sus notas en `docs/releases/vX.Y.Z.md` y
-sube la etiqueta (`git tag vX.Y.Z` y `git push --tags`). La release y la
-página se actualizan solas.
+súbelo a `main`. La etiqueta, la release y la página se crean solas.
 
 ## Licencia y créditos
 

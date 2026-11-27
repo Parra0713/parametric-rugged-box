@@ -195,8 +195,7 @@ Issues and pull requests are welcome. Before opening one:
 
 Bump `version` in `package.json` and `VERSION` in `src/engine/params.js`,
 build (`npm run build`), write the notes in `docs/releases/vX.Y.Z.md` and
-push the tag (`git tag vX.Y.Z` and `git push --tags`). The release and the
-site update themselves.
+push to `main`. The tag, the release and the site are created automatically.
 
 ## License and credits
 

@@ -1,10 +1,18 @@
-# Crea la release al subir una etiqueta vX.Y.Z, con la app adjunta.
+# Crea la release con la app adjunta. Se dispara:
+#   - al subir una etiqueta vX.Y.Z, o
+#   - al subir a main unas notas nuevas en docs/releases/ (la etiqueta sale de
+#     "version" en package.json y la crea GitHub), o
+#   - a mano desde la pestaña Actions.
 # Las notas salen de docs/releases/vX.Y.Z.md (si no existe, se generan solas).
+# Si la release ya existe no hace nada.
 name: Crear release
 
 on:
   push:
     tags: ['v*']
+    branches: [main]
+    paths: ['docs/releases/**', '.github/workflows/release.yml']
+  workflow_dispatch:
 
 permissions:
   contents: write
@@ -17,11 +25,9 @@ jobs:
       - name: Publicar
         env:
           GH_TOKEN: ${{ github.token }}
-          TAG: ${{ github.ref_name }}
         run: |
+          if [ "${GITHUB_REF_TYPE}" = "tag" ]; then TAG="${GITHUB_REF_NAME}"; else TAG="v$(node -p "require('./package.json').version")"; fi
+          if gh release view "$TAG" >/dev/null 2>&1; then echo "La release $TAG ya existe"; exit 0; fi
           cp dist/rugged-box.html "rugged-box-${TAG}.html"
-          if [ -f "docs/releases/${TAG}.md" ]; then
-            gh release create "$TAG" "rugged-box-${TAG}.html" --title "Rugged Box ${TAG}" --notes-file "docs/releases/${TAG}.md"
-          else
-            gh release create "$TAG" "rugged-box-${TAG}.html" --title "Rugged Box ${TAG}" --generate-notes
-          fi
+          if [ -f "docs/releases/${TAG}.md" ]; then NOTES=(--notes-file "docs/releases/${TAG}.md"); else NOTES=(--generate-notes); fi
+          gh release create "$TAG" "rugged-box-${TAG}.html" --target "$GITHUB_SHA" --title "Rugged Box ${TAG}" "${NOTES[@]}"
